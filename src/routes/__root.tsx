@@ -4,18 +4,18 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import { FlashcardProvider } from "../contexts/FlashcardContext";
 import { StudyProvider } from "../contexts/StudyContext";
-import { ErrorProvider } from "../contexts/ErrorContext"; // 👈 ADICIONADO
-import { LoginModal } from "../components/LoginModal";
+import { ErrorProvider } from "../contexts/ErrorContext";
 import { supabase } from "../lib/supabaseClient";
 
 // ============================================================
@@ -104,56 +104,51 @@ function RootShell({ children }: { children: ReactNode }) {
 // ============================================================
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const [showLogin, setShowLogin] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const router = useRouter();
+  const navigate = useNavigate(); // <-- NOVO: hook de navegação
 
-  // Verificar autenticação ao carregar
+  // Verificar autenticação e redirecionar
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const loggedIn = !!session;
-      setIsLoggedIn(loggedIn);
-      if (!loggedIn) {
-        setTimeout(() => setShowLogin(true), 300);
+      const currentPath = window.location.pathname;
+
+      if (!loggedIn && currentPath !== '/login') {
+        navigate({ to: '/login' }); // <-- SUBSTITUÍDO
+      } else if (loggedIn && currentPath === '/login') {
+        navigate({ to: '/' }); // <-- SUBSTITUÍDO
       }
     };
+
     checkAuth();
 
+    // Escutar mudanças na autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const loggedIn = !!session;
-      setIsLoggedIn(loggedIn);
-      if (loggedIn) {
-        setShowLogin(false);
-      } else {
-        setTimeout(() => setShowLogin(true), 300);
+      const currentPath = window.location.pathname;
+
+      if (!loggedIn && currentPath !== '/login') {
+        navigate({ to: '/login' }); // <-- SUBSTITUÍDO
+      } else if (loggedIn && currentPath === '/login') {
+        navigate({ to: '/' }); // <-- SUBSTITUÍDO
       }
     });
 
     return () => subscription?.unsubscribe();
-  }, []);
-
-  const handleLoginSuccess = () => {
-    setIsLoggedIn(true);
-    setShowLogin(false);
-    window.location.reload();
-  };
+  }, [navigate]); // <-- ADICIONADO navigate como dependência
 
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <FlashcardProvider>
           <StudyProvider>
-            <ErrorProvider>          {/* 👈 ADICIONADO: envolve o Outlet com ErrorProvider */}
+            <ErrorProvider>
               <Outlet />
             </ErrorProvider>
           </StudyProvider>
         </FlashcardProvider>
       </ThemeProvider>
-      <LoginModal
-        isOpen={showLogin && !isLoggedIn}
-        onClose={() => setShowLogin(false)}
-        onLoginSuccess={handleLoginSuccess}
-      />
     </QueryClientProvider>
   );
 }

@@ -7,6 +7,7 @@ import {
 import type { ReactNode } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
+import { LogoIcon } from "@/components/LogoIcon";
 
 // ============================================================
 // ROTAS
@@ -141,17 +142,12 @@ export function AppShell({
       {/* Sidebar desktop */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-sidebar-border bg-sidebar lg:flex">
         <div className="flex items-center gap-2 px-6 py-5">
-          <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">
-            <span className="font-display text-sm font-bold">R</span>
-          </div>
+          <LogoIcon className="h-10 w-10" size={40} />
           <div>
             <div className="font-display text-base font-semibold tracking-tight">RevisaFlash</div>
             <div className="text-[10px] uppercase tracking-widest text-foreground/40">ENARE 2026</div>
           </div>
         </div>
-
-        {/* 🔥 REMOVIDO: barra de busca */}
-        {/* <div className="px-3">...</div> */}
 
         <nav className="mt-5 flex-1 space-y-0.5 px-3">
           <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-foreground/30">Principal</div>
@@ -165,9 +161,6 @@ export function AppShell({
             />
           ))}
         </nav>
-
-        {/* 🔥 REMOVIDO: card de Streak */}
-        {/* <div className="m-3 rounded-xl ...">...</div> */}
 
         {/* Perfil do usuário */}
         <div className="border-t border-sidebar-border p-3">
@@ -185,7 +178,7 @@ export function AppShell({
             )}
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{userName}</div>
-              <div className="truncate text-[10px] text-foreground/40"></div>
+              <div className="truncate text-[10px] text-foreground/40">Estudante</div>
             </div>
             <button
               onClick={handleLogout}
@@ -204,9 +197,7 @@ export function AppShell({
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Link to="/" className="flex items-center gap-2 lg:hidden">
-              <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-                <span className="font-display text-xs font-bold">R</span>
-              </div>
+              <LogoIcon className="h-8 w-8" size={32} />
               <span className="font-display text-sm font-semibold">RevisaFlash</span>
             </Link>
             <div className="hidden items-center gap-2 text-xs lg:flex">
@@ -291,7 +282,6 @@ function NavItem({
 // BOTTOM NAV (MOBILE) – COM TODAS AS ROTAS
 // ============================================================
 function BottomNav({ pathname }: { pathname: string }) {
-  // Mostra todas as rotas no mobile (7 itens)
   const items = ROTAS;
 
   return (

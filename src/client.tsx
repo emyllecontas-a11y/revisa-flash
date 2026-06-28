@@ -1,11 +1,10 @@
-/// <reference types="vinxi/types/client" />
-
+// src/client.tsx
 import React, { useEffect, useState } from 'react';
 import { hydrateRoot } from 'react-dom/client';
-import { StartClient } from '@tanstack/react-start/client';
+import { RouterProvider } from '@tanstack/react-router';
+import { getRouter } from './router';
 import { FlashcardProvider } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
-import { getRouter } from './router';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
@@ -22,7 +21,6 @@ function Root() {
         console.log('🔄 Inicializando RxDB...');
         let userId: string | null = null;
 
-        // Tenta obter usuário do Supabase
         try {
           const { data: { user }, error } = await supabase.auth.getUser();
           if (error) throw error;
@@ -32,7 +30,6 @@ function Root() {
             console.log('✅ Usuário autenticado via Supabase:', userId);
           }
         } catch (err) {
-          // Fallback para cache
           const cachedId = localStorage.getItem('revisaflash_user_id');
           if (cachedId) {
             userId = cachedId;
@@ -43,19 +40,13 @@ function Root() {
         }
 
         if (userId) {
-          // 1. Inicializa o banco
           await getDb();
           console.log('✅ Banco local inicializado.');
-
-          // 2. 🔥 LIBERA A TELA DE LOADING IMEDIATAMENTE
           setReady(true);
 
-          // 3. Sincronização em segundo plano (NÃO BLOQUEIA)
           try {
             await syncWithSupabase(userId);
             console.log('✅ Sincronização RxDB concluída!');
-
-            // 🔥 Após sincronizar, processa fila de operações pendentes
             await processPendingOperations();
             console.log('✅ Fila de operações processada.');
           } catch (syncError) {
@@ -73,14 +64,12 @@ function Root() {
 
     initialize();
 
-    // Listener para eventos de conexão
     const handleOnline = () => {
       console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
       processPendingOperations().catch(console.error);
     };
     window.addEventListener('online', handleOnline);
 
-    // Configurar listener da fila para sincronizar quando houver alterações
     setupQueueListener();
 
     return () => {
@@ -102,7 +91,7 @@ function Root() {
   return (
     <FlashcardProvider>
       <StudyProvider>
-        <StartClient router={router} />
+        <RouterProvider router={router} />
       </StudyProvider>
     </FlashcardProvider>
   );
