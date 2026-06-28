@@ -1,0 +1,726 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { AppShell } from "@/components/app-shell";
+import { 
+  Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
+  Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
+  User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
+  Camera
+} from "lucide-react";
+import { supabase, supabaseReady } from "@/lib/supabaseClient";
+import { uid } from "@/utils/helpers";
+import { getDb } from "@/lib/db";
+
+export const Route = createFileRoute("/configuracoes")({
+  head: () => ({ meta: [{ title: "Configurações — RevisaFlash" }] }),
+  component: ConfigPage,
+  ssr: false,
+});
+
+function ConfigPage() {
+  // ============================================================
+  // ESTADOS DO TEMA (persistido no localStorage)
+  // ============================================================
+  const [tema, setTema] = useState<"escuro" | "claro" | "sistema">("escuro");
+
+  // ============================================================
+  // ESTADOS FUNCIONAIS
+  // ============================================================
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [mensagem, setMensagem] = useState("");
+  const [mensagemTipo, setMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
+  const [uploading, setUploading] = useState(false);
+  
+  // Importar Anki
+  const [importando, setImportando] = useState(false);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
+  const [importStats, setImportStats] = useState({ total: 0, importados: 0, ignorados: 0, erros: 0 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Backup
+  const [backupMensagem, setBackupMensagem] = useState("");
+  const [backupMensagemTipo, setBackupMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
+
+  // ============================================================
+  // CARREGAR USUÁRIO E PERFIL
+  // ============================================================
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        if (!supabaseReady) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserId(user.id);
+          setUserEmail(user.email || '');
+          setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário');
+
+          // Carregar perfil do Supabase
+          const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('name, avatar_url, theme')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (profile) {
+            if (profile.name) setUserName(profile.name);
+            if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+            if (profile.theme) {
+              setTema(profile.theme);
+              localStorage.setItem('tema', profile.theme);
+              aplicarTema(profile.theme);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar usuário:', e);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // Aplicar tema ao carregar (do localStorage)
+  useEffect(() => {
+    const temaSalvo = localStorage.getItem('tema') as 'escuro' | 'claro' | 'sistema' | null;
+    if (temaSalvo) {
+      setTema(temaSalvo);
+      aplicarTema(temaSalvo);
+    } else {
+      // Tema padrão: escuro
+      aplicarTema('escuro');
+    }
+  }, []);
+
+  const aplicarTema = (tema: 'escuro' | 'claro' | 'sistema') => {
+    // Aqui você pode aplicar o tema no documento
+    // Exemplo: adicionar classe ao body
+    const body = document.body;
+    body.classList.remove('tema-escuro', 'tema-claro');
+    if (tema === 'escuro') body.classList.add('tema-escuro');
+    else if (tema === 'claro') body.classList.add('tema-claro');
+    // Se for 'sistema', você pode detectar o tema do sistema
+  };
+
+  // ============================================================
+  // ATUALIZAR TEMA NO SUPABASE
+  // ============================================================
+  const handleTemaChange = async (novoTema: 'escuro' | 'claro' | 'sistema') => {
+    setTema(novoTema);
+    localStorage.setItem('tema', novoTema);
+    aplicarTema(novoTema);
+
+    if (userId) {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ id: userId, theme: novoTema, updated_at: new Date().toISOString() })
+        .select();
+      if (error) console.error('Erro ao salvar tema:', error);
+    }
+  };
+
+  // ============================================================
+  // UPLOAD DE FOTO DE PERFIL
+  // ============================================================
+  const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !userId) return;
+
+    // Validar tipo e tamanho
+    if (!file.type.startsWith('image/')) {
+      setMensagem('⚠️ Selecione uma imagem válida (PNG, JPG).');
+      setMensagemTipo('error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setMensagem('⚠️ A imagem deve ter no máximo 2MB.');
+      setMensagemTipo('error');
+      return;
+    }
+
+    setUploading(true);
+    setMensagem('');
+
+    try {
+      // Criar nome único para a imagem
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${userId}/${Date.now()}.${fileExt}`;
+
+      // Upload para Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Obter URL pública
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      const avatarUrl = urlData.publicUrl;
+
+      // Atualizar perfil no Supabase
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .upsert({ id: userId, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+        .select();
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(avatarUrl);
+      setMensagem('✅ Foto de perfil atualizada com sucesso!');
+      setMensagemTipo('success');
+    } catch (error: any) {
+      console.error('Erro ao fazer upload:', error);
+      setMensagem('❌ Erro ao fazer upload: ' + (error.message || 'Erro desconhecido'));
+      setMensagemTipo('error');
+    } finally {
+      setUploading(false);
+      event.target.value = '';
+    }
+  }, [userId]);
+
+  // ============================================================
+  // ATUALIZAR NOME
+  // ============================================================
+  const handleUpdateName = useCallback(async (nome: string) => {
+    if (!userId || !nome.trim()) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ id: userId, name: nome.trim(), updated_at: new Date().toISOString() })
+        .select();
+      if (error) throw error;
+      setUserName(nome.trim());
+      setMensagem('✅ Nome atualizado com sucesso!');
+      setMensagemTipo('success');
+      setTimeout(() => setMensagem(''), 3000);
+    } catch (error: any) {
+      setMensagem('❌ Erro ao atualizar nome: ' + (error.message || 'Erro desconhecido'));
+      setMensagemTipo('error');
+    }
+  }, [userId]);
+
+  // ============================================================
+  // 📥 IMPORTAR FLASHCARDS DO ANKI (com RxDB)
+  // ============================================================
+  const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportando(true);
+    setMensagem("");
+    setImportPreview([]);
+    setImportStats({ total: 0, importados: 0, ignorados: 0, erros: 0 });
+
+    try {
+      const text = await file.text();
+      const linhas = text.split('\n').filter(line => line.trim() !== '');
+      
+      let separador = '\t';
+      const primeiraLinha = linhas[0] || '';
+      if (primeiraLinha.includes('\t')) separador = '\t';
+      else if (primeiraLinha.includes(';')) separador = ';';
+      else if (primeiraLinha.includes(',')) separador = ',';
+
+      const cards = linhas
+        .map(line => {
+          const parts = line.split(separador);
+          if (parts.length >= 2) {
+            return {
+              front: parts[0].trim(),
+              back: parts.slice(1).join(separador).trim(),
+            };
+          }
+          return null;
+        })
+        .filter((card): card is { front: string; back: string } => 
+          card !== null && card.front !== '' && card.back !== ''
+        );
+
+      if (cards.length === 0) {
+        setMensagem("❌ Nenhum flashcard válido encontrado. Verifique o formato (pergunta\tresposta)");
+        setMensagemTipo('error');
+        setImportando(false);
+        return;
+      }
+
+      setImportPreview(cards.slice(0, 10));
+      setShowPreview(true);
+      setImportStats({ total: cards.length, importados: 0, ignorados: 0, erros: 0 });
+
+      const confirmar = confirm(
+        `📚 Encontrados ${cards.length} flashcards.\n\n` +
+        `Primeiro: "${cards[0].front}" → "${cards[0].back}"\n\n` +
+        `Deseja importar todos?`
+      );
+
+      if (!confirmar) {
+        setImportando(false);
+        setShowPreview(false);
+        return;
+      }
+
+      if (!userId) {
+        setMensagem("❌ Usuário não autenticado. Faça login para importar.");
+        setMensagemTipo('error');
+        setImportando(false);
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const deckName = `Anki Import ${new Date().toLocaleDateString('pt-BR')}`;
+
+      const db = await getDb();
+      
+      // Criar baralho
+      const deckId = uid();
+      await db.decks.insert({
+        id: deckId,
+        name: deckName,
+        description: `Importado do Anki em ${new Date().toLocaleDateString('pt-BR')}`,
+        user_id: userId,
+        createdAt: now,
+        color: '#14B8A6',
+        deletedAt: null
+      });
+
+      let importados = 0;
+      let erros = 0;
+
+      // Inserir flashcards
+      for (const card of cards) {
+        try {
+          const cardId = uid();
+          await db.flashcards.insert({
+            id: cardId,
+            deck_id: deckId,
+            user_id: userId,
+            front: card.front,
+            back: card.back,
+            difficulty: 5.0,
+            stability: 1.0,
+            retrievability: 0.9,
+            dueDate: now,
+            reps: 0,
+            lapses: 0,
+            lastReview: null,
+            state: 0,
+            elapsed_days: 0,
+            scheduled_days: 1,
+            createdAt: now,
+            updatedAt: now
+          });
+          importados++;
+        } catch (error) {
+          erros++;
+          console.error('Erro ao importar card:', error);
+        }
+      }
+
+      setImportStats({ total: cards.length, importados, ignorados: 0, erros });
+      setMensagem(`✅ Importação concluída! ${importados} importados, ${erros} erros.`);
+      setMensagemTipo('success');
+
+    } catch (error: any) {
+      console.error('Erro ao importar:', error);
+      setMensagem("❌ Erro ao importar: " + (error.message || 'Erro desconhecido'));
+      setMensagemTipo('error');
+    } finally {
+      setImportando(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [userId]);
+
+  // ============================================================
+  // 💾 BACKUP (mantido igual)
+  // ============================================================
+  const exportarBackup = useCallback(() => {
+    try {
+      const backup = {
+        version: "1.0.0",
+        data: new Date().toISOString(),
+        dados: {
+          disciplines: JSON.parse(localStorage.getItem('eot_disciplines') || '[]'),
+          errors: JSON.parse(localStorage.getItem('eot_errors') || '[]'),
+          flashcards: JSON.parse(localStorage.getItem('eot_flashcards') || '[]'),
+          revisoes: JSON.parse(localStorage.getItem('eot_revisoes_conteudo') || '[]'),
+          studyHistory: JSON.parse(localStorage.getItem('eot_study_history') || '{}'),
+          decks: JSON.parse(localStorage.getItem('eot_decks') || '[]')
+        }
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupMensagem("✅ Backup exportado com sucesso!");
+      setBackupMensagemTipo('success');
+      setTimeout(() => setBackupMensagem(""), 3000);
+    } catch (error: any) {
+      setBackupMensagem("❌ Erro ao exportar: " + (error.message || 'Erro desconhecido'));
+      setBackupMensagemTipo('error');
+    }
+  }, []);
+
+  const importarBackup = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const backup = JSON.parse(e.target?.result as string);
+        if (backup.dados) {
+          if (backup.dados.disciplines) localStorage.setItem('eot_disciplines', JSON.stringify(backup.dados.disciplines));
+          if (backup.dados.errors) localStorage.setItem('eot_errors', JSON.stringify(backup.dados.errors));
+          if (backup.dados.flashcards) localStorage.setItem('eot_flashcards', JSON.stringify(backup.dados.flashcards));
+          if (backup.dados.revisoes) localStorage.setItem('eot_revisoes_conteudo', JSON.stringify(backup.dados.revisoes));
+          if (backup.dados.studyHistory) localStorage.setItem('eot_study_history', JSON.stringify(backup.dados.studyHistory));
+          if (backup.dados.decks) localStorage.setItem('eot_decks', JSON.stringify(backup.dados.decks));
+          
+          setBackupMensagem(`✅ Backup restaurado com sucesso! (${backup.dados.flashcards?.length || 0} flashcards)`);
+          setBackupMensagemTipo('success');
+          setTimeout(() => window.location.reload(), 1500);
+        } else {
+          setBackupMensagem("❌ Arquivo de backup inválido");
+          setBackupMensagemTipo('error');
+        }
+      } catch (error: any) {
+        setBackupMensagem("❌ Erro ao ler o arquivo: " + (error.message || 'Formato inválido'));
+        setBackupMensagemTipo('error');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  }, []);
+
+  // ============================================================
+  // FUNÇÃO DE LOGOUT
+  // ============================================================
+  const handleLogout = useCallback(async () => {
+    if (confirm("Deseja realmente sair?")) {
+      localStorage.removeItem('revisaflash_user_id');
+      await supabase.auth.signOut();
+      window.location.reload();
+    }
+  }, []);
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+  return (
+    <AppShell breadcrumb="Configurações" title="Configurações">
+      {/* Mensagem de feedback */}
+      {mensagem && (
+        <div className={`mb-4 p-3 rounded-xl text-sm border ${
+          mensagemTipo === 'success' ? 'bg-green-500/20 text-green-400 border-green-500/20' : 
+          mensagemTipo === 'error' ? 'bg-red-500/20 text-red-400 border-red-500/20' : 
+          mensagemTipo === 'warning' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/20' : 
+          'bg-blue-500/20 text-blue-400 border-blue-500/20'
+        }`}>
+          {mensagem}
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+        {/* Navegação lateral */}
+        <nav className="rf-card p-2 lg:sticky lg:top-20 lg:self-start">
+          {[
+            ["perfil", "Perfil"],
+            ["aparencia", "Aparência"],
+            ["estudo", "Plano de estudos"],
+            ["dados", "Dados e sincronização"],
+            ["conta", "Conta"],
+          ].map(([k, l]) => (
+            <a key={k} href={`#${k}`} className="block rounded-md px-3 py-2 text-sm text-foreground/65 hover:bg-white/5 transition-colors">
+              {l}
+            </a>
+          ))}
+        </nav>
+
+        <div className="space-y-4">
+          {/* ============================================================
+              PERFIL
+              ============================================================ */}
+          <Section id="perfil" title="Perfil" desc="Suas informações pessoais.">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={userName}
+                    className="h-16 w-16 rounded-full object-cover border border-border"
+                  />
+                ) : (
+                  <div className="grid h-16 w-16 place-items-center rounded-full bg-accent/15 font-display text-lg font-semibold text-accent">
+                    {userName ? userName.slice(0, 2).toUpperCase() : 'U'}
+                  </div>
+                )}
+                <label
+                  htmlFor="avatar-upload"
+                  className="absolute bottom-0 right-0 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground cursor-pointer hover:opacity-80 transition-opacity"
+                >
+                  <Camera className="h-3 w-3" />
+                  <input
+                    id="avatar-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadAvatar}
+                    className="hidden"
+                    disabled={uploading}
+                  />
+                </label>
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium">{userName || "Usuário"}</div>
+                <div className="text-xs text-foreground/45">{userEmail || "carregando..."}</div>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Nome completo"
+                defaultValue={userName}
+                onBlur={(e) => {
+                  if (e.target.value !== userName) {
+                    handleUpdateName(e.target.value);
+                  }
+                }}
+              />
+              <Input label="E-mail" defaultValue={userEmail} disabled className="opacity-60" />
+            </div>
+          </Section>
+
+          {/* ============================================================
+              APARÊNCIA
+              ============================================================ */}
+          <Section id="aparencia" title="Aparência" desc="Tema da interface.">
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ["escuro", "Escuro", <Moon key="m" className="h-4 w-4" />],
+                ["claro", "Claro", <Sun key="s" className="h-4 w-4" />],
+                ["sistema", "Sistema", <span key="sys" className="text-xs font-bold">A</span>],
+              ] as const).map(([k, l, i]) => (
+                <button
+                  key={k as string}
+                  onClick={() => handleTemaChange(k as typeof tema)}
+                  className={[
+                    "flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors",
+                    tema === k
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-surface-2 text-foreground/70 hover:bg-white/5",
+                  ].join(" ")}
+                >
+                  {i} {l}
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          {/* ============================================================
+              PLANO DE ESTUDOS (sem metas diárias/semanais)
+              ============================================================ */}
+          <Section id="estudo" title="Plano de estudos" desc="Configurações da sua prova-alvo.">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Prova-alvo" defaultValue="ENARE Odontologia 2026" />
+              <Input label="Data da prova" type="date" defaultValue="2026-09-13" />
+            </div>
+          </Section>
+
+          {/* ============================================================
+              DADOS E SINCRONIZAÇÃO
+              ============================================================ */}
+          <Section id="dados" title="Dados e sincronização" desc="Importe flashcards, faça backup e gerencie seus dados.">
+            {/* Importar Anki */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+              <h3 className="text-sm font-medium text-white mb-1 flex items-center gap-2">
+                <Upload className="h-4 w-4 text-primary" /> Importar flashcards do Anki
+              </h3>
+              <p className="text-xs text-foreground/45 mb-3">
+                Formatos: .txt, .csv, .apkg (tab separado: pergunta → resposta)
+              </p>
+              
+              <label className={`w-full border-2 border-dashed ${
+                importando ? 'border-primary/30 bg-primary/10' : 'border-primary/30 hover:border-primary/60'
+              } py-4 text-center rounded-xl cursor-pointer transition-colors`}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.apkg,.csv"
+                  onChange={importarAnki}
+                  className="hidden"
+                  disabled={importando}
+                />
+                <div className="flex flex-col items-center gap-2">
+                  <Upload className={`w-6 h-6 ${importando ? 'text-primary animate-pulse' : 'text-foreground/45'}`} />
+                  <span className="text-sm text-foreground/65">
+                    {importando ? '⏳ Importando...' : 'Clique para selecionar arquivo'}
+                  </span>
+                  <span className="text-xs text-foreground/35">.txt, .csv ou .apkg</span>
+                </div>
+              </label>
+
+              {showPreview && importPreview.length > 0 && (
+                <div className="mt-3">
+                  <button
+                    onClick={() => setShowPreview(!showPreview)}
+                    className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+                  >
+                    {showPreview ? '▼' : '▶'} Preview dos primeiros cards
+                  </button>
+                  {showPreview && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {importPreview.map((card, index) => (
+                        <div key={index} className="bg-white/5 rounded-lg p-2 text-xs">
+                          <span className="text-primary">Pergunta:</span> {card.front}
+                          <br />
+                          <span className="text-accent">Resposta:</span> {card.back}
+                        </div>
+                      ))}
+                      {importStats.total > 10 && (
+                        <p className="text-xs text-foreground/35 text-center">+ {importStats.total - 10} cards</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {importStats.total > 0 && (
+                <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-lg font-bold text-white">{importStats.total}</p>
+                    <p className="text-[10px] text-foreground/45">Total</p>
+                  </div>
+                  <div className="bg-green-500/10 rounded-lg p-2">
+                    <p className="text-lg font-bold text-green-400">{importStats.importados}</p>
+                    <p className="text-[10px] text-foreground/45">Importados</p>
+                  </div>
+                  <div className="bg-yellow-500/10 rounded-lg p-2">
+                    <p className="text-lg font-bold text-yellow-400">{importStats.ignorados}</p>
+                    <p className="text-[10px] text-foreground/45">Ignorados</p>
+                  </div>
+                  <div className="bg-red-500/10 rounded-lg p-2">
+                    <p className="text-lg font-bold text-red-400">{importStats.erros}</p>
+                    <p className="text-[10px] text-foreground/45">Erros</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Backup */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+              <h3 className="text-sm font-medium text-white mb-2 flex items-center gap-2">
+                <Database className="h-4 w-4 text-primary" /> Backup dos dados
+              </h3>
+              {backupMensagem && (
+                <div className={`mb-3 p-2 rounded-lg text-sm ${
+                  backupMensagemTipo === 'success' ? 'bg-green-500/20 text-green-400' : 
+                  backupMensagemTipo === 'error' ? 'bg-red-500/20 text-red-400' : 
+                  'bg-yellow-500/20 text-yellow-400'
+                }`}>
+                  {backupMensagem}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={exportarBackup}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs font-medium hover:bg-white/5 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" /> Exportar backup (JSON)
+                </button>
+                <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs font-medium hover:bg-white/5 transition-colors cursor-pointer">
+                  <Upload className="h-3.5 w-3.5" /> Importar backup
+                  <input
+                    ref={backupFileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={importarBackup}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-[10px] text-foreground/35">Exporta todos os seus dados (disciplinas, flashcards, erros, revisões, estudos)</p>
+            </div>
+          </Section>
+
+          {/* ============================================================
+              CONTA
+              ============================================================ */}
+          <Section id="conta" title="Conta" desc="Encerrar sessão ou excluir conta.">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm font-medium hover:bg-white/5 transition-colors"
+              >
+                <LogOut className="h-4 w-4" /> Sair
+              </button>
+              <button className="inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/15 transition-colors">
+                <Trash2 className="h-4 w-4" /> Excluir conta
+              </button>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+// ============================================================
+// COMPONENTES VISUAIS
+// ============================================================
+
+function Section({ id, title, desc, children }: { id: string; title: string; desc: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="rf-card p-5 scroll-mt-20">
+      <header className="mb-4">
+        <h2 className="font-display text-base font-semibold">{title}</h2>
+        <p className="text-xs text-foreground/45">{desc}</p>
+      </header>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function Input({ label, className, ...rest }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-foreground/70">{label}</span>
+      <input {...rest} className={`w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary placeholder:text-foreground/40 ${className || ''}`} />
+    </label>
+  );
+}
+
+function Toggle({ label, desc, on, onChange, icon }: { label: string; desc?: string; on: boolean; onChange: (b: boolean) => void; icon?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-background/30 p-3">
+      <div className="flex items-start gap-3">
+        {icon && <div className="mt-0.5 grid h-7 w-7 place-items-center rounded-md bg-primary/10 text-primary">{icon}</div>}
+        <div>
+          <div className="text-sm font-medium">{label}</div>
+          {desc && <div className="text-xs text-foreground/45">{desc}</div>}
+        </div>
+      </div>
+      <button
+        onClick={() => onChange(!on)}
+        role="switch"
+        aria-checked={on}
+        className={["relative h-5 w-9 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-white/10"].join(" ")}
+      >
+        <span className={["absolute top-0.5 grid h-4 w-4 place-items-center rounded-full bg-background shadow transition-all", on ? "left-[18px]" : "left-0.5"].join(" ")} />
+      </button>
+    </div>
+  );
+}

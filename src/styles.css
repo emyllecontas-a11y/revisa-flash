@@ -1,0 +1,130 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-elevated: 0 24px 60px -24px color-mix(in oklab, #000 70%, transparent);
+  --shadow-glow: 0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent),
+                 0 12px 40px -12px color-mix(in oklab, var(--primary) 35%, transparent);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Clinical dark palette — bg #0F1A1F, surface #0E2A2C, primary #14B8A6, accent #FB7185, text #ECFEFF */
+  --background: #0F1A1F;
+  --surface: #0E2A2C;
+  --surface-2: #112E31;
+  --foreground: #ECFEFF;
+  --card: #0E2A2C;
+  --card-foreground: #ECFEFF;
+  --popover: #112E31;
+  --popover-foreground: #ECFEFF;
+  --primary: #14B8A6;
+  --primary-foreground: #04201D;
+  --secondary: #112E31;
+  --secondary-foreground: #ECFEFF;
+  --muted: #15363A;
+  --muted-foreground: rgba(236, 254, 255, 0.55);
+  --accent: #FB7185;
+  --accent-foreground: #2A0610;
+  --destructive: #FB7185;
+  --destructive-foreground: #ECFEFF;
+  --success: #14B8A6;
+  --warning: #F59E0B;
+  --border: rgba(236, 254, 255, 0.08);
+  --input: rgba(236, 254, 255, 0.12);
+  --ring: #14B8A6;
+
+  --sidebar: #0B1518;
+  --sidebar-foreground: #ECFEFF;
+  --sidebar-border: rgba(236, 254, 255, 0.06);
+}
+
+@layer base {
+  html, body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  * { border-color: var(--border); }
+
+  ::selection { background: color-mix(in oklab, var(--primary) 35%, transparent); color: var(--foreground); }
+
+  h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.01em; }
+}
+
+@keyframes rf-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rf-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes rf-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility rf-fade-in {
+  animation: rf-fade-up 0.4s cubic-bezier(0.19, 1, 0.22, 1) both;
+}
+@utility rf-pulse {
+  animation: rf-pulse-dot 1.8s ease-in-out infinite;
+}
+@utility rf-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+@utility rf-card-hover {
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  &:hover {
+    border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px -16px color-mix(in oklab, var(--primary) 40%, transparent);
+  }
+}
