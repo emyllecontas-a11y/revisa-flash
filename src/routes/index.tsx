@@ -278,15 +278,6 @@ function DashboardPage() {
   }, []);
 
   // ============================================================
-  // DERIVADOS
-  // ============================================================
-  const totalChecklist = checklist.length;
-  const feitos = checklist.filter(c => c.feito).length;
-  const saudacao = getSaudacao();
-  const flashcardDueCount = dueCards.length;
-  const dueCardsDisplay = dueCards.slice(0, 10);
-
-  // ============================================================
   // RENDER
   // ============================================================
   if (loading) {
@@ -300,17 +291,17 @@ function DashboardPage() {
   }
 
   return (
-    <AppShell breadcrumb="Início" title={`${saudacao}, ${userName.split(" ")[0]}.`}>
+    <AppShell breadcrumb="Início" title={`${getSaudacao()}, ${userName.split(" ")[0]}.`}>
       <p className="-mt-4 mb-8 max-w-2xl text-sm text-foreground/55">
-        Você tem <span className="font-medium text-primary">{flashcardDueCount} flashcards</span> para revisar hoje
+        Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
         e <span className="font-medium text-accent">{diasAteProva} dias</span> até a prova.
       </p>
 
-      {/* Bento */}
+      {/* Bento grid */}
       <div className="grid grid-cols-12 gap-4">
         {/* Stat cards */}
         <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
-        <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={flashcardDueCount} hint={`${decks.length} decks`} />
+        <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
         <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Erros ativos" value={totalErros} hint="banco de erros" tone="accent" />
         <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint="ENARE 2026" />
 
@@ -319,7 +310,7 @@ function DashboardPage() {
           <header className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Checklist de hoje</h2>
-              <p className="text-xs text-foreground/45">{feitos}/{totalChecklist} concluídos</p>
+              <p className="text-xs text-foreground/45">{checklist.filter(c => c.feito).length}/{checklist.length} concluídos</p>
             </div>
             <button
               onClick={() => setIsAddingChecklist(true)}
@@ -353,7 +344,7 @@ function DashboardPage() {
             ))}
           </ul>
           <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/5">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${totalChecklist > 0 ? (feitos / totalChecklist) * 100 : 0}%` }} />
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${checklist.length > 0 ? (checklist.filter(c => c.feito).length / checklist.length) * 100 : 0}%` }} />
           </div>
 
           {/* Modal adicionar checklist */}
@@ -400,9 +391,9 @@ function DashboardPage() {
               Estudar agora <ArrowUpRight className="h-3 w-3" />
             </Link>
           </header>
-          {dueCardsDisplay.length > 0 ? (
+          {dueCards.slice(0, 10).length > 0 ? (
             <ul className="divide-y divide-border">
-              {dueCardsDisplay.map((card) => {
+              {dueCards.slice(0, 10).map((card) => {
                 const deckName = decks.find(d => d.id === card.deck_id)?.name || 'Sem deck';
                 return (
                   <li key={card.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
@@ -426,9 +417,9 @@ function DashboardPage() {
           ) : (
             <p className="text-sm text-foreground/40 text-center py-6">Nenhum flashcard devido hoje. 🎉</p>
           )}
-          {flashcardDueCount > 10 && (
+          {dueCards.length > 10 && (
             <div className="mt-3 text-center text-xs text-foreground/40">
-              + {flashcardDueCount - 10} cards a mais
+              + {dueCards.length - 10} cards a mais
             </div>
           )}
         </section>
@@ -464,7 +455,7 @@ function DashboardPage() {
           )}
         </section>
 
-        {/* Próximas revisões (conteúdo DSM-30) */}
+        {/* Próximas revisões */}
         <section className="col-span-12 rf-card p-5 lg:col-span-5">
           <header className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-base font-semibold">Próximas revisões</h2>

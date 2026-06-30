@@ -105,9 +105,8 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
-  const navigate = useNavigate(); // <-- NOVO: hook de navegação
+  const navigate = useNavigate();
 
-  // Verificar autenticação e redirecionar
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -115,28 +114,27 @@ function RootComponent() {
       const currentPath = window.location.pathname;
 
       if (!loggedIn && currentPath !== '/login') {
-        navigate({ to: '/login' }); // <-- SUBSTITUÍDO
+        navigate({ to: '/login' });
       } else if (loggedIn && currentPath === '/login') {
-        navigate({ to: '/' }); // <-- SUBSTITUÍDO
+        navigate({ to: '/' });
       }
     };
 
     checkAuth();
 
-    // Escutar mudanças na autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const loggedIn = !!session;
       const currentPath = window.location.pathname;
 
       if (!loggedIn && currentPath !== '/login') {
-        navigate({ to: '/login' }); // <-- SUBSTITUÍDO
+        navigate({ to: '/login' });
       } else if (loggedIn && currentPath === '/login') {
-        navigate({ to: '/' }); // <-- SUBSTITUÍDO
+        navigate({ to: '/' });
       }
     });
 
     return () => subscription?.unsubscribe();
-  }, [navigate]); // <-- ADICIONADO navigate como dependência
+  }, [navigate]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -154,7 +152,7 @@ function RootComponent() {
 }
 
 // ============================================================
-// ROUTE DEFINITION
+// ROUTE DEFINITION (com splash screens para iOS)
 // ============================================================
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
@@ -170,6 +168,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary" },
     ],
     links: [
+      // Fontes e CSS
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
@@ -177,6 +176,65 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Space+Grotesk:wght@500;600;700&display=swap",
       },
       { rel: "stylesheet", href: appCss },
+
+      // Ícones do PWA (já no manifest, mas redundante para iOS)
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
+
+      // ============================================================
+      // SPLASH SCREENS PARA IPHONE (iOS)
+      // ============================================================
+      // iPhone 12 Pro Max, 13 Pro Max, 14 Pro Max (1284x2778)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-1284x2778.png",
+        media: "(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      // iPhone X, XS, 11 Pro, 12, 13, 14 (1125x2436)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-1125x2436.png",
+        media: "(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      // iPhone 8 Plus, 7 Plus, 6s Plus (1242x2208)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-1242x2208.png",
+        media: "(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      // iPhone 8, 7, 6s, SE (750x1334)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-750x1334.png",
+        media: "(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      // iPhone XR, 11 (828x1792)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-828x1792.png",
+        media: "(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      // iPhone 5, 5s, SE 1ª geração (640x1136)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-640x1136.png",
+        media: "(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      // iPads (opcional, mas incluído)
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-1536x2048.png",
+        media: "(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-1668x2224.png",
+        media: "(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        href: "/splash/splash-2048x2732.png",
+        media: "(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2)",
+      },
     ],
   }),
   shellComponent: RootShell,

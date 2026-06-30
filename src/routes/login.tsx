@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { LogoIcon } from "@/components/LogoIcon";
+import { useLoading } from "@/contexts/LoadingContext"; // <-- NOVO IMPORT
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -17,12 +18,13 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // <-- RENOMEADO (opcional)
   const [error, setError] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const navigate = useNavigate();
+  const { showLoading, hideLoading } = useLoading(); // <-- NOVO
 
   // Redireciona se já estiver logado
   useEffect(() => {
@@ -38,7 +40,8 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
+    setIsSubmitting(true);
+    showLoading(); // <-- ATIVA O OVERLAY
 
     try {
       if (isSignUp) {
@@ -72,7 +75,8 @@ function LoginPage() {
     } catch (err: any) {
       setError(err.message || (isSignUp ? "Erro ao criar conta." : "Erro ao fazer login."));
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
+      hideLoading(); // <-- DESATIVA O OVERLAY
     }
   };
 
@@ -82,7 +86,6 @@ function LoginPage() {
         {/* Card principal */}
         <div className="rf-card p-8">
           <div className="text-center mb-8">
-            {/* 🔥 Substituído o "R" pelo LogoIcon */}
             <LogoIcon className="h-14 w-14" size={56} />
             <h1 className="mt-4 font-display text-2xl font-semibold">
               {isSignUp ? "Criar conta" : "Bem-vindo de volta"}
@@ -169,10 +172,10 @@ function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={isSubmitting}
               className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
-              {loading
+              {isSubmitting
                 ? isSignUp
                   ? "Criando conta..."
                   : "Entrando..."

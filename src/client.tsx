@@ -1,10 +1,11 @@
 // src/client.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { getRouter } from './router';
 import { FlashcardProvider } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
+import { LoadingProvider } from './contexts/LoadingContext';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
@@ -14,6 +15,7 @@ const router = getRouter();
 
 function Root() {
   const [ready, setReady] = useState(false);
+  const userIdRef = useRef<string | null>(null); // guarda o userId para uso na inscrição
 
   useEffect(() => {
     const initialize = async () => {
@@ -40,6 +42,7 @@ function Root() {
         }
 
         if (userId) {
+          userIdRef.current = userId;
           await getDb();
           console.log('✅ Banco local inicializado.');
           setReady(true);
@@ -77,6 +80,50 @@ function Root() {
     };
   }, []);
 
+  // ============================================================
+  // INSCRIÇÃO EM TEMPO REAL (Supabase Realtime)
+  // ============================================================
+  useEffect(() => {
+    if (!userIdRef.current || !ready) return;
+
+    const userId = userIdRef.current;
+
+    // Cria um canal para escutar todas as tabelas do schema 'public'
+    const channel = supabase
+      .channel('realtime-sync')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // escuta todos os eventos (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          // filter: `user_id=eq.${userId}`, // opcional: só escuta dados do usuário logado
+        },
+        async (payload) => {
+          console.log('📡 Mudança detectada no Supabase:', payload);
+          try {
+            // Re-sincroniza o banco local com o Supabase
+            await syncWithSupabase(userId);
+            console.log('✅ Re-sincronização concluída após mudança em tempo real.');
+          } catch (syncError) {
+            console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Inscrição em tempo real estabelecida com sucesso.');
+        } else {
+          console.log(`🔄 Status da inscrição: ${status}`);
+        }
+      });
+
+    // Limpa a inscrição ao desmontar o componente
+    return () => {
+      console.log('🔌 Removendo inscrição em tempo real...');
+      supabase.removeChannel(channel);
+    };
+  }, [ready]); // executa quando o app ficar pronto
+
   if (!ready) {
     return (
       <div className="min-h-screen bg-[#0B1020] flex items-center justify-center">
@@ -89,11 +136,13 @@ function Root() {
   }
 
   return (
-    <FlashcardProvider>
-      <StudyProvider>
-        <RouterProvider router={router} />
-      </StudyProvider>
-    </FlashcardProvider>
+    <LoadingProvider>
+      <FlashcardProvider>
+        <StudyProvider>
+          <RouterProvider router={router} />
+        </StudyProvider>
+      </FlashcardProvider>
+    </LoadingProvider>
   );
 }
 

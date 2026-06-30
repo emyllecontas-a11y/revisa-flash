@@ -128,3 +128,14 @@
     box-shadow: 0 8px 24px -16px color-mix(in oklab, var(--primary) 40%, transparent);
   }
 }
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+.animate-bounce-slow {
+  animation: bounce-slow 1.5s ease-in-out infinite;
+}

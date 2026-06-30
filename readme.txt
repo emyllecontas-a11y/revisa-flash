@@ -1,5 +1,5 @@
 ATENÇÃO: Antes de gerar qualquer código, siga rigorosamente as diretrizes abaixo.
-
+TESTANDO
 DIRETRIZES OBRIGATÓRIAS:
 
 1. Use o arquivo de constantes (src/constants/index.ts) para TODOS os nomes de campos e valores fixos.
