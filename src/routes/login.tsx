@@ -17,15 +17,21 @@ export default function LoginPage() { // <-- exportação direta
   const { showLoading, hideLoading } = useLoading();
 
   // Redireciona se já estiver logado
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        navigate("/"); // <-- sintaxe do React Router (sem objeto { to })
+useEffect(() => {
+  const checkAuth = async () => {
+    try {
+      // Tenta obter o usuário REAL (se o token for inválido, lança erro)
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        navigate("/");
       }
-    };
-    checkSession();
-  }, [navigate]);
+    } catch (error) {
+      // Se der erro, o token é inválido – fica na página de login
+      console.log("⏳ Sessão inválida ou expirada – mostrando login.");
+    }
+  };
+  checkAuth();
+}, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
