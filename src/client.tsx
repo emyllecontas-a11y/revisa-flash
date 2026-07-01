@@ -5,8 +5,8 @@ import { router } from './router';
 import { FlashcardProvider } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
 import { LoadingProvider } from './contexts/LoadingContext';
-import { ErrorProvider } from './contexts/ErrorContext';      // <-- ADICIONADO
-import { ThemeProvider } from './contexts/ThemeContext';      // <-- ADICIONADO
+import { ErrorProvider } from './contexts/ErrorContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
@@ -16,6 +16,9 @@ function Root() {
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(null);
 
+  // ============================================================
+  // INICIALIZAÇÃO DO RxDB E AUTENTICAÇÃO
+  // ============================================================
   useEffect(() => {
     const initialize = async () => {
       try {
@@ -79,7 +82,9 @@ function Root() {
     };
   }, []);
 
-  // Inscrição em tempo real (Supabase Realtime)
+  // ============================================================
+  // INSCRIÇÃO EM TEMPO REAL (Supabase Realtime)
+  // ============================================================
   useEffect(() => {
     if (!userIdRef.current || !ready) return;
 
@@ -117,6 +122,20 @@ function Root() {
     };
   }, [ready]);
 
+  // ============================================================
+  // REGISTRO DO SERVICE WORKER MANUAL (NOVO)
+  // ============================================================
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => console.log('✅ Service Worker registrado com sucesso!', reg))
+        .catch((err) => console.warn('⚠️ Falha ao registrar Service Worker:', err));
+    }
+  }, []);
+
+  // ============================================================
+  // TELA DE CARREGAMENTO
+  // ============================================================
   if (!ready) {
     return (
       <div className="min-h-screen bg-[#0B1020] flex items-center justify-center">
@@ -128,6 +147,9 @@ function Root() {
     );
   }
 
+  // ============================================================
+  // RENDERIZAÇÃO PRINCIPAL (com todos os provedores)
+  // ============================================================
   return (
     <ThemeProvider>
       <LoadingProvider>
