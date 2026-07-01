@@ -1,7 +1,6 @@
 // public/sw.js
-// Service Worker manual – NÃO é compilado pelo Vite
-
 const CACHE_NAME = 'revisaflash-v1';
+
 const urlsToCache = [
   '/',
   '/index.html',
@@ -11,16 +10,25 @@ const urlsToCache = [
   '/icons/apple-touch-icon.png',
 ];
 
-// Instalação: salva os arquivos principais no cache
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(urlsToCache))
-      .then(() => self.skipWaiting()) // ativa imediatamente
+      .then((cache) => {
+        // Tenta adicionar cada URL individualmente, ignorando falhas
+        return Promise.allSettled(
+          urlsToCache.map((url) => cache.add(url))
+        ).then((results) => {
+          // Loga quais falharam (opcional)
+          const failed = results.filter(r => r.status === 'rejected');
+          if (failed.length) {
+            console.warn('⚠️ Alguns recursos não puderam ser cacheados:', failed.map(r => r.reason));
+          }
+        });
+      })
+      .then(() => self.skipWaiting())
   );
 });
 
-// Ativação: limpa caches antigos
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) =>
@@ -33,13 +41,9 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Intercepta requisições e serve do cache (offline)
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request)
-      .then((response) => {
-        // Se encontrou no cache, retorna; senão, busca na rede
-        return response || fetch(event.request);
-      })
+      .then((response) => response || fetch(event.request))
   );
 });

@@ -1,9 +1,9 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { QueryClient } from '@tanstack/react-query';
 
-// Importe todas as páginas (cada uma está em src/routes/)
-import Index from './routes/index';
+// Importa as páginas
 import Login from './routes/login';
+import Index from './routes/index';
 import Flashcards from './routes/flashcards';
 import Erros from './routes/erros';
 import Desempenho from './routes/desempenho';
@@ -11,14 +11,19 @@ import Conteudo from './routes/conteudo';
 import Configuracoes from './routes/configuracoes';
 import Calendario from './routes/calendario';
 
-// Cria o cliente do React Query (igual antes)
+// Importa o componente de proteção
+import { ProtectedRoute } from './components/ProtectedRoute';
+
 export const queryClient = new QueryClient();
 
-// Cria o roteador com todas as rotas
 export const router = createBrowserRouter([
   {
     path: '/',
-    element: <Index />,
+    element: (
+      <ProtectedRoute>
+        <Index />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/login',
@@ -26,26 +31,50 @@ export const router = createBrowserRouter([
   },
   {
     path: '/flashcards',
-    element: <Flashcards />,
+    element: (
+      <ProtectedRoute>
+        <Flashcards />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/erros',
-    element: <Erros />,
+    element: (
+      <ProtectedRoute>
+        <Erros />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/desempenho',
-    element: <Desempenho />,
+    element: (
+      <ProtectedRoute>
+        <Desempenho />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/conteudo',
-    element: <Conteudo />,
+    element: (
+      <ProtectedRoute>
+        <Conteudo />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/configuracoes',
-    element: <Configuracoes />,
+    element: (
+      <ProtectedRoute>
+        <Configuracoes />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/calendario',
-    element: <Calendario />,
+    element: (
+      <ProtectedRoute>
+        <Calendario />
+      </ProtectedRoute>
+    ),
   },
 ]);

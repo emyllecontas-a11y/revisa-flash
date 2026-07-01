@@ -1,11 +1,11 @@
 // src/routes/login.tsx
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom"; // <-- importação do React Router
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { LogoIcon } from "@/components/LogoIcon";
 import { useLoading } from "@/contexts/LoadingContext";
 
-export default function LoginPage() { // <-- exportação direta
+export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -13,25 +13,8 @@ export default function LoginPage() { // <-- exportação direta
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const navigate = useNavigate(); // <-- useNavigate do React Router
+  const navigate = useNavigate();
   const { showLoading, hideLoading } = useLoading();
-
-  // Redireciona se já estiver logado
-useEffect(() => {
-  const checkAuth = async () => {
-    try {
-      // Tenta obter o usuário REAL (se o token for inválido, lança erro)
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (!error && user) {
-        navigate("/");
-      }
-    } catch (error) {
-      // Se der erro, o token é inválido – fica na página de login
-      console.log("⏳ Sessão inválida ou expirada – mostrando login.");
-    }
-  };
-  checkAuth();
-}, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +49,7 @@ useEffect(() => {
           password,
         });
         if (error) throw error;
-        navigate("/"); // <-- redireciona para a raiz
+        navigate("/");
       }
     } catch (err: any) {
       setError(err.message || (isSignUp ? "Erro ao criar conta." : "Erro ao fazer login."));
