@@ -496,22 +496,22 @@ export default function FlashcardsPage() {
                 const status = getStatusBadge(card.reps, card.due);
                 const meta = getCardMeta(card.id);
                 return (
-                  <article key={card.id} className="rf-card rf-card-hover group flex items-start gap-4 p-5">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
-                    {isErrorDeck && <AlertTriangle className="h-3 w-3 text-accent ml-0.5" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
-                        {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
-                      </div>
-                      <p className="mt-1.5 text-sm font-medium text-foreground">{card.front}</p>
-                      <p className="mt-1 truncate text-xs text-foreground/50">{card.back}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-red-500/50 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                  </article>
+<article key={card.id} className="rf-card rf-card-hover group flex items-start gap-3 sm:gap-4 p-4 sm:p-5 w-full max-w-full overflow-hidden">
+  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
+  {isErrorDeck && <AlertTriangle className="h-3 w-3 text-accent ml-0.5" />}
+  <div className="min-w-0 flex-1">
+    <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
+      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+      {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
+    </div>
+    <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">{card.front}</p>
+    <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">{card.back}</p>
+  </div>
+  <div className="flex items-center gap-1 shrink-0">
+    <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
+    <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-red-500/50 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+  </div>
+</article>
                 );
               })
             ) : (
