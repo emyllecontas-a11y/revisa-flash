@@ -5,7 +5,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase } from './supabaseClient';
 
 // ============================================================
-// SCHEMAS (todos em camelCase)
+// SCHEMAS (todos em camelCase, com updated_at)
 // ============================================================
 
 const deckSchema = {
@@ -19,6 +19,7 @@ const deckSchema = {
     description: { type: 'string' },
     user_id: { type: 'string' },
     createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
     color: { type: 'string' },
     deletedAt: { type: ['string', 'null'] }
   },
@@ -47,7 +48,7 @@ const flashcardSchema = {
     elapsed_days: { type: 'number' },
     scheduled_days: { type: 'number' },
     createdAt: { type: 'string' },
-    updatedAt: { type: 'string' }
+    updated_at: { type: 'string' }
   },
   required: ['id', 'deck_id', 'user_id', 'front', 'back']
 };
@@ -62,6 +63,7 @@ const disciplineSchema = {
     name: { type: 'string' },
     user_id: { type: 'string' },
     createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
     deletedAt: { type: ['string', 'null'] }
   },
   required: ['id', 'name', 'user_id']
@@ -80,6 +82,7 @@ const topicSchema = {
     status: { type: 'string' },
     planned_date: { type: 'string' },
     createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
     deletedAt: { type: ['string', 'null'] },
     updatedAt: { type: ['string', 'null'] }
   },
@@ -106,7 +109,7 @@ const errorSchema = {
     status: { type: 'string' },
     flashcardId: { type: 'string' },
     createdAt: { type: 'string' },
-    updatedAt: { type: 'string' }
+    updated_at: { type: 'string' }
   },
   required: ['id', 'user_id', 'question', 'area', 'correctAnswer']
 };
@@ -127,7 +130,7 @@ const revisaoSchema = {
     lastStudyDate: { type: 'string' },
     completedAt: { type: 'string' },
     createdAt: { type: 'string' },
-    updatedAt: { type: 'string' }
+    updated_at: { type: 'string' }
   },
   required: ['id', 'user_id', 'topico_id']
 };
@@ -151,7 +154,8 @@ const studyRecordSchema = {
     wrongCount: { type: 'number' },
     source: { type: 'string' },
     observations: { type: 'string' },
-    createdAt: { type: 'string' }
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' }
   },
   required: ['id', 'user_id', 'date', 'type', 'discipline', 'topic', 'duration']
 };
@@ -169,7 +173,8 @@ const studySessionSchema = {
     totalTimeSeconds: { type: 'number' },
     completed: { type: 'boolean' },
     cardTimes: { type: 'object' },
-    createdAt: { type: 'string' }
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' }
   },
   required: ['id', 'deckId']
 };
@@ -188,7 +193,6 @@ const areaSchema = {
   required: ['id', 'user_id', 'name']
 };
 
-// 👇 NOVO: Schema da fila de operações
 const pendingOperationSchema = {
   title: 'pending operation schema',
   version: 0,
@@ -256,10 +260,10 @@ export async function getDb(): Promise<RxDatabase> {
       study_records: { schema: studyRecordSchema },
       study_sessions: { schema: studySessionSchema },
       areas: { schema: areaSchema },
-      pending_operations: { schema: pendingOperationSchema } // 👈 ADICIONADO
+      pending_operations: { schema: pendingOperationSchema }
     });
 
-    console.log('✅ Banco local criado com sucesso (nova versão).');
+    console.log('✅ Banco local criado com sucesso (versão com updated_at).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -274,152 +278,166 @@ export async function getDb(): Promise<RxDatabase> {
 }
 
 // ============================================================
-// SINCRONIZAÇÃO COM SUPABASE (CORRIGIDA)
+// SINCRONIZAÇÃO COM SUPABASE (VERSÃO 2 – INTELIGENTE)
 // ============================================================
 
+let isSyncing = false;
+
 export async function syncWithSupabase(userId: string) {
-  const database = await getDb();
+  if (isSyncing) {
+    console.log('⏳ Sincronização já em andamento. Aguarde.');
+    return;
+  }
+  isSyncing = true;
 
-  // ⚠️ review_logs removido porque a tabela não tem user_id
-  const directCollections = [
-    'decks',
-    'flashcards',
-    'disciplines',
-    'topics',
-    'errors',
-    'revisoes',
-    'study_records'
-  ];
+  try {
+    const database = await getDb();
+    const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
 
-  for (const collectionName of directCollections) {
-    const collection = database.collections[collectionName];
+    const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
 
-    try {
-      console.log(`📥 Pull: ${collectionName}`);
-      
+    for (const name of collections) {
+      const collection = database.collections[name];
+      if (!collection) continue;
+
+      // 1. PULL: buscar apenas registros atualizados APÓS o último sync
       let query = supabase
-        .from(collectionName)
+        .from(name)
         .select('*')
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .gte('updated_at', lastSync);
 
-      if (collectionName === 'decks' || collectionName === 'disciplines' || collectionName === 'topics') {
+      if (['decks', 'disciplines', 'topics'].includes(name)) {
         query = query.is('deletedAt', null);
       }
 
       const { data: supabaseData, error } = await query;
-
       if (error) {
-        console.error(`❌ Erro ao buscar ${collectionName}:`, error);
+        console.error(`❌ Pull ${name}:`, error);
         continue;
       }
 
       if (supabaseData && supabaseData.length > 0) {
         for (const doc of supabaseData) {
-          const existing = await collection.findOne({
-            selector: { id: doc.id }
-          }).exec();
-
+          const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
           if (existing) {
-            await existing.patch(doc);
+            // Só atualiza se o documento remoto for mais recente
+            const localUpdated = existing.get('updated_at') || '1970-01-01T00:00:00Z';
+            if (doc.updated_at > localUpdated) {
+              await existing.patch(doc);
+              console.log(`🔄 Atualizado ${name} ID ${doc.id}`);
+            }
           } else {
             await collection.insert(doc);
+            console.log(`➕ Inserido ${name} ID ${doc.id}`);
           }
         }
-        console.log(`✅ ${collectionName}: ${supabaseData.length} registros sincronizados`);
+        console.log(`✅ Pull ${name}: ${supabaseData.length} registros atualizados`);
       } else {
-        console.log(`⚠️ ${collectionName}: Nenhum dado encontrado no Supabase`);
+        console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
-      console.log(`📤 Push: ${collectionName}`);
-      const localDocs = await collection.find().exec();
-      
+      // 2. PUSH: enviar apenas documentos com updated_at > lastSync
+      const localDocs = await collection.find({
+        selector: {
+          user_id: userId,
+          updated_at: { $gt: lastSync }
+        }
+      }).exec();
+
       if (localDocs.length > 0) {
-        const documents = localDocs.map(doc => doc.toJSON());
+        const docsToPush = localDocs.map(doc => doc.toJSON());
         const { error: upsertError } = await supabase
-          .from(collectionName)
-          .upsert(documents, { onConflict: 'id' });
+          .from(name)
+          .upsert(docsToPush, { onConflict: 'id' });
 
         if (upsertError) {
-          console.error(`❌ Erro ao enviar ${collectionName} para Supabase:`, upsertError);
+          console.error(`❌ Push ${name}:`, upsertError);
         } else {
-          console.log(`✅ ${collectionName}: ${localDocs.length} registros enviados para Supabase`);
+          console.log(`✅ Push ${name}: ${docsToPush.length} registros enviados`);
         }
-      }
-
-    } catch (err) {
-      console.error(`❌ Erro na sincronização de ${collectionName}:`, err);
-    }
-  }
-
-  // study_sessions – usando camelCase
-  try {
-    console.log(`📥 Pull: study_sessions`);
-
-    const decksCollection = database.collections.decks;
-    const userDecks = await decksCollection.find({
-      selector: { 
-        user_id: userId,
-        deletedAt: { $eq: null }
-      }
-    }).exec();
-    
-    const deckIds = userDecks.map(doc => doc.get('id'));
-
-    if (deckIds.length === 0) {
-      console.log('⚠️ study_sessions: Nenhum deck encontrado para este usuário');
-    } else {
-      const { data: sessionsData, error } = await supabase
-        .from('study_sessions')
-        .select('*')
-        .in('deckId', deckIds);
-
-      if (error) {
-        console.error('❌ Erro ao buscar study_sessions:', error);
-      } else if (sessionsData && sessionsData.length > 0) {
-        const collection = database.collections.study_sessions;
-        for (const doc of sessionsData) {
-          const existing = await collection.findOne({
-            selector: { id: doc.id }
-          }).exec();
-
-          if (existing) {
-            await existing.patch(doc);
-          } else {
-            await collection.insert(doc);
-          }
-        }
-        console.log(`✅ study_sessions: ${sessionsData.length} registros sincronizados`);
       } else {
-        console.log('⚠️ study_sessions: Nenhum dado encontrado para os decks do usuário');
-      }
-
-      console.log(`📤 Push: study_sessions`);
-      const collection = database.collections.study_sessions;
-      const localSessions = await collection.find().exec();
-
-      if (localSessions.length > 0) {
-        const sessionsToPush = localSessions
-          .map(doc => doc.toJSON())
-          .filter(session => deckIds.includes(session.deckId));
-
-        if (sessionsToPush.length > 0) {
-          const { error: upsertError } = await supabase
-            .from('study_sessions')
-            .upsert(sessionsToPush, { onConflict: 'id' });
-
-          if (upsertError) {
-            console.error('❌ Erro ao enviar study_sessions para Supabase:', upsertError);
-          } else {
-            console.log(`✅ study_sessions: ${sessionsToPush.length} registros enviados para Supabase`);
-          }
-        } else {
-          console.log('⚠️ study_sessions: Nenhum registro local pertence aos decks do usuário');
-        }
+        console.log(`ℹ️ Push ${name}: Nenhum documento local modificado.`);
       }
     }
-  } catch (err) {
-    console.error('❌ Erro na sincronização de study_sessions:', err);
-  }
 
-  console.log('✅ Sincronização manual concluída!');
+    // study_sessions – usando camelCase e filtro por deckIds (como antes)
+    try {
+      console.log('📥 Pull: study_sessions');
+      const decksCollection = database.collections.decks;
+      const userDecks = await decksCollection.find({
+        selector: { 
+          user_id: userId,
+          deletedAt: { $eq: null }
+        }
+      }).exec();
+      
+      const deckIds = userDecks.map(doc => doc.get('id'));
+
+      if (deckIds.length === 0) {
+        console.log('⚠️ study_sessions: Nenhum deck encontrado para este usuário');
+      } else {
+        const { data: sessionsData, error } = await supabase
+          .from('study_sessions')
+          .select('*')
+          .in('deckId', deckIds)
+          .gte('updated_at', lastSync);
+
+        if (error) {
+          console.error('❌ Erro ao buscar study_sessions:', error);
+        } else if (sessionsData && sessionsData.length > 0) {
+          const collection = database.collections.study_sessions;
+          for (const doc of sessionsData) {
+            const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+            if (existing) {
+              const localUpdated = existing.get('updated_at') || '1970-01-01T00:00:00Z';
+              if (doc.updated_at > localUpdated) {
+                await existing.patch(doc);
+              }
+            } else {
+              await collection.insert(doc);
+            }
+          }
+          console.log(`✅ study_sessions: ${sessionsData.length} registros sincronizados`);
+        }
+
+        console.log('📤 Push: study_sessions');
+        const collection = database.collections.study_sessions;
+        const localSessions = await collection.find({
+          selector: {
+            updated_at: { $gt: lastSync }
+          }
+        }).exec();
+
+        if (localSessions.length > 0) {
+          const sessionsToPush = localSessions
+            .map(doc => doc.toJSON())
+            .filter(session => deckIds.includes(session.deckId));
+
+          if (sessionsToPush.length > 0) {
+            const { error: upsertError } = await supabase
+              .from('study_sessions')
+              .upsert(sessionsToPush, { onConflict: 'id' });
+
+            if (upsertError) {
+              console.error('❌ Erro ao enviar study_sessions:', upsertError);
+            } else {
+              console.log(`✅ study_sessions: ${sessionsToPush.length} registros enviados`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('❌ Erro na sincronização de study_sessions:', err);
+    }
+
+    // Atualizar timestamp do último sync
+    localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
+    console.log('✅ Sincronização concluída com sucesso.');
+
+  } catch (err) {
+    console.error('❌ Erro na sincronização:', err);
+  } finally {
+    isSyncing = false;
+  }
 }

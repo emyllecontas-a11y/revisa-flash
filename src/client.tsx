@@ -15,6 +15,7 @@ import './styles.css';
 function Root() {
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(null);
+  const channelRef = useRef<any>(null);
 
   // ============================================================
   // INICIALIZAÇÃO DO RxDB E AUTENTICAÇÃO
@@ -50,6 +51,7 @@ function Root() {
           setReady(true);
 
           try {
+            // Sincronização inicial (pull/push)
             await syncWithSupabase(userId);
             console.log('✅ Sincronização RxDB concluída!');
             await processPendingOperations();
@@ -83,13 +85,14 @@ function Root() {
   }, []);
 
   // ============================================================
-  // INSCRIÇÃO EM TEMPO REAL (Supabase Realtime)
+  // INSCRIÇÃO EM TEMPO REAL (Supabase Realtime) – ATUALIZAÇÃO DIRETA
   // ============================================================
   useEffect(() => {
     if (!userIdRef.current || !ready) return;
 
     const userId = userIdRef.current;
 
+    // Cria um canal para escutar todas as tabelas do schema 'public'
     const channel = supabase
       .channel('realtime-sync')
       .on(
@@ -100,11 +103,50 @@ function Root() {
         },
         async (payload) => {
           console.log('📡 Mudança detectada no Supabase:', payload);
+
+          const { table, eventType, new: newRecord, old: oldRecord } = payload;
+
           try {
-            await syncWithSupabase(userId);
-            console.log('✅ Re-sincronização concluída após mudança em tempo real.');
-          } catch (syncError) {
-            console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
+            const db = await getDb();
+            const collection = db.collections[table];
+            if (!collection) {
+              console.warn(`⚠️ Coleção ${table} não encontrada no RxDB. Ignorando.`);
+              return;
+            }
+
+            // Atualiza apenas o documento afetado (evita sync completo)
+            if (eventType === 'INSERT' || eventType === 'UPDATE') {
+              if (!newRecord) return;
+              const existing = await collection.findOne({ selector: { id: newRecord.id } }).exec();
+              if (existing) {
+                await existing.patch(newRecord);
+                console.log(`🔄 Atualizado ${table} ID ${newRecord.id} via Realtime`);
+              } else {
+                await collection.insert(newRecord);
+                console.log(`➕ Inserido ${table} ID ${newRecord.id} via Realtime`);
+              }
+            } else if (eventType === 'DELETE') {
+              if (!oldRecord) return;
+              const doc = await collection.findOne({ selector: { id: oldRecord.id } }).exec();
+              if (doc) {
+                await doc.remove();
+                console.log(`🗑️ Removido ${table} ID ${oldRecord.id} via Realtime`);
+              }
+            }
+
+            // Se você quiser forçar uma sincronização completa de tempos em tempos,
+            // pode chamar syncWithSupabase(userId) a cada N eventos, mas evite fazer isso
+            // em cada evento para não gerar loops.
+
+          } catch (error) {
+            console.warn('⚠️ Erro ao processar mudança em tempo real:', error);
+            // Fallback: tenta sincronizar tudo se falhar
+            try {
+              await syncWithSupabase(userId);
+              console.log('✅ Re-sincronização completa após erro.');
+            } catch (syncError) {
+              console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
+            }
           }
         }
       )
@@ -116,14 +158,19 @@ function Root() {
         }
       });
 
+    channelRef.current = channel;
+
     return () => {
       console.log('🔌 Removendo inscrição em tempo real...');
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [ready]);
 
   // ============================================================
-  // REGISTRO DO SERVICE WORKER MANUAL (NOVO)
+  // REGISTRO DO SERVICE WORKER MANUAL
   // ============================================================
   useEffect(() => {
     if ('serviceWorker' in navigator) {
