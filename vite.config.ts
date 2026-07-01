@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { VitePWA } from 'vite-plugin-pwa'; // <-- import do PWA
+import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 
@@ -90,5 +90,17 @@ export default defineConfig({
   builder: 'rollup',
   optimizeDeps: {
     exclude: ['broadcast-channel'],
+  },
+  // ===== CONFIGURAÇÃO DEFINTIVA PARA DESABILITAR SSR =====
+  ssr: false, // <-- desativa SSR no nível mais alto
+  build: {
+    ssr: false, // <-- redundante, mas seguro
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+      },
+      // Garante que nenhum arquivo SSR seja incluído
+      external: [],
+    },
   },
 });
