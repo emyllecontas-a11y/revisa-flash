@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { uid, gerenciarRevisao } from "@/utils/helpers";
-import { getDb } from "@/lib/db";
+import { getDb, syncWithSupabase } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
 
@@ -367,6 +367,9 @@ export default function ConteudoPage() {
         user_id: userId,
         createdAt: now
       });
+
+      await syncWithSupabase(userId);
+
       setDiscNome("");
       setDiscDesc("");
       setIsModalOpen(false);
@@ -407,6 +410,9 @@ export default function ConteudoPage() {
         createdAt: now,
         user_id: userId
       });
+
+      await syncWithSupabase(userId);
+      
       setTopicoNome("");
       setTopicoDesc("");
       setTopicoStatus("nao_estudado");
