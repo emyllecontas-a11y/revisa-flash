@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { RouterProvider } from 'react-router-dom'; // <-- importação do React Router
-import { router } from './router'; // <-- importa o roteador que você criou
+import { RouterProvider } from 'react-router-dom';
+import { router } from './router';
 import { FlashcardProvider } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
 import { LoadingProvider } from './contexts/LoadingContext';
+import { ErrorProvider } from './contexts/ErrorContext';      // <-- ADICIONADO
+import { ThemeProvider } from './contexts/ThemeContext';      // <-- ADICIONADO
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
@@ -127,13 +129,17 @@ function Root() {
   }
 
   return (
-    <LoadingProvider>
-      <FlashcardProvider>
-        <StudyProvider>
-          <RouterProvider router={router} /> {/* <-- usa o novo roteador */}
-        </StudyProvider>
-      </FlashcardProvider>
-    </LoadingProvider>
+    <ThemeProvider>
+      <LoadingProvider>
+        <FlashcardProvider>
+          <StudyProvider>
+            <ErrorProvider>
+              <RouterProvider router={router} />
+            </ErrorProvider>
+          </StudyProvider>
+        </FlashcardProvider>
+      </LoadingProvider>
+    </ThemeProvider>
   );
 }
 
