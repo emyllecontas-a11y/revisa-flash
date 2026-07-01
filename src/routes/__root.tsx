@@ -5,8 +5,6 @@ import {
   createRootRouteWithContext,
   useRouter,
   useNavigate,
-  HeadContent,
-  Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -83,23 +81,6 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 // ============================================================
-// ROOT SHELL
-// ============================================================
-function RootShell({ children }: { children: ReactNode }) {
-  return (
-    <html lang="pt-BR">
-      <head>
-        <HeadContent />
-      </head>
-      <body className="bg-background text-foreground">
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
-
-// ============================================================
 // ROOT COMPONENT
 // ============================================================
 function RootComponent() {
@@ -152,7 +133,7 @@ function RootComponent() {
 }
 
 // ============================================================
-// ROUTE DEFINITION (com splash screens para iOS)
+// ROUTE DEFINITION (sem SSR)
 // ============================================================
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
@@ -237,7 +218,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
     ],
   }),
-  shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,

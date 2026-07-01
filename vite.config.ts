@@ -91,16 +91,19 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['broadcast-channel'],
   },
-  // ===== CONFIGURAÇÃO DEFINTIVA PARA DESABILITAR SSR =====
-  ssr: false, // <-- desativa SSR no nível mais alto
+  ssr: false,
   build: {
-    ssr: false, // <-- redundante, mas seguro
+    ssr: false,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
       },
-      // Garante que nenhum arquivo SSR seja incluído
-      external: [],
+      output: {
+        // Força a saída para o formato cliente
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+      },
     },
   },
 });

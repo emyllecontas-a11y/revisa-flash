@@ -23,43 +23,36 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const FlashcardsRoute = FlashcardsRouteImport.update({
   id: '/flashcards',
   path: '/flashcards',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const ErrosRoute = ErrosRouteImport.update({
   id: '/erros',
   path: '/erros',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const DesempenhoRoute = DesempenhoRouteImport.update({
   id: '/desempenho',
   path: '/desempenho',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const ConteudoRoute = ConteudoRouteImport.update({
   id: '/conteudo',
   path: '/conteudo',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
   id: '/configuracoes',
   path: '/configuracoes',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const CalendarioRoute = CalendarioRouteImport.update({
   id: '/calendario',
   path: '/calendario',
   getParentRoute: () => rootRouteImport,
 } as any)
-
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -68,81 +61,77 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/login': typeof LoginRoute
   '/calendario': typeof CalendarioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/conteudo': typeof ConteudoRoute
   '/desempenho': typeof DesempenhoRoute
   '/erros': typeof ErrosRoute
   '/flashcards': typeof FlashcardsRoute
+  '/login': typeof LoginRoute
 }
-
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/login': typeof LoginRoute
   '/calendario': typeof CalendarioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/conteudo': typeof ConteudoRoute
   '/desempenho': typeof DesempenhoRoute
   '/erros': typeof ErrosRoute
   '/flashcards': typeof FlashcardsRoute
+  '/login': typeof LoginRoute
 }
-
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/login': typeof LoginRoute
   '/calendario': typeof CalendarioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/conteudo': typeof ConteudoRoute
   '/desempenho': typeof DesempenhoRoute
   '/erros': typeof ErrosRoute
   '/flashcards': typeof FlashcardsRoute
+  '/login': typeof LoginRoute
 }
-
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/login'
     | '/calendario'
     | '/configuracoes'
     | '/conteudo'
     | '/desempenho'
     | '/erros'
     | '/flashcards'
+    | '/login'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/login'
     | '/calendario'
     | '/configuracoes'
     | '/conteudo'
     | '/desempenho'
     | '/erros'
     | '/flashcards'
+    | '/login'
   id:
     | '__root__'
     | '/'
-    | '/login'
     | '/calendario'
     | '/configuracoes'
     | '/conteudo'
     | '/desempenho'
     | '/erros'
     | '/flashcards'
+    | '/login'
   fileRoutesById: FileRoutesById
 }
-
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  LoginRoute: typeof LoginRoute
   CalendarioRoute: typeof CalendarioRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
   ConteudoRoute: typeof ConteudoRoute
   DesempenhoRoute: typeof DesempenhoRoute
   ErrosRoute: typeof ErrosRoute
   FlashcardsRoute: typeof FlashcardsRoute
+  LoginRoute: typeof LoginRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -208,15 +197,14 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  LoginRoute: LoginRoute,
   CalendarioRoute: CalendarioRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
   ConteudoRoute: ConteudoRoute,
   DesempenhoRoute: DesempenhoRoute,
   ErrosRoute: ErrosRoute,
   FlashcardsRoute: FlashcardsRoute,
+  LoginRoute: LoginRoute,
 }
-
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()

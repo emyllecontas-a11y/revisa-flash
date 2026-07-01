@@ -1,6 +1,6 @@
 // src/client.tsx
 import React, { useEffect, useState, useRef } from 'react';
-import { hydrateRoot } from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { getRouter } from './router';
 import { FlashcardProvider } from './contexts/FlashcardContext';
@@ -146,4 +146,5 @@ function Root() {
   );
 }
 
-hydrateRoot(document, <Root />);
+const root = createRoot(document.getElementById('root')!);
+root.render(<Root />);
