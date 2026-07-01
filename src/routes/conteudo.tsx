@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { 
   Plus, Search, ChevronRight, ChevronLeft, FileText, Upload, 
@@ -12,13 +11,6 @@ import { getDb } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
 
-// ============================================================
-// ROTA
-// ============================================================
-export const Route = createFileRoute("/conteudo")({
-  component: ConteudoPage,
-  ssr: false,
-});
 
 // ============================================================
 // TIPOS
@@ -56,7 +48,7 @@ interface Revisao {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-function ConteudoPage() {
+export default function ConteudoPage() {
   const [modo, setModo] = useState<"disciplinas" | "disciplina-detalhe" | "topico-detalhe">("disciplinas");
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);

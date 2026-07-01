@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
@@ -10,17 +9,9 @@ import { useErrorSync } from "@/hooks/useErrorSync";
 import type { ErrorType, ErrorRecord } from "@/contexts/ErrorContext";
 
 // ============================================================
-// ROTA
-// ============================================================
-export const Route = createFileRoute("/erros")({
-  component: ErrosPage,
-  ssr: false,
-});
-
-// ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-function ErrosPage() {
+export default function ErrosPage() {
   const [modo, setModo] = useState<"areas" | "disciplina">("areas");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>("Todos");

@@ -1,37 +1,27 @@
 // src/routes/login.tsx
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // <-- importação do React Router
 import { supabase } from "@/lib/supabaseClient";
 import { LogoIcon } from "@/components/LogoIcon";
-import { useLoading } from "@/contexts/LoadingContext"; // <-- NOVO IMPORT
+import { useLoading } from "@/contexts/LoadingContext";
 
-export const Route = createFileRoute("/login")({
-  head: () => ({
-    meta: [
-      { title: "Entrar — RevisaFlash" },
-      { name: "description", content: "Acesse sua conta no RevisaFlash." },
-    ],
-  }),
-  component: LoginPage,
-});
-
-function LoginPage() {
+export default function LoginPage() { // <-- exportação direta
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false); // <-- RENOMEADO (opcional)
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const navigate = useNavigate();
-  const { showLoading, hideLoading } = useLoading(); // <-- NOVO
+  const navigate = useNavigate(); // <-- useNavigate do React Router
+  const { showLoading, hideLoading } = useLoading();
 
   // Redireciona se já estiver logado
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        navigate({ to: "/" });
+        navigate("/"); // <-- sintaxe do React Router (sem objeto { to })
       }
     };
     checkSession();
@@ -41,7 +31,7 @@ function LoginPage() {
     e.preventDefault();
     setError("");
     setIsSubmitting(true);
-    showLoading(); // <-- ATIVA O OVERLAY
+    showLoading();
 
     try {
       if (isSignUp) {
@@ -70,20 +60,19 @@ function LoginPage() {
           password,
         });
         if (error) throw error;
-        navigate({ to: "/" });
+        navigate("/"); // <-- redireciona para a raiz
       }
     } catch (err: any) {
       setError(err.message || (isSignUp ? "Erro ao criar conta." : "Erro ao fazer login."));
     } finally {
       setIsSubmitting(false);
-      hideLoading(); // <-- DESATIVA O OVERLAY
+      hideLoading();
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
-        {/* Card principal */}
         <div className="rf-card p-8">
           <div className="text-center mb-8">
             <LogoIcon className="h-14 w-14" size={56} />

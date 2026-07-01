@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+// src/routes/flashcards.tsx
 import { useState, useCallback, useRef } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
@@ -9,13 +9,7 @@ import {
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
 
-export const Route = createFileRoute("/flashcards")({
-  head: () => ({ meta: [{ title: "Flashcards — RevisaFlash" }] }),
-  component: FlashcardsPage,
-  ssr: false,
-});
-
-function FlashcardsPage() {
+export default function FlashcardsPage() {
   const { 
     decks, 
     dueCards, 

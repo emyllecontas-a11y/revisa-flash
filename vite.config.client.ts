@@ -11,6 +11,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    // VitePWA removido para teste
   ],
   resolve: {
     alias: {

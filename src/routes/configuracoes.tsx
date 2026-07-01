@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
@@ -11,13 +10,8 @@ import { supabase, supabaseReady } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
 
-export const Route = createFileRoute("/configuracoes")({
-  head: () => ({ meta: [{ title: "Configurações — RevisaFlash" }] }),
-  component: ConfigPage,
-  ssr: false,
-});
 
-function ConfigPage() {
+export default function ConfigPage() {
   // ============================================================
   // ESTADOS DO TEMA (persistido no localStorage)
   // ============================================================

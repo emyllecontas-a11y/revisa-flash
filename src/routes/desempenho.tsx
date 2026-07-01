@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { useStudy } from "@/contexts/StudyContext";
@@ -6,11 +5,6 @@ import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { getDb } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
-
-export const Route = createFileRoute("/desempenho")({
-  head: () => ({ meta: [{ title: "Desempenho — RevisaFlash" }] }),
-  component: DesempenhoPage,
-});
 
 // ============================================================
 // TIPOS
@@ -20,7 +14,7 @@ type HeatmapData = number[][]; // 12 semanas x 7 dias
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-function DesempenhoPage() {
+export default function DesempenhoPage() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 

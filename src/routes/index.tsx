@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom"; // <-- substitui o Link do TanStack
 import { AppShell } from "@/components/app-shell";
 import {
   Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X
@@ -9,16 +9,6 @@ import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { getDb } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
-
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Início — RevisaFlash" },
-      { name: "description", content: "Painel diário de revisões, checklist e progresso para o ENARE." },
-    ],
-  }),
-  component: DashboardPage,
-});
 
 // ============================================================
 // TIPOS
@@ -503,3 +493,8 @@ function StatCard({ icon, label, value, hint, tone = "primary" }: { icon: React.
     </div>
   );
 }
+
+// ============================================================
+// EXPORTAÇÃO DEFAULT
+// ============================================================
+export default DashboardPage;

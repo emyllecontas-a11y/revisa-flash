@@ -1,8 +1,7 @@
-// src/client.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { RouterProvider } from '@tanstack/react-router';
-import { getRouter } from './router';
+import { RouterProvider } from 'react-router-dom'; // <-- importação do React Router
+import { router } from './router'; // <-- importa o roteador que você criou
 import { FlashcardProvider } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
 import { LoadingProvider } from './contexts/LoadingContext';
@@ -11,11 +10,9 @@ import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
 import './styles.css';
 
-const router = getRouter();
-
 function Root() {
   const [ready, setReady] = useState(false);
-  const userIdRef = useRef<string | null>(null); // guarda o userId para uso na inscrição
+  const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const initialize = async () => {
@@ -80,28 +77,23 @@ function Root() {
     };
   }, []);
 
-  // ============================================================
-  // INSCRIÇÃO EM TEMPO REAL (Supabase Realtime)
-  // ============================================================
+  // Inscrição em tempo real (Supabase Realtime)
   useEffect(() => {
     if (!userIdRef.current || !ready) return;
 
     const userId = userIdRef.current;
 
-    // Cria um canal para escutar todas as tabelas do schema 'public'
     const channel = supabase
       .channel('realtime-sync')
       .on(
         'postgres_changes',
         {
-          event: '*', // escuta todos os eventos (INSERT, UPDATE, DELETE)
+          event: '*',
           schema: 'public',
-          // filter: `user_id=eq.${userId}`, // opcional: só escuta dados do usuário logado
         },
         async (payload) => {
           console.log('📡 Mudança detectada no Supabase:', payload);
           try {
-            // Re-sincroniza o banco local com o Supabase
             await syncWithSupabase(userId);
             console.log('✅ Re-sincronização concluída após mudança em tempo real.');
           } catch (syncError) {
@@ -117,12 +109,11 @@ function Root() {
         }
       });
 
-    // Limpa a inscrição ao desmontar o componente
     return () => {
       console.log('🔌 Removendo inscrição em tempo real...');
       supabase.removeChannel(channel);
     };
-  }, [ready]); // executa quando o app ficar pronto
+  }, [ready]);
 
   if (!ready) {
     return (
@@ -139,7 +130,7 @@ function Root() {
     <LoadingProvider>
       <FlashcardProvider>
         <StudyProvider>
-          <RouterProvider router={router} />
+          <RouterProvider router={router} /> {/* <-- usa o novo roteador */}
         </StudyProvider>
       </FlashcardProvider>
     </LoadingProvider>

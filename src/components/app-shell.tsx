@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useLocation } from "react-router-dom"; // <-- importação do React Router
 import { useState, useEffect } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, BarChart3, Settings,
@@ -46,7 +46,8 @@ export function AppShell({
   title?: string;
   breadcrumb?: string;
 }) {
-  const pathname = useRouterState((s) => s.location.pathname);
+  const location = useLocation(); // <-- substitui useRouterState
+  const pathname = location.pathname; // <-- obtém o caminho atual
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("Usuário");
   const [userAvatar, setUserAvatar] = useState<string | null>(null);

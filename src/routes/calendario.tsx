@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { 
   ChevronLeft, ChevronRight, Plus, Clock, BookOpen, Brain, 
@@ -10,14 +9,6 @@ import { getDb } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { updateTopicStatusAndRevisions } from "@/services/topicService";
-
-// ============================================================
-// ROTA
-// ============================================================
-export const Route = createFileRoute("/calendario")({
-  component: CalendarioPage,
-  ssr: false,
-});
 
 // ============================================================
 // TIPOS
@@ -39,7 +30,7 @@ interface Revisao {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-function CalendarioPage() {
+export default function CalendarioPage() {
   const [modo, setModo] = useState<"calendario" | "registrar">("calendario");
   const [tipo, setTipo] = useState<"teorico" | "pratico">("teorico");
   const [salvo, setSalvo] = useState(false);
