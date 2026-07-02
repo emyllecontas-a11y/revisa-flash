@@ -2,6 +2,11 @@
 @source "../src";
 @import "tw-animate-css";
 
+/* ============================================================
+   DEFINE A ORDEM DAS CAMADAS
+   ============================================================ */
+@layer tailwind, base, utilities;
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -94,6 +99,98 @@
   ::selection { background: color-mix(in oklab, var(--primary) 35%, transparent); color: var(--foreground); }
 
   h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.01em; }
+}
+
+/* ============================================================
+   ESTILOS GLOBAIS PARA O CLERK (FORÇA CORES BRANCAS)
+   ============================================================ */
+@layer base {
+  /* Força todos os textos do Clerk a serem brancos */
+  .cl-rootBox,
+  .cl-card,
+  .cl-header,
+  .cl-headerTitle,
+  .cl-headerSubtitle,
+  .cl-formFieldLabel,
+  .cl-formFieldInput,
+  .cl-formFieldHintText,
+  .cl-formFieldErrorText,
+  .cl-identityPreview,
+  .cl-identityPreviewText,
+  .cl-socialButtonsBlockButton,
+  .cl-socialButtonsBlockButtonText,
+  .cl-footer,
+  .cl-footerAction,
+  .cl-footerActionLink,
+  .cl-dividerText,
+  .cl-dividerLine {
+    color: #FFFFFF !important;
+  }
+
+  /* Inputs e placeholders */
+  .cl-formFieldInput::placeholder {
+    color: #8A86A8 !important;
+  }
+
+  /* Links e ações */
+  .cl-footerActionLink,
+  .cl-formFieldAction {
+    color: #14B8A6 !important;
+  }
+
+  .cl-footerActionLink:hover,
+  .cl-formFieldAction:hover {
+    color: #0ea596 !important;
+  }
+
+  /* Botão principal */
+  .cl-formButtonPrimary {
+    background-color: #14B8A6 !important;
+    color: #FFFFFF !important;
+  }
+
+  .cl-formButtonPrimary:hover {
+    background-color: #0ea596 !important;
+  }
+
+  /* Botões sociais */
+  .cl-socialButtonsBlockButton {
+    border: 1px solid #2A3A40 !important;
+    background: #1A2A30 !important;
+    color: #FFFFFF !important;
+  }
+
+  .cl-socialButtonsBlockButton:hover {
+    background: #2A3A40 !important;
+  }
+
+  /* Card */
+  .cl-card {
+    background: #1A2A30 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 1rem !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+    padding: 2rem !important;
+  }
+
+  /* Inputs */
+  .cl-formFieldInput {
+    background: #0F1A1F !important;
+    border: 1px solid #2A3A40 !important;
+    color: #FFFFFF !important;
+    border-radius: 0.5rem !important;
+    padding: 0.625rem !important;
+  }
+
+  .cl-formFieldInput:focus {
+    border-color: #14B8A6 !important;
+    outline: none !important;
+  }
+
+  /* Esconde cabeçalho padrão do Clerk */
+  .cl-header {
+    display: none !important;
+  }
 }
 
 @keyframes rf-fade-up {

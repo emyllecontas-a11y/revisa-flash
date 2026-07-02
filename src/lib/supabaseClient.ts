@@ -1,18 +1,73 @@
 // src/lib/supabaseClient.ts
-// Cliente Supabase para autenticação e operações manuais
+// Cliente Supabase para operações com autenticação via Clerk
 
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://driayoaxyrpfdaqugvmx.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyaWF5b2F4eXJwZmRhcXVndm14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MzE3MjIsImV4cCI6MjA5NzQwNzcyMn0.iAZZ2J7sXthYj8UQYEAwuJGbbLt2cudDpp0D2HaxHPI';
 
+// ============================================================
+// CLIENTE SUPABASE BASE
+// ============================================================
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export const supabaseReady = true;
 
 console.log('✅ Supabase client inicializado!');
 
 // ============================================================
-// 🔐 AUTENTICAÇÃO
+// FUNÇÃO PARA OBTER O TOKEN DO CLERK (com fallback)
+// ============================================================
+export const getClerkToken = async (): Promise<string | null> => {
+  try {
+    // Verifica se estamos no navegador
+    if (typeof window === 'undefined') return null;
+    
+    // Importa dinamicamente para evitar dependência circular
+    const { getToken } = await import("@clerk/clerk-react");
+    const token = await getToken({ template: 'supabase' })
+    console.log('🔑 Token do Clerk obtido com sucesso!');
+    return token;
+  } catch (error) {
+    console.warn('⚠️ Erro ao obter token do Clerk:', error);
+    return null;
+  }
+};
+
+// ============================================================
+// FUNÇÃO PARA CRIAR UM CLIENTE SUPABASE COM O TOKEN DO CLERK
+// ============================================================
+export const getSupabaseWithToken = async () => {
+  const token = await getClerkToken();
+  if (!token) {
+    console.warn('⚠️ Nenhum token do Clerk disponível. Usando cliente anônimo.');
+    return supabase;
+  }
+
+  console.log('✅ Criando cliente Supabase com token do Clerk');
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
+};
+// ============================================================
+// WRAPPERS PARA OPERAÇÕES COM AUTENTICAÇÃO
+// ============================================================
+
+/**
+ * Executa uma operação Supabase com o token do Clerk
+ */
+export const withAuth = async <T>(
+  fn: (client: any) => Promise<T>
+): Promise<T> => {
+  const client = await getSupabaseWithToken();
+  return fn(client);
+};
+
+// ============================================================
+// AUTENTICAÇÃO (legado - mantido para compatibilidade)
 // ============================================================
 export const getCurrentUser = async () => {
   try {
@@ -58,12 +113,15 @@ export const getDisciplines = async (userId: string) => {
 export const createDiscipline = async (userId: string, name: string) => {
   try {
     const id = Math.random().toString(36).slice(2, 10);
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('disciplines')
       .insert({
         id,
         user_id: userId,
-        name
+        name,
+        created_at: now,
+        updated_at: now
       })
       .select()
       .single();
@@ -130,6 +188,7 @@ export const getTopics = async (disciplineId: string) => {
 export const createTopic = async (disciplineId: string, name: string, status: string = 'nao_estudado', plannedDate?: string) => {
   try {
     const id = Math.random().toString(36).slice(2, 10);
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('topics')
       .insert({
@@ -137,7 +196,9 @@ export const createTopic = async (disciplineId: string, name: string, status: st
         discipline_id: disciplineId,
         name,
         status,
-        planned_date: plannedDate || null
+        planned_date: plannedDate || null,
+        created_at: now,
+        updated_at: now
       })
       .select()
       .single();
@@ -194,6 +255,7 @@ export const createError = async (userId: string, errorData: {
 }) => {
   try {
     const id = Math.random().toString(36).slice(2, 10);
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('errors')
       .insert({
@@ -203,7 +265,9 @@ export const createError = async (userId: string, errorData: {
         area: errorData.area,
         correct_answer: errorData.correctAnswer,
         tipo_erro: errorData.tipoErro,
-        observacao: errorData.observacao || ''
+        observacao: errorData.observacao || '',
+        created_at: now,
+        updated_at: now
       })
       .select()
       .single();
@@ -456,6 +520,7 @@ export const createStudyRecord = async (userId: string, recordData: {
 }) => {
   try {
     const id = Math.random().toString(36).slice(2, 10);
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('study_records')
       .insert({
@@ -469,7 +534,8 @@ export const createStudyRecord = async (userId: string, recordData: {
         questoes_feitas: recordData.questoesFeitas || 0,
         questoes_acertos: recordData.questoesAcertos || 0,
         resumo: recordData.resumo || '',
-        created_at: new Date().toISOString()
+        created_at: now,
+        updated_at: now
       })
       .select()
       .single();

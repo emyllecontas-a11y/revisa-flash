@@ -1,6 +1,6 @@
 // src/services/queueService.ts
 import { getDb } from '@/lib/db';
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseWithToken } from '@/lib/supabaseClient';
 import { uid } from '@/utils/helpers';
 
 export type OperationType = 'create' | 'update' | 'delete';
@@ -24,6 +24,13 @@ export async function addPendingOperation(
 ): Promise<void> {
   try {
     const db = await getDb();
+    
+    // Verifica se a coleção existe
+    if (!db.collections || !db.collections.pending_operations) {
+      console.error('❌ Coleção pending_operations não encontrada no banco.');
+      return;
+    }
+
     const operation: PendingOperation = {
       id: uid(),
       type,
@@ -32,11 +39,12 @@ export async function addPendingOperation(
       timestamp: new Date().toISOString(),
       retries: 0,
     };
+
     await db.pending_operations.insert(operation);
     console.log(`📦 Operação adicionada à fila: ${type} em ${collection}`);
   } catch (error) {
     console.error('❌ Erro ao adicionar operação à fila:', error);
-    throw error;
+    // Não relança o erro para não quebrar o fluxo principal
   }
 }
 
@@ -46,6 +54,13 @@ export async function addPendingOperation(
 export async function processPendingOperations(): Promise<void> {
   try {
     const db = await getDb();
+    
+    // Verifica se a coleção existe
+    if (!db.collections || !db.collections.pending_operations) {
+      console.log('📭 Coleção pending_operations não encontrada.');
+      return;
+    }
+
     const operations = await db.pending_operations.find().exec();
 
     if (operations.length === 0) {
@@ -68,16 +83,19 @@ export async function processPendingOperations(): Promise<void> {
       try {
         console.log(`🔄 Processando: ${op.type} em ${op.collection}`);
 
+        // 👇 OBTÉM O CLIENTE SUPABASE COM O TOKEN DO CLERK
+        const supabaseClient = await getSupabaseWithToken();
+
         if (op.type === 'create') {
-          const { error } = await supabase.from(op.collection).insert(op.data);
+          const { error } = await supabaseClient.from(op.collection).insert(op.data);
           if (error) throw error;
         } else if (op.type === 'update') {
           const { id, ...updateData } = op.data;
-          const { error } = await supabase.from(op.collection).update(updateData).eq('id', id);
+          const { error } = await supabaseClient.from(op.collection).update(updateData).eq('id', id);
           if (error) throw error;
         } else if (op.type === 'delete') {
           const { id } = op.data;
-          const { error } = await supabase.from(op.collection).delete().eq('id', id);
+          const { error } = await supabaseClient.from(op.collection).delete().eq('id', id);
           if (error) throw error;
         }
 
@@ -120,10 +138,12 @@ export function setupQueueListener(): void {
   const setupChangeListener = async () => {
     try {
       const db = await getDb();
-      const collection = db.pending_operations;
-      if (!collection) return;
+      if (!db.collections || !db.collections.pending_operations) {
+        console.warn('⚠️ Coleção pending_operations não encontrada para listener.');
+        return;
+      }
 
-      collection.$.subscribe(() => {
+      db.pending_operations.$.subscribe(() => {
         console.log('🔄 Mudança detectada na fila, processando...');
         processPendingOperations().catch(console.error);
       });
@@ -141,4 +161,6 @@ export function setupQueueListener(): void {
 
   console.log('✅ Listener da fila configurado.');
 }
+
+// Exporta o alias para compatibilidade
 export const enqueueOperation = addPendingOperation;

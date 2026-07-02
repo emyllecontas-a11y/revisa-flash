@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useMemo, useCallback, ReactNode, useEffect } from 'react';
 import { uid } from '@/utils/helpers';
 import { getDb } from '@/lib/db';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { enqueueOperation } from '@/services/queueService';
 
 export type ErrorType = 'Conceito' | 'Interpretação' | 'Memória' | 'Atenção';
@@ -66,29 +66,22 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [areas, setAreas] = useState<{ name: string; icon: string }[]>(DEFAULT_AREAS);
 
   // ============================================================
-  // CARREGAR USER ID, REGISTROS E ÁREAS DO RxDB
+  // CARREGAR USER ID DO CLERK
   // ============================================================
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       let userIdFromAuth: string | null = null;
 
-      try {
-        const { data: { user }, error } = await supabase.auth.getUser();
-        if (error) throw error;
-        if (user) {
-          userIdFromAuth = user.id;
-          localStorage.setItem('revisaflash_user_id', userIdFromAuth);
-        }
-      } catch {
-        const cachedId = localStorage.getItem('revisaflash_user_id');
-        if (cachedId) {
-          userIdFromAuth = cachedId;
-        } else {
-          console.warn('⚠️ [ErrorContext] Nenhum usuário disponível.');
-          setLoading(false);
-          return;
-        }
+      // Tenta pegar do localStorage (vem do Clerk)
+      const cachedId = localStorage.getItem('revisaflash_user_id');
+      if (cachedId) {
+        userIdFromAuth = cachedId;
+        console.log('✅ [ErrorContext] Usuário recuperado do cache local (Clerk):', userIdFromAuth);
+      } else {
+        console.warn('⚠️ [ErrorContext] Nenhum usuário disponível.');
+        setLoading(false);
+        return;
       }
 
       setUserId(userIdFromAuth);
@@ -149,6 +142,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       status: 'ativo',
       flashcardId: undefined,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     try {
@@ -157,9 +151,10 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => [...prev, newError]);
       console.log('📝 Erro registrado e salvo no RxDB:', newError);
 
-      // Tenta sincronizar com Supabase
+      // Tenta sincronizar com Supabase usando token do Clerk
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('errors')
           .insert(newError);
         if (error) throw error;
@@ -198,9 +193,10 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         r.id === id ? { ...r, ...updatedData } : r
       ));
 
-      // Tenta sincronizar com Supabase
+      // Tenta sincronizar com Supabase usando token do Clerk
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('errors')
           .update(updatedData)
           .eq('id', id);
@@ -230,9 +226,10 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setRecords(prev => prev.filter(r => r.id !== id));
         console.log('🗑️ Erro removido localmente.');
 
-        // Tentar excluir no Supabase
+        // Tentar excluir no Supabase usando token do Clerk
         try {
-          const { error } = await supabase
+          const supabaseClient = await getSupabaseWithToken();
+          const { error } = await supabaseClient
             .from('errors')
             .delete()
             .eq('id', id);

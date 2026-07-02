@@ -2,7 +2,7 @@
 
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
-import { supabase } from './supabaseClient';
+import { supabase, getSupabaseWithToken } from './supabaseClient';
 
 // ============================================================
 // SCHEMAS (todos em camelCase, com updated_at)
@@ -294,14 +294,19 @@ export async function syncWithSupabase(userId: string) {
     const database = await getDb();
     const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
 
+    // 👇 OBTÉM O CLIENTE SUPABASE COM O TOKEN DO CLERK
+    const supabaseClient = await getSupabaseWithToken();
+
+    console.log('🔍 Cliente Supabase com token:', supabaseClient);
+
     const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
 
     for (const name of collections) {
       const collection = database.collections[name];
       if (!collection) continue;
 
-      // 1. PULL: buscar apenas registros atualizados APÓS o último sync
-      let query = supabase
+      // 1. PULL
+      let query = supabaseClient
         .from(name)
         .select('*')
         .eq('user_id', userId)
@@ -321,7 +326,6 @@ export async function syncWithSupabase(userId: string) {
         for (const doc of supabaseData) {
           const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
           if (existing) {
-            // Só atualiza se o documento remoto for mais recente
             const localUpdated = existing.get('updated_at') || '1970-01-01T00:00:00Z';
             if (doc.updated_at > localUpdated) {
               await existing.patch(doc);
@@ -337,7 +341,7 @@ export async function syncWithSupabase(userId: string) {
         console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
-      // 2. PUSH: enviar apenas documentos com updated_at > lastSync
+      // 2. PUSH
       const localDocs = await collection.find({
         selector: {
           user_id: userId,
@@ -347,7 +351,7 @@ export async function syncWithSupabase(userId: string) {
 
       if (localDocs.length > 0) {
         const docsToPush = localDocs.map(doc => doc.toJSON());
-        const { error: upsertError } = await supabase
+        const { error: upsertError } = await supabaseClient
           .from(name)
           .upsert(docsToPush, { onConflict: 'id' });
 
@@ -361,7 +365,7 @@ export async function syncWithSupabase(userId: string) {
       }
     }
 
-    // study_sessions – usando camelCase e filtro por deckIds (como antes)
+    // study_sessions
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
@@ -377,7 +381,7 @@ export async function syncWithSupabase(userId: string) {
       if (deckIds.length === 0) {
         console.log('⚠️ study_sessions: Nenhum deck encontrado para este usuário');
       } else {
-        const { data: sessionsData, error } = await supabase
+        const { data: sessionsData, error } = await supabaseClient
           .from('study_sessions')
           .select('*')
           .in('deckId', deckIds)
@@ -415,7 +419,7 @@ export async function syncWithSupabase(userId: string) {
             .filter(session => deckIds.includes(session.deckId));
 
           if (sessionsToPush.length > 0) {
-            const { error: upsertError } = await supabase
+            const { error: upsertError } = await supabaseClient
               .from('study_sessions')
               .upsert(sessionsToPush, { onConflict: 'id' });
 
@@ -431,7 +435,6 @@ export async function syncWithSupabase(userId: string) {
       console.error('❌ Erro na sincronização de study_sessions:', err);
     }
 
-    // Atualizar timestamp do último sync
     localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
     console.log('✅ Sincronização concluída com sucesso.');
 

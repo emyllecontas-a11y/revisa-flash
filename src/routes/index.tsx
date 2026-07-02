@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom"; // <-- substitui o Link do TanStack
+import { Link } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
   Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X
@@ -7,8 +7,9 @@ import {
 import { useStudy } from "@/contexts/StudyContext";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
+import { useUser } from "@clerk/clerk-react";
 import { getDb } from "@/lib/db";
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
 
 // ============================================================
 // TIPOS
@@ -31,9 +32,10 @@ interface ProximaRevisao {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-function DashboardPage() {
+export default function DashboardPage() {
+  const { user, isLoaded } = useUser();
   const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>("Emylle");
+  const [userName, setUserName] = useState<string>("Usuário");
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [isAddingChecklist, setIsAddingChecklist] = useState(false);
   const [newChecklistText, setNewChecklistText] = useState("");
@@ -63,62 +65,51 @@ function DashboardPage() {
   };
 
   // ============================================================
-  // LOAD ALL DATA
+  // CARREGAR DADOS (COM CLERK)
   // ============================================================
   useEffect(() => {
     const loadAllData = async () => {
       try {
         setLoading(true);
 
-        let userIdLocal: string | null = null;
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            userIdLocal = user.id;
-            localStorage.setItem('revisaflash_user_id', userIdLocal);
-            
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('name')
-              .eq('id', user.id)
-              .maybeSingle();
-
-            if (profile?.name) {
-              setUserName(profile.name);
-            } else {
-              const name = user.user_metadata?.name || user.email?.split('@')[0] || "Emylle";
-              setUserName(name);
-            }
-          } else {
-            const cachedId = localStorage.getItem('revisaflash_user_id');
-            if (cachedId) userIdLocal = cachedId;
-            const cachedName = localStorage.getItem('revisaflash_user_name');
-            if (cachedName) setUserName(cachedName);
-          }
-          setUserId(userIdLocal);
-        } catch (e) {
-          console.warn('Erro ao carregar usuário:', e);
-          const cachedId = localStorage.getItem('revisaflash_user_id');
-          if (cachedId) {
-            userIdLocal = cachedId;
-            setUserId(cachedId);
-          }
-          const cachedName = localStorage.getItem('revisaflash_user_name');
-          if (cachedName) setUserName(cachedName);
-        }
-
-        if (!userIdLocal) {
+        // 1. Obtém userId do Clerk
+        const clerkUserId = user?.id || null;
+        if (!clerkUserId) {
           setLoading(false);
           return;
         }
 
-        // Dias até a prova
+        setUserId(clerkUserId);
+        localStorage.setItem('revisaflash_user_id', clerkUserId);
+
+        // 2. Carrega o nome do perfil do Supabase com token
+        let profileName = "Usuário";
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { data: profile } = await supabaseClient
+            .from('profiles')
+            .select('name')
+            .eq('id', clerkUserId)
+            .maybeSingle();
+          if (profile?.name) {
+            profileName = profile.name;
+          } else {
+            profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+          }
+        } catch (e) {
+          console.warn('Erro ao carregar perfil:', e);
+          profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+        }
+        setUserName(profileName);
+        localStorage.setItem('revisaflash_user_name', profileName);
+
+        // 3. Dias até a prova
         const dataProva = new Date(2026, 8, 13);
         const hoje = new Date();
         const diff = Math.ceil((dataProva.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
         setDiasAteProva(Math.max(0, diff));
 
-        // Streak
+        // 4. Streak
         if (studyRecords.length > 0) {
           const datas = [...new Set(studyRecords.map(r => r.date))].sort();
           if (datas.length > 0) {
@@ -139,16 +130,16 @@ function DashboardPage() {
           }
         }
 
-        // Progresso por disciplina
+        // 5. Progresso por disciplina
         try {
           const db = await getDb();
           const disciplinesResult = await db.disciplines.find({
-            selector: { user_id: userIdLocal, deletedAt: { $eq: null } }
+            selector: { user_id: clerkUserId, deletedAt: { $eq: null } }
           }).exec();
           const disciplinas = disciplinesResult.map((doc: any) => doc.toJSON());
 
           const topicsResult = await db.topics.find({
-            selector: { user_id: userIdLocal, deletedAt: { $eq: null } }
+            selector: { user_id: clerkUserId, deletedAt: { $eq: null } }
           }).exec();
           const topicos = topicsResult.map((doc: any) => doc.toJSON());
 
@@ -167,16 +158,16 @@ function DashboardPage() {
           console.error('Erro ao carregar progresso:', error);
         }
 
-        // Total de erros
+        // 6. Total de erros
         setTotalErros(getTotalErrors());
 
-        // Próximas revisões (do RxDB)
+        // 7. Próximas revisões
         try {
           const db = await getDb();
           const hojeStr = new Date().toISOString().split('T')[0];
 
           const revisoesResult = await db.revisoes.find({
-            selector: { user_id: userIdLocal }
+            selector: { user_id: clerkUserId }
           }).exec();
           const revisoes = revisoesResult.map((doc: any) => doc.toJSON());
 
@@ -208,8 +199,6 @@ function DashboardPage() {
           console.error('Erro ao carregar próximas revisões:', error);
         }
 
-        localStorage.setItem('revisaflash_user_name', userName);
-
       } catch (error) {
         console.error('Erro ao carregar dashboard:', error);
       } finally {
@@ -217,8 +206,10 @@ function DashboardPage() {
       }
     };
 
-    loadAllData();
-  }, [studyRecords, getTotalErrors]);
+    if (isLoaded) {
+      loadAllData();
+    }
+  }, [studyRecords, getTotalErrors, user, isLoaded]);
 
   // ============================================================
   // CHECKLIST
@@ -270,7 +261,7 @@ function DashboardPage() {
   // ============================================================
   // RENDER
   // ============================================================
-  if (loading) {
+  if (loading || !isLoaded) {
     return (
       <AppShell breadcrumb="Início" title="Carregando...">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -493,8 +484,3 @@ function StatCard({ icon, label, value, hint, tone = "primary" }: { icon: React.
     </div>
   );
 }
-
-// ============================================================
-// EXPORTAÇÃO DEFAULT
-// ============================================================
-export default DashboardPage;

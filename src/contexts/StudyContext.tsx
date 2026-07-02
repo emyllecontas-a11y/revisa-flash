@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback, useEffect } from 'react';
 import { uid } from '@/utils/helpers';
 import { getDb } from '@/lib/db';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { CAMPOS, TIPOS_ESTUDO } from '@/constants';
 import { enqueueOperation } from '@/services/queueService';
 
@@ -24,9 +24,10 @@ export interface StudyRecord {
   source?: string;
   observations?: string;
   createdAt: string;
+  updated_at?: string;
 }
 
-type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt'>;
+type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt' | 'updated_at'>;
 
 interface StudyContextType {
   records: StudyRecord[];
@@ -53,35 +54,30 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ============================================================
+  // CARREGAR DADOS (agora com Clerk)
+  // ============================================================
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       let userIdFromAuth: string | null = null;
 
-      try {
-        const { data: { user }, error } = await supabase.auth.getUser();
-        if (error) throw error;
-        if (user) {
-          userIdFromAuth = user.id;
-          localStorage.setItem('revisaflash_user_id', userIdFromAuth);
-        }
-      } catch {
-        const cachedId = localStorage.getItem('revisaflash_user_id');
-        if (cachedId) {
-          userIdFromAuth = cachedId;
-          console.warn('⚠️ [StudyContext] Usuário recuperado do cache local:', cachedId);
-        } else {
-          console.warn('⚠️ [StudyContext] Nenhum usuário disponível.');
-          setLoading(false);
-          return;
-        }
+      // Tenta pegar do localStorage (vem do Clerk)
+      const cachedId = localStorage.getItem('revisaflash_user_id');
+      if (cachedId) {
+        userIdFromAuth = cachedId;
+        console.log('✅ [StudyContext] Usuário recuperado do cache local (Clerk):', userIdFromAuth);
+      } else {
+        console.warn('⚠️ [StudyContext] Nenhum usuário disponível.');
+        setLoading(false);
+        return;
       }
 
       setUserId(userIdFromAuth);
 
       const db = await getDb();
       const result = await db.study_records.find({
-        selector: { [CAMPOS.ESTUDO.USUARIO_ID]: userIdFromAuth }
+        selector: { user_id: userIdFromAuth }
       }).exec();
 
       const loadedRecords = result.map((doc: any) => doc.toJSON() as StudyRecord);
@@ -98,17 +94,22 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     loadData();
   }, [loadData]);
 
+  // ============================================================
+  // ADICIONAR REGISTRO
+  // ============================================================
   const addRecord = useCallback(async (data: AddStudyData) => {
     if (!userId) {
       console.error('❌ [StudyContext] Usuário não autenticado');
       throw new Error('Usuário não autenticado');
     }
 
+    const now = new Date().toISOString();
     const newRecord: StudyRecord = {
       ...data,
       id: uid(),
       user_id: userId,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updated_at: now,
     };
 
     try {
@@ -117,9 +118,10 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => [...prev, newRecord]);
       console.log('📚 [StudyContext] Registro adicionado e salvo no RxDB:', newRecord);
 
-      // Tenta sincronizar com Supabase
+      // Tenta sincronizar com Supabase usando token do Clerk
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('study_records')
           .insert(newRecord);
         if (error) throw error;
@@ -134,6 +136,9 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [userId]);
 
+  // ============================================================
+  // DELETAR REGISTRO
+  // ============================================================
   const deleteRecord = useCallback(async (id: string) => {
     console.log('🔍 [StudyContext] Tentando excluir registro com id:', id);
     if (!userId) {
@@ -157,9 +162,10 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ [StudyContext] Registro removido localmente.');
 
-      // 2. Tentar excluir no Supabase
+      // 2. Tentar excluir no Supabase com token do Clerk
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('study_records')
           .delete()
           .eq('id', id);
@@ -178,6 +184,9 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [userId]);
 
+  // ============================================================
+  // GETTERS
+  // ============================================================
   const getRecordsForDate = useCallback((date: string) => {
     return records.filter(r => r.date === date);
   }, [records]);

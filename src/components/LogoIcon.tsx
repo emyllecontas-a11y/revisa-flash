@@ -1,4 +1,3 @@
-// src/components/LogoIcon.tsx
 import { Zap } from "lucide-react";
 
 interface LogoIconProps {
@@ -12,13 +11,10 @@ export function LogoIcon({ className = "", size = 40 }: LogoIconProps) {
       className={`relative inline-flex items-center justify-center ${className}`}
       style={{ width: size, height: size }}
     >
-      {/* Glow pulsante */}
       <div
         className="absolute inset-0 rounded-full bg-accent/40 blur-2xl animate-pulse"
         style={{ animationDuration: "2s" }}
       />
-      
-      {/* Fundo com efeito de brilho interno */}
       <div className="relative z-10 grid h-full w-full place-items-center rounded-full bg-accent/10 backdrop-blur-sm border border-accent/30 shadow-[0_0_30px_rgba(251,113,133,0.5)]">
         <Zap
           className="text-accent drop-shadow-[0_0_20px_rgba(251,113,133,0.9)]"

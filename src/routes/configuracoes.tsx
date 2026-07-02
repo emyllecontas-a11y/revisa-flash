@@ -6,16 +6,22 @@ import {
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
   Camera
 } from "lucide-react";
-import { supabase, supabaseReady } from "@/lib/supabaseClient";
+import { useUser, useClerk } from "@clerk/clerk-react"; // <-- CORRIGIDO
+import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
-
 
 export default function ConfigPage() {
   // ============================================================
   // ESTADOS DO TEMA (persistido no localStorage)
   // ============================================================
   const [tema, setTema] = useState<"escuro" | "claro" | "sistema">("escuro");
+
+  // ============================================================
+  // CLERK: OBTÉM USUÁRIO E FUNÇÃO DE LOGOUT
+  // ============================================================
+  const { user, isLoaded } = useUser();
+  const { signOut } = useClerk();
 
   // ============================================================
   // ESTADOS FUNCIONAIS
@@ -41,33 +47,44 @@ export default function ConfigPage() {
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   // ============================================================
-  // CARREGAR USUÁRIO E PERFIL
+  // CARREGAR USUÁRIO E PERFIL DO SUPABASE (usando Clerk)
   // ============================================================
   useEffect(() => {
     const loadUser = async () => {
       try {
-        if (!supabaseReady) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          setUserEmail(user.email || '');
-          setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário');
+        if (!isLoaded) return;
+        
+        // Obtém o userId do Clerk
+        const clerkUserId = user?.id || null;
+        if (!clerkUserId) {
+          console.warn('Nenhum usuário Clerk encontrado.');
+          return;
+        }
 
-          // Carregar perfil do Supabase
-          const { data: profile, error } = await supabase
-            .from('profiles')
-            .select('name, avatar_url, theme')
-            .eq('id', user.id)
-            .maybeSingle();
+        setUserId(clerkUserId);
+        setUserEmail(user?.emailAddresses?.[0]?.emailAddress || '');
+        setUserName(user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário');
 
-          if (profile) {
-            if (profile.name) setUserName(profile.name);
-            if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
-            if (profile.theme) {
-              setTema(profile.theme);
-              localStorage.setItem('tema', profile.theme);
-              aplicarTema(profile.theme);
-            }
+        // Carregar perfil do Supabase usando o userId do Clerk
+        const supabaseClient = await getSupabaseWithToken();
+        const { data: profile, error } = await supabaseClient
+          .from('profiles')
+          .select('name, avatar_url, theme')
+          .eq('id', clerkUserId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Erro ao carregar perfil:', error);
+          return;
+        }
+
+        if (profile) {
+          if (profile.name) setUserName(profile.name);
+          if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+          if (profile.theme) {
+            setTema(profile.theme);
+            localStorage.setItem('tema', profile.theme);
+            aplicarTema(profile.theme);
           }
         }
       } catch (e) {
@@ -75,7 +92,7 @@ export default function ConfigPage() {
       }
     };
     loadUser();
-  }, []);
+  }, [user, isLoaded]);
 
   // Aplicar tema ao carregar (do localStorage)
   useEffect(() => {
@@ -90,13 +107,10 @@ export default function ConfigPage() {
   }, []);
 
   const aplicarTema = (tema: 'escuro' | 'claro' | 'sistema') => {
-    // Aqui você pode aplicar o tema no documento
-    // Exemplo: adicionar classe ao body
     const body = document.body;
     body.classList.remove('tema-escuro', 'tema-claro');
     if (tema === 'escuro') body.classList.add('tema-escuro');
     else if (tema === 'claro') body.classList.add('tema-claro');
-    // Se for 'sistema', você pode detectar o tema do sistema
   };
 
   // ============================================================
@@ -108,22 +122,30 @@ export default function ConfigPage() {
     aplicarTema(novoTema);
 
     if (userId) {
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({ id: userId, theme: novoTema, updated_at: new Date().toISOString() })
-        .select();
-      if (error) console.error('Erro ao salvar tema:', error);
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('profiles')
+          .upsert({ id: userId, theme: novoTema, updated_at: new Date().toISOString() })
+          .select();
+        if (error) console.error('Erro ao salvar tema:', error);
+      } catch (error) {
+        console.error('Erro ao salvar tema:', error);
+      }
     }
   };
 
   // ============================================================
-  // UPLOAD DE FOTO DE PERFIL
+  // UPLOAD DE FOTO DE PERFIL (CORRIGIDO DEFINITIVAMENTE)
   // ============================================================
   const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !userId) return;
+    if (!file || !userId) {
+      setMensagem('⚠️ Nenhum arquivo selecionado ou usuário não autenticado.');
+      setMensagemTipo('error');
+      return;
+    }
 
-    // Validar tipo e tamanho
     if (!file.type.startsWith('image/')) {
       setMensagem('⚠️ Selecione uma imagem válida (PNG, JPG).');
       setMensagemTipo('error');
@@ -139,12 +161,14 @@ export default function ConfigPage() {
     setMensagem('');
 
     try {
-      // Criar nome único para a imagem
       const fileExt = file.name.split('.').pop();
       const fileName = `${userId}/${Date.now()}.${fileExt}`;
 
-      // Upload para Supabase Storage
-      const { error: uploadError } = await supabase.storage
+      // 👇 OBTÉM O CLIENTE AUTENTICADO UMA ÚNICA VEZ
+      const supabaseClient = await getSupabaseWithToken();
+
+      // 👇 FAZ O UPLOAD COM O CLIENTE AUTENTICADO
+      const { error: uploadError } = await supabaseClient.storage
         .from('avatars')
         .upload(fileName, file, {
           cacheControl: '3600',
@@ -153,15 +177,15 @@ export default function ConfigPage() {
 
       if (uploadError) throw uploadError;
 
-      // Obter URL pública
-      const { data: urlData } = supabase.storage
+      // 👇 OBTÉM A URL PÚBLICA (não precisa de autenticação, mas usamos o mesmo cliente)
+      const { data: urlData } = supabaseClient.storage
         .from('avatars')
         .getPublicUrl(fileName);
 
       const avatarUrl = urlData.publicUrl;
 
-      // Atualizar perfil no Supabase
-      const { error: updateError } = await supabase
+      // 👇 ATUALIZA A TABELA PROFILES COM O MESMO CLIENTE
+      const { error: updateError } = await supabaseClient
         .from('profiles')
         .upsert({ id: userId, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
         .select();
@@ -171,6 +195,9 @@ export default function ConfigPage() {
       setAvatarUrl(avatarUrl);
       setMensagem('✅ Foto de perfil atualizada com sucesso!');
       setMensagemTipo('success');
+      
+      // Recarregar a página para atualizar o sidebar
+      setTimeout(() => window.location.reload(), 1500);
     } catch (error: any) {
       console.error('Erro ao fazer upload:', error);
       setMensagem('❌ Erro ao fazer upload: ' + (error.message || 'Erro desconhecido'));
@@ -182,12 +209,13 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // ATUALIZAR NOME
+  // ATUALIZAR NOME (usando Clerk e Supabase)
   // ============================================================
   const handleUpdateName = useCallback(async (nome: string) => {
     if (!userId || !nome.trim()) return;
     try {
-      const { error } = await supabase
+      const supabaseClient = await getSupabaseWithToken();
+      const { error } = await supabaseClient
         .from('profiles')
         .upsert({ id: userId, name: nome.trim(), updated_at: new Date().toISOString() })
         .select();
@@ -203,7 +231,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // 📥 IMPORTAR FLASHCARDS DO ANKI (com RxDB)
+  // 📥 IMPORTAR FLASHCARDS DO ANKI
   // ============================================================
   const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -274,7 +302,6 @@ export default function ConfigPage() {
 
       const db = await getDb();
       
-      // Criar baralho
       const deckId = uid();
       await db.decks.insert({
         id: deckId,
@@ -289,7 +316,6 @@ export default function ConfigPage() {
       let importados = 0;
       let erros = 0;
 
-      // Inserir flashcards
       for (const card of cards) {
         try {
           const cardId = uid();
@@ -336,7 +362,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // 💾 BACKUP (mantido igual)
+  // 💾 BACKUP
   // ============================================================
   const exportarBackup = useCallback(() => {
     try {
@@ -403,22 +429,21 @@ export default function ConfigPage() {
   }, []);
 
   // ============================================================
-  // FUNÇÃO DE LOGOUT
+  // FUNÇÃO DE LOGOUT (usando Clerk)
   // ============================================================
   const handleLogout = useCallback(async () => {
     if (confirm("Deseja realmente sair?")) {
       localStorage.removeItem('revisaflash_user_id');
-      await supabase.auth.signOut();
-      window.location.reload();
+      await signOut();
+      window.location.href = '/login';
     }
-  }, []);
+  }, [signOut]);
 
   // ============================================================
   // RENDER
   // ============================================================
   return (
     <AppShell breadcrumb="Configurações" title="Configurações">
-      {/* Mensagem de feedback */}
       {mensagem && (
         <div className={`mb-4 p-3 rounded-xl text-sm border ${
           mensagemTipo === 'success' ? 'bg-green-500/20 text-green-400 border-green-500/20' : 
@@ -431,7 +456,6 @@ export default function ConfigPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        {/* Navegação lateral */}
         <nav className="rf-card p-2 lg:sticky lg:top-20 lg:self-start">
           {[
             ["perfil", "Perfil"],
@@ -447,9 +471,7 @@ export default function ConfigPage() {
         </nav>
 
         <div className="space-y-4">
-          {/* ============================================================
-              PERFIL
-              ============================================================ */}
+          {/* PERFIL */}
           <Section id="perfil" title="Perfil" desc="Suas informações pessoais.">
             <div className="flex items-center gap-4">
               <div className="relative">
@@ -498,9 +520,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* ============================================================
-              APARÊNCIA
-              ============================================================ */}
+          {/* APARÊNCIA */}
           <Section id="aparencia" title="Aparência" desc="Tema da interface.">
             <div className="grid grid-cols-3 gap-2">
               {([
@@ -524,9 +544,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* ============================================================
-              PLANO DE ESTUDOS (sem metas diárias/semanais)
-              ============================================================ */}
+          {/* PLANO DE ESTUDOS */}
           <Section id="estudo" title="Plano de estudos" desc="Configurações da sua prova-alvo.">
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label="Prova-alvo" defaultValue="ENARE Odontologia 2026" />
@@ -534,11 +552,8 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* ============================================================
-              DADOS E SINCRONIZAÇÃO
-              ============================================================ */}
+          {/* DADOS E SINCRONIZAÇÃO */}
           <Section id="dados" title="Dados e sincronização" desc="Importe flashcards, faça backup e gerencie seus dados.">
-            {/* Importar Anki */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-4">
               <h3 className="text-sm font-medium text-white mb-1 flex items-center gap-2">
                 <Upload className="h-4 w-4 text-primary" /> Importar flashcards do Anki
@@ -614,7 +629,6 @@ export default function ConfigPage() {
               )}
             </div>
 
-            {/* Backup */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-4">
               <h3 className="text-sm font-medium text-white mb-2 flex items-center gap-2">
                 <Database className="h-4 w-4 text-primary" /> Backup dos dados
@@ -650,9 +664,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* ============================================================
-              CONTA
-              ============================================================ */}
+          {/* CONTA */}
           <Section id="conta" title="Conta" desc="Encerrar sessão ou excluir conta.">
             <div className="flex flex-wrap gap-2">
               <button
@@ -694,27 +706,5 @@ function Input({ label, className, ...rest }: React.InputHTMLAttributes<HTMLInpu
       <span className="mb-1 block text-xs font-medium text-foreground/70">{label}</span>
       <input {...rest} className={`w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary placeholder:text-foreground/40 ${className || ''}`} />
     </label>
-  );
-}
-
-function Toggle({ label, desc, on, onChange, icon }: { label: string; desc?: string; on: boolean; onChange: (b: boolean) => void; icon?: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-background/30 p-3">
-      <div className="flex items-start gap-3">
-        {icon && <div className="mt-0.5 grid h-7 w-7 place-items-center rounded-md bg-primary/10 text-primary">{icon}</div>}
-        <div>
-          <div className="text-sm font-medium">{label}</div>
-          {desc && <div className="text-xs text-foreground/45">{desc}</div>}
-        </div>
-      </div>
-      <button
-        onClick={() => onChange(!on)}
-        role="switch"
-        aria-checked={on}
-        className={["relative h-5 w-9 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-white/10"].join(" ")}
-      >
-        <span className={["absolute top-0.5 grid h-4 w-4 place-items-center rounded-full bg-background shadow transition-all", on ? "left-[18px]" : "left-0.5"].join(" ")} />
-      </button>
-    </div>
   );
 }

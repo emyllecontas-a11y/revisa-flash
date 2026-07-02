@@ -5,7 +5,8 @@ import {
   Flame, LogOut, ChevronRight, User
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useUser, useClerk } from "@clerk/clerk-react"; // <-- CORRIGIDO
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 
@@ -46,55 +47,53 @@ export function AppShell({
   title?: string;
   breadcrumb?: string;
 }) {
-  const location = useLocation(); // <-- substitui useRouterState
+  const location = useLocation();
   const pathname = location.pathname;
   const navigate = useNavigate();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>("Usuário");
-  const [userAvatar, setUserAvatar] = useState<string | null>(null);
-  const [streak, setStreak] = useState(0);
 
+  // ============================================================
+  // CLERK
+  // ============================================================
+  const { user, isSignedIn, isLoaded } = useUser();
+  const { signOut } = useClerk();
+
+  // ============================================================
+  // NOME E AVATAR DO SUPABASE (fonte única)
+  // ============================================================
+  const [profileName, setProfileName] = useState<string>("Usuário");
+  const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user?.id) return;
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { data } = await supabaseClient
+          .from('profiles')
+          .select('name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (data?.name) setProfileName(data.name);
+        if (data?.avatar_url) setAvatarFromSupabase(data.avatar_url);
+      } catch (error) {
+        console.warn('Erro ao carregar perfil no AppShell:', error);
+        // Fallback para o Clerk
+        const fallbackName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+        setProfileName(fallbackName);
+      }
+    };
+    if (isLoaded) {
+      loadProfile();
+    }
+  }, [user, isLoaded]);
+
+  // ============================================================
+  // STREAK
+  // ============================================================
+  const [streak, setStreak] = useState(0);
   const studyContext = useStudy();
   const { records: studyRecords } = studyContext;
 
-  // ============================================================
-  // CARREGAR USUÁRIO
-  // ============================================================
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('name, avatar_url')
-            .eq('id', user.id)
-            .maybeSingle();
-
-          if (profile?.name) {
-            setUserName(profile.name);
-          } else {
-            const name = user.user_metadata?.name || user.email?.split('@')[0] || "Usuário";
-            setUserName(name);
-          }
-          if (profile?.avatar_url) {
-            setUserAvatar(profile.avatar_url);
-          }
-        } else {
-          const cachedName = localStorage.getItem('revisaflash_user_name');
-          if (cachedName) setUserName(cachedName);
-        }
-      } catch (e) {
-        console.warn('Erro ao carregar usuário:', e);
-      }
-    };
-    loadUser();
-  }, []);
-
-  // ============================================================
-  // CALCULAR STREAK
-  // ============================================================
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
       setStreak(0);
@@ -131,7 +130,7 @@ export function AppShell({
   const handleLogout = async () => {
     if (confirm("Deseja realmente sair?")) {
       localStorage.removeItem('revisaflash_user_id');
-      await supabase.auth.signOut();
+      await signOut();
       navigate('/login');
     }
   };
@@ -141,7 +140,6 @@ export function AppShell({
   // ============================================================
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Sidebar desktop */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-sidebar-border bg-sidebar lg:flex">
         <div className="flex items-center gap-2 px-6 py-5">
           <LogoIcon className="h-10 w-10" size={40} />
@@ -164,27 +162,27 @@ export function AppShell({
           ))}
         </nav>
 
-        {/* Perfil do usuário */}
+        {/* Perfil do usuário - com nome e avatar do Supabase */}
         <div className="border-t border-sidebar-border p-3">
           <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/5">
-            {userAvatar ? (
+            {avatarFromSupabase ? (
               <img
-                src={userAvatar}
-                alt={userName}
+                src={avatarFromSupabase}
+                alt={profileName}
                 className="h-9 w-9 rounded-full object-cover border border-border"
               />
             ) : (
               <div className="grid h-9 w-9 place-items-center rounded-full bg-accent/15 font-display text-xs font-semibold text-accent">
-                {userName.slice(0, 2).toUpperCase()}
+                {profileName.slice(0, 2).toUpperCase()}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-medium">{userName}</div>
+              <div className="truncate text-xs font-medium">{profileName}</div>
               <div className="truncate text-[10px] text-foreground/40">Estudante</div>
             </div>
             <button
               onClick={handleLogout}
-              className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground"
+              className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground transition-colors"
               aria-label="Sair"
             >
               <LogOut className="h-3.5 w-3.5" />
@@ -195,7 +193,6 @@ export function AppShell({
 
       {/* Main */}
       <div className="lg:pl-[248px]">
-        {/* Topbar */}
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Link to="/" className="flex items-center gap-2 lg:hidden">
@@ -230,7 +227,6 @@ export function AppShell({
           </div>
         </header>
 
-        {/* Page content */}
         <main className="rf-fade-in mx-auto w-full max-w-7xl px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
           {title && (
             <div className="mb-6 flex flex-col gap-1">
@@ -242,7 +238,6 @@ export function AppShell({
         </main>
       </div>
 
-      {/* Bottom nav mobile – com todas as rotas */}
       <BottomNav pathname={pathname} />
     </div>
   );
@@ -281,14 +276,14 @@ function NavItem({
 }
 
 // ============================================================
-// BOTTOM NAV (MOBILE) – COM TODAS AS ROTAS
+// BOTTOM NAV (MOBILE)
 // ============================================================
 function BottomNav({ pathname }: { pathname: string }) {
   const items = ROTAS;
 
   return (
     <nav className="fixed inset-x-3 bottom-3 z-40 lg:hidden">
-      <div className="mx-auto flex max-w-md items-center justify-around rounded-2xl border border-white/10 bg-surface/85 px-2 py-2 backdrop-blur-xl shadow-elevated">
+      <div className="mx-auto flex max-w-sm items-center justify-between rounded-2xl border border-white/10 bg-surface/85 px-1 py-1.5 backdrop-blur-xl shadow-elevated overflow-x-auto">
         {items.map((r) => {
           const Icon = ICONS[r.icon as RouteIcon];
           const active = pathname === r.to;
@@ -297,15 +292,15 @@ function BottomNav({ pathname }: { pathname: string }) {
               key={r.to}
               to={r.to}
               className={[
-                "flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition-colors",
+                "flex flex-col items-center gap-0 rounded-md px-1.5 py-1 transition-colors min-w-[40px]",
                 active ? "text-primary" : "text-foreground/45",
               ].join(" ")}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium">{r.label}</span>
+              <Icon className="h-4 w-4" />
+              <span className="text-[9px] font-medium leading-tight">{r.label}</span>
               <span
                 className={[
-                  "h-0.5 w-4 rounded-full transition-colors",
+                  "h-0.5 w-3 rounded-full transition-colors",
                   active ? "bg-primary" : "bg-transparent",
                 ].join(" ")}
               />

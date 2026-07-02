@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useMemo, useCallback, ReactNode, useEffect } from 'react';
 import { getDb, syncWithSupabase } from '@/lib/db';
-import { supabase, supabaseReady } from '@/lib/supabaseClient';
+import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { uid } from '@/utils/helpers';
 import { FSRSScheduler } from '@/lib/fsrs/scheduler';
 import type { CardState, Rating } from '@/lib/fsrs/types';
@@ -18,7 +18,7 @@ interface Deck {
   description: string;
   user_id: string;
   createdAt: string;
-  color?: string;           // 👈 NOVO: cor do deck (sincronizada)
+  color?: string;
   deletedAt?: string | null;
 }
 
@@ -42,10 +42,8 @@ interface Card {
   updatedAt: string;
 }
 
-// Metadados mantidos apenas para disciplina (não sincronizado)
 interface DeckMeta {
   disciplina?: string;
-  // cor removido - agora vem do deck
 }
 
 interface CardMeta {
@@ -97,7 +95,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const scheduler = useMemo(() => new FSRSScheduler(), []);
 
   // ============================================================
-  // METADADOS (LOCALSTORAGE) – apenas disciplina agora
+  // METADADOS (LOCALSTORAGE)
   // ============================================================
   const [deckMetas, setDeckMetas] = useState<Record<string, DeckMeta>>(() => {
     if (typeof window === 'undefined') return {};
@@ -178,7 +176,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ============================================================
-  // CARREGAR USUÁRIO E DADOS
+  // CARREGAR USUÁRIO (agora com Clerk)
   // ============================================================
   useEffect(() => {
     let isMounted = true;
@@ -188,26 +186,13 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         
         let userId: string | null = null;
 
-        try {
-          if (!supabaseReady) {
-            console.log('⏳ Aguardando Supabase ficar pronto...');
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          const { data: { user }, error } = await supabase.auth.getUser();
-          if (error) throw error;
-          if (user) {
-            userId = user.id;
-            localStorage.setItem('revisaflash_user_id', userId);
-            console.log('✅ Usuário autenticado via Supabase:', userId);
-          }
-        } catch (authError) {
-          const cachedId = localStorage.getItem('revisaflash_user_id');
-          if (cachedId) {
-            userId = cachedId;
-            console.log('✅ Usuário recuperado do cache local:', userId);
-          } else {
-            console.warn('⚠️ Sem usuário online e nenhum cache disponível.');
-          }
+        // Tenta pegar do localStorage (vem do Clerk)
+        const cachedId = localStorage.getItem('revisaflash_user_id');
+        if (cachedId) {
+          userId = cachedId;
+          console.log('✅ Usuário recuperado do cache local (Clerk):', userId);
+        } else {
+          console.warn('⚠️ Nenhum usuário disponível.');
         }
 
         if (isMounted && userId) {
@@ -302,10 +287,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [dueCards]);
 
   // ============================================================
-  // FUNÇÕES CRUD (COM COR)
+  // FUNÇÕES CRUD (COM TOKEN DO CLERK)
   // ============================================================
 
-  // --- CREATE DECK (com cor) ---
+  // --- CREATE DECK ---
   const createDeck = useCallback(async (name: string, description: string, color?: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
@@ -318,6 +303,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       name: name.trim(),
       description: description.trim() || '',
       createdAt: now,
+      updated_at: now,
       color: color || '#14B8A6',
       deletedAt: null
     };
@@ -327,7 +313,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     console.log('📚 [FlashcardContext] Deck criado localmente:', deckId);
 
     try {
-      const { error } = await supabase
+      const supabaseClient = await getSupabaseWithToken();
+      const { error } = await supabaseClient
         .from('decks')
         .insert(newDeck);
       if (error) throw error;
@@ -362,7 +349,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       name: 'Erros',
       description: 'Flashcards gerados a partir do banco de erros',
       createdAt: now,
-      color: '#FB7185', // cor especial para o deck de erros
+      updated_at: now,
+      color: '#FB7185',
       deletedAt: null
     };
     
@@ -370,7 +358,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     refreshFlashcards();
     
     try {
-      const { error } = await supabase
+      const supabaseClient = await getSupabaseWithToken();
+      const { error } = await supabaseClient
         .from('decks')
         .insert(newDeck);
       if (error) throw error;
@@ -390,7 +379,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
   }, [userId, refreshFlashcards]);
 
-  // --- ADD CARD (sem alterações) ---
+  // --- ADD CARD ---
   const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
@@ -427,7 +416,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     console.log('📇 [FlashcardContext] Card criado localmente:', cardId);
 
     try {
-      const { error } = await supabase
+      const supabaseClient = await getSupabaseWithToken();
+      const { error } = await supabaseClient
         .from('flashcards')
         .insert(newCard);
       if (error) throw error;
@@ -499,7 +489,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log(`✅ Card revisado: ${cardId} (rating: ${rating})`);
 
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('flashcards')
           .update(updatedData)
           .eq('id', cardId);
@@ -546,7 +537,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log('🗑️ [FlashcardContext] Deck marcado como deletado localmente:', deckId);
 
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('decks')
           .update({ deletedAt: now })
           .eq('id', deckId);
@@ -581,7 +573,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log('🗑️ [FlashcardContext] Card removido localmente:', cardId);
 
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('flashcards')
           .delete()
           .eq('id', cardId);
@@ -596,7 +589,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards]);
 
-  // --- RENAME DECK (com cor) ---
+  // --- RENAME DECK ---
   const renameDeck = useCallback(async (deckId: string, name: string, description: string, color?: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -607,7 +600,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (deck) {
       const updatedData: any = {
         name: name.trim(),
-        description: description.trim() || ''
+        description: description.trim() || '',
+        updated_at: new Date().toISOString()
       };
       if (color) {
         updatedData.color = color;
@@ -618,7 +612,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log('✏️ [FlashcardContext] Deck renomeado localmente:', deckId);
 
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('decks')
           .update(updatedData)
           .eq('id', deckId);
@@ -654,7 +649,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log('✏️ [FlashcardContext] Card editado localmente:', cardId);
 
       try {
-        const { error } = await supabase
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
           .from('flashcards')
           .update(updatedData)
           .eq('id', cardId);

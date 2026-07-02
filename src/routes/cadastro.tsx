@@ -1,14 +1,14 @@
-import { SignIn } from '@clerk/clerk-react';
+import { SignUp } from '@clerk/clerk-react'; // <-- CORRIGIDO
 import { useSearchParams } from 'react-router-dom';
 import { LogoIcon } from '@/components/LogoIcon';
 
-export default function LoginPage() {
+export default function CadastroPage() {
   const isDev = import.meta.env.DEV;
   const [searchParams] = useSearchParams();
   const redirectParam = searchParams.get('redirect');
 
-  // Define o destino após login: usa o parâmetro 'redirect' se existir, senão vai para '/'
-  const afterSignInUrl = redirectParam || '/';
+  // Define o destino após cadastro: usa o parâmetro 'redirect' se existir, senão vai para '/'
+  const afterSignUpUrl = redirectParam || '/';
 
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-background px-4 py-10">
@@ -18,11 +18,11 @@ export default function LoginPage() {
           <LogoIcon size={56} />
           <h1 className="font-display text-2xl font-semibold text-white">RevisaFlash</h1>
         </div>
-        <SignIn
+        <SignUp
           routing="path"
-          path="/login"
-          signUpUrl="/cadastro"
-          afterSignInUrl={afterSignInUrl}
+          path="/cadastro"
+          signInUrl="/login"
+          afterSignUpUrl={afterSignUpUrl}
           appearance={{
             variables: {
               colorPrimary: '#14B8A6',
