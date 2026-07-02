@@ -196,18 +196,20 @@ export default function DesempenhoPage() {
   // Verifica se há dados
   const hasData = metricas.questoesResolvidas > 0 || heatmap.some(s => s.some(v => v > 0));
 
-  if (!hasData) {
-    return (
-      <AppShell breadcrumb="Desempenho" title="Sua evolução">
+if (!hasData) {
+  return (
+    <AppShell breadcrumb="Desempenho" title="Sua evolução">
+      <div id="desempenho-header">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <p className="text-foreground/60 text-lg font-medium">Nenhum dado de desempenho ainda</p>
             <p className="text-foreground/40 text-sm mt-2">Comece a estudar e registre seu progresso para ver suas estatísticas aqui.</p>
           </div>
         </div>
-      </AppShell>
-    );
-  }
+      </div> 
+    </AppShell>
+  );
+}
 
   return (
     <AppShell breadcrumb="Desempenho" title="Sua evolução">

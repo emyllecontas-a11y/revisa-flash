@@ -1,5 +1,6 @@
-import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/clerk-react';
 import { Navigate } from 'react-router-dom';
+import { AccessExpired } from './AccessExpired';
 
 export function ClerkProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn, user } = useUser();
@@ -18,18 +19,18 @@ export function ClerkProtectedRoute({ children }: { children: React.ReactNode })
     return <Navigate to="/login" replace />;
   }
 
-  // 3. Verifica a assinatura nos metadados públicos do usuário
-  const subscription = user?.publicMetadata?.subscription as
-    | { status: string }
-    | undefined;
-  const status = subscription?.status;
+  // 3. Verifica o trial nos metadados públicos do usuário
+  const trialEndsAt = user?.publicMetadata?.trialEndsAt as string | undefined;
+  const now = new Date();
+  const trialDate = trialEndsAt ? new Date(trialEndsAt) : null;
 
-  // Acesso permitido se status for 'active' ou 'trialing'
-  const hasAccess = status === 'active' || status === 'trialing';
+  // Se não houver trialEndsAt, permite acesso (fallback para usuários existentes)
+  // Se houver, verifica se a data ainda é futura
+  const hasAccess = !trialDate || trialDate > now;
 
-  // 4. Se não tiver acesso (não assinou ou expirou), redireciona para a landing page (seção de planos)
+  // 4. Se não tiver acesso (trial expirado), mostra a tela de "Acesso Expirado"
   if (!hasAccess) {
-    return <Navigate to="/landing#planos" replace />;
+    return <AccessExpired />;
   }
 
   // 5. Se tiver acesso, renderiza o conteúdo

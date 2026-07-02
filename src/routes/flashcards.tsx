@@ -527,6 +527,7 @@ export default function FlashcardsPage() {
     // Lista de decks
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
+        <div id="flashcards-header">
         {errorMessage && (
           <div className={`mb-4 rounded-xl border p-3 text-sm ${errorMessage.includes("🎉") || errorMessage.includes("✅") ? "border-green-500/20 bg-green-500/20 text-green-400" : "border-red-500/20 bg-red-500/20 text-red-400"}`}>
             {errorMessage}
@@ -622,15 +623,15 @@ export default function FlashcardsPage() {
               );
             })}
           </div>
-        ) : (
+           ) : (
           <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
             <p className="text-sm text-foreground/40">Nenhum baralho criado. Clique em "Novo baralho" para começar.</p>
           </div>
         )}
-      </AppShell>
-    );
-  }
-
+      </div>
+    </AppShell>
+);
+}
   // ============================================================
   // RENDERIZAÇÃO FINAL (conteúdo + modais)
   // ============================================================

@@ -10,6 +10,7 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useUser } from "@clerk/clerk-react";
 import { getDb } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
+import { OnboardingTour } from "@/components/OnboardingTour"; // <-- ADICIONADO
 
 // ============================================================
 // TIPOS
@@ -273,6 +274,9 @@ export default function DashboardPage() {
 
   return (
     <AppShell breadcrumb="Início" title={`${getSaudacao()}, ${userName.split(" ")[0]}.`}>
+      {/* TOUR DE ONBOARDING */}
+      <OnboardingTour />
+
       <p className="-mt-4 mb-8 max-w-2xl text-sm text-foreground/55">
         Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
         e <span className="font-medium text-accent">{diasAteProva} dias</span> até a prova.
@@ -281,13 +285,15 @@ export default function DashboardPage() {
       {/* Bento grid */}
       <div className="grid grid-cols-12 gap-4">
         {/* Stat cards */}
-        <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
-        <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
-        <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Erros ativos" value={totalErros} hint="banco de erros" tone="accent" />
-        <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint="ENARE 2026" />
+        <div id="dashboard-stats" className="col-span-12 grid grid-cols-12 gap-4">
+          <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
+          <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
+          <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Erros ativos" value={totalErros} hint="banco de erros" tone="accent" />
+          <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint="ENARE 2026" />
+        </div>
 
         {/* Checklist */}
-        <section className="col-span-12 rf-card p-5 lg:col-span-5">
+        <section id="dashboard-checklist" className="col-span-12 rf-card p-5 lg:col-span-5">
           <header className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Checklist de hoje</h2>
@@ -362,7 +368,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Flashcards devidos hoje */}
-        <section className="col-span-12 rf-card p-5 lg:col-span-7">
+        <section id="dashboard-flashcards" className="col-span-12 rf-card p-5 lg:col-span-7">
           <header className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Flashcards hoje</h2>
@@ -406,7 +412,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Disciplinas mini */}
-        <section className="col-span-12 rf-card p-5 lg:col-span-7">
+        <section id="dashboard-progress" className="col-span-12 rf-card p-5 lg:col-span-7">
           <header className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Progresso por disciplina</h2>
@@ -437,7 +443,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Próximas revisões */}
-        <section className="col-span-12 rf-card p-5 lg:col-span-5">
+        <section id="dashboard-reviews" className="col-span-12 rf-card p-5 lg:col-span-5">
           <header className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-base font-semibold">Próximas revisões</h2>
             <Link to="/calendario" className="text-xs font-medium text-primary hover:underline">Ver agenda</Link>

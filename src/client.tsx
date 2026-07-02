@@ -168,14 +168,13 @@ function Root() {
 }
 
 const App = () => (
-  <ClerkProvider
-    publishableKey={PUBLISHABLE_KEY}
-    localization={ptBR}
-    signInUrl="/login"
-    signUpUrl="/cadastro"
-    afterSignInUrl="/"
-    afterSignUpUrl="/"
-    __experimental_billing={{ enabled: true }}  // <-- ATIVA O BILLING
+<ClerkProvider
+  publishableKey={PUBLISHABLE_KEY}
+  localization={ptBR}
+  signInUrl="/login"
+  signUpUrl="/cadastro"
+  fallbackRedirectUrl="/"
+  __experimental_billing={{ enabled: true }}
     appearance={{
       cssLayerName: 'clerk',
       variables: {

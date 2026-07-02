@@ -200,6 +200,7 @@ export default function ErrosPage() {
     return (
       <>
         <AppShell breadcrumb="Erros" title="Banco de erros por grande área">
+          <div id="erros-header">
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Kpi label="Total ativos" value={totalErrors} accent />
             <Kpi label="Áreas com erro" value={areaStats.filter(a => a.errors > 0).length} />
@@ -266,7 +267,8 @@ export default function ErrosPage() {
               );
             })}
           </div>
-        </AppShell>
+    </div>
+  </AppShell>
 
         {isCreateModalOpen && (
           <CreateErrorModal

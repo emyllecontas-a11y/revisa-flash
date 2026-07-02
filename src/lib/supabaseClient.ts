@@ -15,18 +15,54 @@ export const supabaseReady = true;
 console.log('✅ Supabase client inicializado!');
 
 // ============================================================
-// FUNÇÃO PARA OBTER O TOKEN DO CLERK (com fallback)
+// CACHE DO CLIENTE SUPABASE COM TOKEN
+// ============================================================
+let cachedSupabaseClient: any = null;
+let cachedToken: string | null = null;
+
+// ============================================================
+// FUNÇÃO PARA OBTER O TOKEN DO CLERK (via window.Clerk)
 // ============================================================
 export const getClerkToken = async (): Promise<string | null> => {
   try {
     // Verifica se estamos no navegador
     if (typeof window === 'undefined') return null;
-    
-    // Importa dinamicamente para evitar dependência circular
-    const { getToken } = await import("@clerk/clerk-react");
-    const token = await getToken({ template: 'supabase' })
-    console.log('🔑 Token do Clerk obtido com sucesso!');
-    return token;
+
+    // Tenta obter o token via window.Clerk
+    const clerk = (window as any).Clerk;
+    if (!clerk) {
+      console.warn('⚠️ Clerk não carregado globalmente.');
+      return null;
+    }
+
+    // Obtém a sessão ativa
+    const session = clerk.session;
+    if (!session) {
+      console.warn('⚠️ Nenhuma sessão ativa no Clerk.');
+      return null;
+    }
+
+    // Obtém o token (usando o template "supabase" se existir)
+    try {
+      const token = await session.getToken({ template: 'supabase' });
+      if (token) {
+        console.log('🔑 Token do Clerk obtido com sucesso!');
+        return token;
+      }
+    } catch (e) {
+      // Fallback: tenta sem template
+      console.warn('⚠️ Falha ao obter token com template supabase, tentando sem template...');
+    }
+
+    // Fallback: pega token sem template
+    const fallbackToken = await session.getToken();
+    if (fallbackToken) {
+      console.log('🔑 Token do Clerk obtido (fallback) com sucesso!');
+      return fallbackToken;
+    }
+
+    console.warn('⚠️ Nenhum token disponível.');
+    return null;
   } catch (error) {
     console.warn('⚠️ Erro ao obter token do Clerk:', error);
     return null;
@@ -34,24 +70,35 @@ export const getClerkToken = async (): Promise<string | null> => {
 };
 
 // ============================================================
-// FUNÇÃO PARA CRIAR UM CLIENTE SUPABASE COM O TOKEN DO CLERK
+// FUNÇÃO PARA CRIAR UM CLIENTE SUPABASE COM O TOKEN DO CLERK (COM CACHE)
 // ============================================================
 export const getSupabaseWithToken = async () => {
   const token = await getClerkToken();
   if (!token) {
     console.warn('⚠️ Nenhum token do Clerk disponível. Usando cliente anônimo.');
+    cachedSupabaseClient = null;
+    cachedToken = null;
     return supabase;
   }
 
-  console.log('✅ Criando cliente Supabase com token do Clerk');
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
+  // Se o token mudou, recria o cliente
+  if (cachedToken !== token || !cachedSupabaseClient) {
+    console.log('✅ Criando novo cliente Supabase com token do Clerk');
+    cachedToken = token;
+    cachedSupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       },
-    },
-  });
+    });
+  } else {
+    console.log('♻️ Reutilizando cliente Supabase com token (cache)');
+  }
+
+  return cachedSupabaseClient;
 };
+
 // ============================================================
 // WRAPPERS PARA OPERAÇÕES COM AUTENTICAÇÃO
 // ============================================================

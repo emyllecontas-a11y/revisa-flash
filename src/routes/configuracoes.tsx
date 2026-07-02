@@ -4,9 +4,9 @@ import {
   Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
   Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
-  Camera
+  Camera, HelpCircle
 } from "lucide-react";
-import { useUser, useClerk } from "@clerk/clerk-react"; // <-- CORRIGIDO
+import { useUser, useClerk } from "@clerk/clerk-react";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
@@ -440,6 +440,17 @@ export default function ConfigPage() {
   }, [signOut]);
 
   // ============================================================
+  // REABRIR TOUR DE ONBOARDING
+  // ============================================================
+  const reabrirTour = useCallback(() => {
+    if (!user?.id) return;
+    if (confirm("Deseja reabrir o tour de boas-vindas? Isso vai recarregar a página.")) {
+      localStorage.removeItem(`tour_completed_${user.id}`);
+      window.location.reload();
+    }
+  }, [user]);
+
+  // ============================================================
   // RENDER
   // ============================================================
   return (
@@ -665,13 +676,19 @@ export default function ConfigPage() {
           </Section>
 
           {/* CONTA */}
-          <Section id="conta" title="Conta" desc="Encerrar sessão ou excluir conta.">
+          <Section id="conta" title="Conta" desc="Encerrar sessão, reabrir tour ou excluir conta.">
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleLogout}
                 className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm font-medium hover:bg-white/5 transition-colors"
               >
                 <LogOut className="h-4 w-4" /> Sair
+              </button>
+              <button
+                onClick={reabrirTour}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm font-medium hover:bg-white/5 transition-colors"
+              >
+                <HelpCircle className="h-4 w-4" /> Reabrir tour
               </button>
               <button className="inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/15 transition-colors">
                 <Trash2 className="h-4 w-4" /> Excluir conta

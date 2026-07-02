@@ -20,13 +20,11 @@ import {
   Chrome,
 } from "lucide-react";
 import { useState } from "react";
-import { useUser, PricingTable } from "@clerk/clerk-react";
+import { useUser } from "@clerk/clerk-react";
 
 export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { isLoaded, isSignedIn } = useUser();
-
-  const isLoading = !isLoaded;
+  const { isSignedIn } = useUser();
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -62,13 +60,13 @@ export default function LandingPage() {
                 Entrar
               </Link>
             )}
-            <a
-              href="#planos"
+            <Link
+              to="/cadastro"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_10px_30px_-10px_rgba(20,184,166,0.6)] hover:bg-primary/90 transition"
             >
               Começar teste grátis
               <ArrowRight className="h-4 w-4" />
-            </a>
+            </Link>
           </div>
 
           <button
@@ -103,9 +101,9 @@ export default function LandingPage() {
                   <Link to="/login" className="flex-1 rounded-md border border-border px-3 py-2 text-center text-sm">
                     Entrar
                   </Link>
-                  <a href="#planos" className="flex-1 rounded-md bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
+                  <Link to="/cadastro" className="flex-1 rounded-md bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
                     Testar grátis
-                  </a>
+                  </Link>
                 </>
               )}
             </div>
@@ -138,13 +136,13 @@ export default function LandingPage() {
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <a
-                  href="#planos"
+                <Link
+                  to="/cadastro"
                   className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
                 >
                   Teste grátis por 30 dias
                   <ArrowRight className="h-4 w-4" />
-                </a>
+                </Link>
                 <a
                   href="#funcionalidades"
                   className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-medium hover:bg-muted transition"
@@ -298,7 +296,7 @@ export default function LandingPage() {
           </ol>
         </section>
 
-        {/* ⭐ SEÇÃO DE PLANOS – SUBSTITUÍDA PELO <PricingTable /> */}
+        {/* Planos - simplificado */}
         <section id="planos" className="mx-auto max-w-7xl px-6 py-20">
           <SectionHeader
             kicker="Planos"
@@ -306,7 +304,40 @@ export default function LandingPage() {
             subtitle="Acesso completo a tudo durante o teste. Sem cartão. Sem limites. Sem pegadinhas."
           />
           <div className="mt-14 flex justify-center">
-            <PricingTable />
+            <div className="relative rf-card p-8 max-w-md w-full border-primary/40 shadow-[0_30px_80px_-30px_rgba(20,184,166,0.45)]">
+              <div className="absolute -top-3 right-6 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
+                Teste grátis
+              </div>
+              <div className="flex items-center gap-2 text-xs font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                Plano Pro
+              </div>
+              <h3 className="mt-3 font-display text-2xl font-semibold">30 dias grátis</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Acesso completo a todas as funcionalidades. Sem cartão. Sem compromisso.
+              </p>
+              <ul className="mt-6 space-y-3 text-sm">
+                {[
+                  "Flashcards FSRS ilimitados",
+                  "Banco de erros e revisões DSM30",
+                  "Anexos e sincronização multi-dispositivo",
+                  "Suporte prioritário",
+                  "Cancelamento a qualquer momento",
+                ].map((f) => (
+                  <li key={f} className="flex items-start gap-2">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                to="/cadastro"
+                className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
+              >
+                Começar teste grátis
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -364,7 +395,7 @@ export default function LandingPage() {
             </p>
             <div className="relative mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                to="/login"
+                to="/cadastro"
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
               >
                 Começar teste grátis

@@ -5,10 +5,11 @@ import {
   Flame, LogOut, ChevronRight, User
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useUser, useClerk } from "@clerk/clerk-react"; // <-- CORRIGIDO
+import { useUser, useClerk } from "@clerk/clerk-react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
+import { OnboardingTour } from "@/components/OnboardingTour";
 
 // ============================================================
 // ROTAS
@@ -140,6 +141,9 @@ export function AppShell({
   // ============================================================
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* TOUR DE ONBOARDING – aparece em todas as páginas */}
+      <OnboardingTour />
+
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-sidebar-border bg-sidebar lg:flex">
         <div className="flex items-center gap-2 px-6 py-5">
           <LogoIcon className="h-10 w-10" size={40} />
@@ -229,7 +233,7 @@ export function AppShell({
 
         <main className="rf-fade-in mx-auto w-full max-w-7xl px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
           {title && (
-            <div className="mb-6 flex flex-col gap-1">
+            <div id={`${breadcrumb?.toLowerCase() || 'page'}-header`} className="mb-6 flex flex-col gap-1">
               {breadcrumb && <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">{breadcrumb}</span>}
               <h1 className="font-display text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{title}</h1>
             </div>

@@ -645,7 +645,7 @@ export default function ConteudoPage() {
             </div>
           )}
 
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div id="conteudo-header" className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               {([
                 ["todas", "Todas"],

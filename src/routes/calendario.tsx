@@ -484,6 +484,7 @@ if (userId && newStatus !== currentStatus) {
 
     return (
       <AppShell breadcrumb="Calendário" title="Agenda de estudos">
+        <div id="calendario-header">
         {salvo && (
           <div className="mb-4 rounded-xl border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
             ✅ Estudo registrado com sucesso!
@@ -710,9 +711,10 @@ if (userId && newStatus !== currentStatus) {
             </div>
           </aside>
         </div>
-      </AppShell>
-    );
-  }
+      </div>     {/* <-- FECHA O id="calendario-header" */}
+    </AppShell>
+  );
+}
 
   // ============================================================
   // RENDER: REGISTRAR ESTUDO (COM SELECTS DE DISCIPLINA E TÓPICO)

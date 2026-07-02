@@ -36,7 +36,7 @@ export const router = createBrowserRouter([
     element: <Login />,
   },
   {
-    path: '/cadastro',
+    path: '/cadastro/*', // <-- CORRIGIDO: agora aceita sub-rotas como /cadastro/verify-email-address
     element: <Cadastro />,
   },
   {
