@@ -76,8 +76,9 @@ interface FlashcardContextType {
   getCardMeta: (cardId: string) => CardMeta;
   setCardMeta: (cardId: string, meta: CardMeta) => void;
   getCardHistory: (cardId: string) => any[];
-  // 🔥 NOVA FUNÇÃO ADICIONADA
   getAllCardsByDeck: (deckId: string) => Promise<any[]>;
+  // 🔥 NOVA FUNÇÃO PARA ACESSAR TODOS OS FLASHCARDS
+  getAllFlashcards: () => Card[];
 }
 
 const FlashcardContext = createContext<FlashcardContextType | undefined>(undefined);
@@ -151,14 +152,14 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const loadLocalData = useCallback(async (db: any, userId: string) => {
     try {
       console.log('📥 [loadLocalData] Buscando decks do usuário:', userId);
-      
+
       const decksResult = await db.decks.find({
         selector: {
           user_id: userId,
           deletedAt: { $eq: null }
         }
       }).exec();
-      
+
       const decksData = decksResult.map((doc: any) => doc.toJSON());
       console.log(`📊 [loadLocalData] Encontrados ${decksData.length} decks.`);
       setDecksData(decksData);
@@ -178,7 +179,14 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ============================================================
-  // 🔥 NOVA FUNÇÃO: BUSCAR TODOS OS CARDS DE UM DECK
+  // 🔥 FUNÇÃO PARA ACESSAR TODOS OS FLASHCARDS (SINCRONA)
+  // ============================================================
+  const getAllFlashcards = useCallback(() => {
+    return allFlashcards;
+  }, [allFlashcards]);
+
+  // ============================================================
+  // 🔥 FUNÇÃO PARA BUSCAR CARDS DE UM DECK ESPECÍFICO
   // ============================================================
   const getAllCardsByDeck = useCallback(async (deckId: string): Promise<any[]> => {
     try {
@@ -201,7 +209,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const loadUser = async () => {
       try {
         console.log('🔍 [FlashcardContext] Iniciando carregamento do usuário...');
-        
+
         let userId: string | null = null;
 
         // Tenta pegar do localStorage (vem do Clerk)
@@ -257,7 +265,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const deckIds = new Set(decksData.map(d => d.id));
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     return allFlashcards
       .filter(c => {
         if (!deckIds.has(c.deck_id)) return false;
@@ -314,7 +322,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const now = new Date().toISOString();
     const deckId = uid();
     const db = await getDb();
-    
+
     const newDeck = {
       id: deckId,
       user_id: userId,
@@ -325,7 +333,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       color: color || '#14B8A6',
       deletedAt: null
     };
-    
+
     await db.decks.insert(newDeck);
     refreshFlashcards();
     console.log('📚 [FlashcardContext] Deck criado localmente:', deckId);
@@ -347,18 +355,18 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const getOrCreateErrorDeck = useCallback(async (): Promise<Deck> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
-    
+
     const existing = await db.decks.findOne({
-      selector: { 
+      selector: {
         user_id: userId,
         name: 'Erros'
       }
     }).exec();
-    
+
     if (existing) {
       return existing.toJSON() as Deck;
     }
-    
+
     const now = new Date().toISOString();
     const deckId = uid();
     const newDeck = {
@@ -371,10 +379,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       color: '#FB7185',
       deletedAt: null
     };
-    
+
     await db.decks.insert(newDeck);
     refreshFlashcards();
-    
+
     try {
       const supabaseClient = await getSupabaseWithToken();
       const { error } = await supabaseClient
@@ -386,14 +394,14 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.warn('⚠️ [FlashcardContext] Falha ao sincronizar deck "Erros", enfileirando.');
       await enqueueOperation('create', 'decks', newDeck);
     }
-    
-    return { 
-      id: deckId, 
-      user_id: userId, 
-      name: 'Erros', 
+
+    return {
+      id: deckId,
+      user_id: userId,
+      name: 'Erros',
       createdAt: now,
       color: '#FB7185',
-      description: 'Flashcards gerados a partir do banco de erros' 
+      description: 'Flashcards gerados a partir do banco de erros'
     };
   }, [userId, refreshFlashcards]);
 
@@ -405,7 +413,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const db = await getDb();
 
     const fsrsCard = scheduler.createCard(front.trim(), back.trim(), deckId);
-    
+
     const newCard = {
       id: cardId,
       deck_id: deckId,
@@ -425,7 +433,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       createdAt: now,
       updatedAt: now
     };
-    
+
     await db.flashcards.insert(newCard);
     if (meta) {
       setCardMeta(cardId, meta);
@@ -444,7 +452,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.warn('⚠️ [FlashcardContext] Falha ao sincronizar card, enfileirando.');
       await enqueueOperation('create', 'flashcards', newCard);
     }
-    
+
     return cardId;
   }, [userId, refreshFlashcards, setCardMeta, scheduler]);
 
@@ -464,7 +472,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
 
       const cardData = doc.toJSON();
-      
+
       const fsrsCard: CardState = {
         id: cardData.id,
         deck_id: cardData.deck_id,
@@ -499,8 +507,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       };
 
       await doc.incrementalPatch(updatedData);
-      
-      setAllFlashcards(prev => prev.map(c => 
+
+      setAllFlashcards(prev => prev.map(c =>
         c.id === cardId ? { ...c, ...updatedData } : c
       ));
 
@@ -576,7 +584,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const deleteCard = useCallback(async (cardId: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
-    
+
     const card = await db.flashcards.findOne({
       selector: { id: cardId }
     }).exec();
@@ -611,7 +619,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const renameDeck = useCallback(async (deckId: string, name: string, description: string, color?: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
-    
+
     const deck = await db.decks.findOne({
       selector: { id: deckId }
     }).exec();
@@ -624,7 +632,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       if (color) {
         updatedData.color = color;
       }
-      
+
       await deck.patch(updatedData);
       refreshFlashcards();
       console.log('✏️ [FlashcardContext] Deck renomeado localmente:', deckId);
@@ -648,7 +656,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
-    
+
     const card = await db.flashcards.findOne({
       selector: { id: cardId }
     }).exec();
@@ -658,7 +666,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         back: back.trim(),
         updatedAt: new Date().toISOString()
       };
-      
+
       await card.patch(updatedData);
       if (meta) {
         setCardMeta(cardId, meta);
@@ -713,8 +721,9 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     getCardMeta,
     setCardMeta,
     getCardHistory,
-    // 🔥 NOVA FUNÇÃO EXPORTADA
     getAllCardsByDeck,
+    // 🔥 NOVA FUNÇÃO EXPORTADA
+    getAllFlashcards,
   }), [
     refreshFlashcards,
     dueCards,
@@ -737,6 +746,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     setCardMeta,
     getCardHistory,
     getAllCardsByDeck,
+    getAllFlashcards,
   ]);
 
   return (

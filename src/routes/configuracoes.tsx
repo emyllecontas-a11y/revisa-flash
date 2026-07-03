@@ -4,7 +4,7 @@ import {
   Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
   Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
-  Camera, HelpCircle, Save
+  Camera, HelpCircle, Save, Loader2
 } from "lucide-react";
 import { useUser, useClerk } from "@clerk/clerk-react";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
@@ -39,6 +39,9 @@ export default function ConfigPage() {
   const [provaData, setProvaData] = useState<string>("2026-09-13");
   const [salvandoProva, setSalvandoProva] = useState(false);
   
+  // 🔥 ESTADO PARA EXCLUIR CONTA
+  const [deletandoConta, setDeletandoConta] = useState(false);
+
   // Importar Anki
   const [importando, setImportando] = useState(false);
   const [importPreview, setImportPreview] = useState<any[]>([]);
@@ -59,7 +62,6 @@ export default function ConfigPage() {
       try {
         if (!isLoaded) return;
         
-        // Obtém o userId do Clerk
         const clerkUserId = user?.id || null;
         if (!clerkUserId) {
           console.warn('Nenhum usuário Clerk encontrado.');
@@ -70,7 +72,6 @@ export default function ConfigPage() {
         setUserEmail(user?.emailAddresses?.[0]?.emailAddress || '');
         setUserName(user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário');
 
-        // Carregar perfil do Supabase usando o userId do Clerk
         const supabaseClient = await getSupabaseWithToken();
         const { data: profile, error } = await supabaseClient
           .from('profiles')
@@ -91,7 +92,6 @@ export default function ConfigPage() {
             localStorage.setItem('tema', profile.theme);
             aplicarTema(profile.theme);
           }
-          // 🔥 CARREGAR DADOS DO PLANO DE ESTUDOS
           if (profile.prova_nome) setProvaNome(profile.prova_nome);
           if (profile.prova_data) setProvaData(profile.prova_data);
         }
@@ -109,7 +109,6 @@ export default function ConfigPage() {
       setTema(temaSalvo);
       aplicarTema(temaSalvo);
     } else {
-      // Tema padrão: escuro
       aplicarTema('escuro');
     }
   }, []);
@@ -144,7 +143,7 @@ export default function ConfigPage() {
   };
 
   // ============================================================
-  // 🔥 SALVAR PLANO DE ESTUDOS
+  // SALVAR PLANO DE ESTUDOS
   // ============================================================
   const handleSaveProva = useCallback(async () => {
     if (!userId) {
@@ -175,8 +174,6 @@ export default function ConfigPage() {
 
       setMensagem("✅ Plano de estudos atualizado com sucesso!");
       setMensagemTipo('success');
-      
-      // Atualizar o dashboard também, mas como é uma página separada, vamos apenas mostrar a mensagem
       setTimeout(() => setMensagem(""), 4000);
     } catch (error: any) {
       console.error('Erro ao salvar plano de estudos:', error);
@@ -188,7 +185,7 @@ export default function ConfigPage() {
   }, [userId, provaNome, provaData]);
 
   // ============================================================
-  // UPLOAD DE FOTO DE PERFIL (CORRIGIDO DEFINITIVAMENTE)
+  // UPLOAD DE FOTO DE PERFIL
   // ============================================================
   const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -256,7 +253,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // ATUALIZAR NOME (usando Clerk e Supabase)
+  // ATUALIZAR NOME
   // ============================================================
   const handleUpdateName = useCallback(async (nome: string) => {
     if (!userId || !nome.trim()) return;
@@ -487,15 +484,95 @@ export default function ConfigPage() {
   }, [signOut]);
 
   // ============================================================
-  // REABRIR TOUR DE ONBOARDING
+  // 🔥 REABRIR TOUR DE ONBOARDING (CORRIGIDO)
   // ============================================================
   const reabrirTour = useCallback(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setMensagem("⚠️ Usuário não identificado.");
+      setMensagemTipo('warning');
+      return;
+    }
     if (confirm("Deseja reabrir o tour de boas-vindas? Isso vai recarregar a página.")) {
+      // Remove a chave de conclusão do tour
       localStorage.removeItem(`tour_completed_${user.id}`);
+      // Também remove qualquer outra chave que o tour possa usar
+      localStorage.removeItem('onboarding_completed');
+      // Recarrega a página para reexibir o tour
       window.location.reload();
     }
   }, [user]);
+
+  // ============================================================
+  // 🔥 EXCLUIR CONTA (CORRIGIDO)
+  // ============================================================
+  const handleDeleteAccount = useCallback(async () => {
+    if (!userId) {
+      setMensagem("❌ Usuário não autenticado.");
+      setMensagemTipo('error');
+      return;
+    }
+
+    const confirmar = confirm(
+      "⚠️ ATENÇÃO: Essa ação é irreversível!\n\n" +
+      "Todos os seus dados serão permanentemente excluídos, incluindo:\n" +
+      "- Flashcards e decks\n" +
+      "- Erros registrados\n" +
+      "- Progresso de estudos\n" +
+      "- Plano de estudos\n\n" +
+      "Deseja realmente excluir sua conta?"
+    );
+
+    if (!confirmar) return;
+
+    setDeletandoConta(true);
+    setMensagem("");
+
+    try {
+      // 1. Marca o perfil como excluído no Supabase (soft delete)
+      const supabaseClient = await getSupabaseWithToken();
+      const { error: updateError } = await supabaseClient
+        .from('profiles')
+        .upsert({ 
+          id: userId, 
+          deleted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select();
+
+      if (updateError) throw updateError;
+
+      // 2. Remove todos os dados locais (limpa o localStorage)
+      const keysToRemove = [
+        'revisaflash_user_id',
+        'revisaflash_user_name',
+        'eot_decks',
+        'eot_flashcards',
+        'eot_errors',
+        'eot_disciplines',
+        'eot_revisoes_conteudo',
+        'eot_study_history',
+        'dashboard_checklist',
+        'eot_deck_metas',
+        'eot_card_metas',
+        `tour_completed_${userId}`,
+        'onboarding_completed'
+      ];
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+
+      // 3. Faz logout do Clerk
+      await signOut();
+
+      // 4. Redireciona para a página inicial
+      window.location.href = '/login';
+
+    } catch (error: any) {
+      console.error('❌ Erro ao excluir conta:', error);
+      setMensagem("❌ Erro ao excluir conta: " + (error.message || 'Erro desconhecido'));
+      setMensagemTipo('error');
+    } finally {
+      setDeletandoConta(false);
+    }
+  }, [userId, signOut]);
 
   // ============================================================
   // RENDER
@@ -602,7 +679,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* 🔥 PLANO DE ESTUDOS (EDITÁVEL) */}
+          {/* PLANO DE ESTUDOS (EDITÁVEL) */}
           <Section id="estudo" title="Plano de estudos" desc="Configurações da sua prova-alvo.">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -633,7 +710,7 @@ export default function ConfigPage() {
               >
                 {salvandoProva ? (
                   <>
-                    <span className="inline-block animate-spin">⟳</span> Salvando...
+                    <Loader2 className="h-4 w-4 animate-spin" /> Salvando...
                   </>
                 ) : (
                   <>
@@ -771,8 +848,20 @@ export default function ConfigPage() {
               >
                 <HelpCircle className="h-4 w-4" /> Reabrir tour
               </button>
-              <button className="inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/15 transition-colors">
-                <Trash2 className="h-4 w-4" /> Excluir conta
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deletandoConta}
+                className="inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletandoConta ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" /> Excluir conta
+                  </>
+                )}
               </button>
             </div>
           </Section>

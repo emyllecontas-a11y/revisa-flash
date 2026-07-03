@@ -1,4 +1,4 @@
-// src/routes/flashcards.tsx
+// src/routes/flashcards.tsx (ou src/pages/FlashcardsPage.tsx)
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
@@ -10,6 +10,7 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
 
 export default function FlashcardsPage() {
+  const flashcardContext = useFlashcardContext();
   const { 
     decks, 
     dueCards, 
@@ -27,8 +28,9 @@ export default function FlashcardsPage() {
     getCardMeta,
     setCardMeta,
     getCardHistory,
-    getAllCardsByDeck, // ← nova função que você adicionou no contexto
-  } = useFlashcardContext();
+    getAllCardsByDeck,
+    getAllFlashcards, // 🔥 NOVA FUNÇÃO
+  } = flashcardContext;
 
   // ============================================================
   // ESTADOS PRINCIPAIS
@@ -47,7 +49,7 @@ export default function FlashcardsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [isRating, setIsRating] = useState(false); // proteção para os botões de avaliação
+  const [isRating, setIsRating] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
@@ -73,7 +75,7 @@ export default function FlashcardsPage() {
   const [renameDescription, setRenameDescription] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
 
-  // 🔥 NOVOS ESTADOS PARA LISTA DE CARDS
+  // 🔥 ESTADOS PARA LISTA DE CARDS
   const [filterStatus, setFilterStatus] = useState<"todos" | "para_revisar">("todos");
   const [allCardsInDeck, setAllCardsInDeck] = useState<any[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
@@ -108,7 +110,7 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, getAllCardsByDeck]);
 
   // ============================================================
-  // FILTRAR CARDS
+  // FILTRAR CARDS (dentro do deck)
   // ============================================================
   const deckCards = useMemo(() => {
     if (filterStatus === "todos") {
@@ -143,8 +145,12 @@ export default function FlashcardsPage() {
   const dueCount = deckCardsDue.length;
   const novos = deckCardsDue.filter(c => c.reps === 0).length;
 
+  // ============================================================
+  // 🔥 FUNÇÃO PARA ESTATÍSTICAS DOS DECKS (USANDO getAllFlashcards)
+  // ============================================================
   const getDeckStats = useCallback((deckId: string) => {
-    const cards = allCardsInDeck.filter((c) => c.deck_id === deckId);
+    const allFlashcards = getAllFlashcards();
+    const cards = allFlashcards.filter((c) => c.deck_id === deckId);
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
     const due = cards.filter(c => {
@@ -157,7 +163,7 @@ export default function FlashcardsPage() {
       due: due.length,
       novos: cards.filter(c => c.reps === 0).length,
     };
-  }, [allCardsInDeck]);
+  }, [getAllFlashcards]);
 
   const getStatusBadge = (reps: number, dueDate?: string) => {
     if (reps === 0) return { label: "Novo", className: "bg-primary/15 text-primary" };
@@ -172,7 +178,7 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE FORMATAÇÃO (sem alterações)
+  // FUNÇÕES DE FORMATAÇÃO
   // ============================================================
   const applyFormatting = (
     ref: React.RefObject<HTMLTextAreaElement>, 
@@ -202,7 +208,7 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE CRUD (com proteção contra múltiplos cliques)
+  // FUNÇÕES DE CRUD
   // ============================================================
   const handleCreateDeck = useCallback(async () => {
     if (!deckName.trim()) {
@@ -243,7 +249,6 @@ export default function FlashcardsPage() {
     try {
       setIsSaving(true);
       await addCard(selectedDeckId, newCardFrente.trim(), newCardVerso.trim());
-      // Buscar o card recém-criado para adicionar metadados
       const allCards = await getAllCardsByDeck(selectedDeckId);
       const newCard = allCards.find(c => c.front === newCardFrente.trim() && c.deck_id === selectedDeckId);
       if (newCard && newCardTopico.trim()) {
@@ -257,7 +262,6 @@ export default function FlashcardsPage() {
       }
       setErrorMessage("");
       refreshFlashcards();
-      // Recarregar a lista de cards do deck
       const updatedCards = await getAllCardsByDeck(selectedDeckId);
       setAllCardsInDeck(updatedCards);
     } catch (error: any) {
@@ -287,7 +291,6 @@ export default function FlashcardsPage() {
       setEditTopico("");
       setErrorMessage("");
       refreshFlashcards();
-      // Recarregar a lista de cards do deck
       if (selectedDeckId) {
         const updatedCards = await getAllCardsByDeck(selectedDeckId);
         setAllCardsInDeck(updatedCards);
@@ -356,21 +359,18 @@ export default function FlashcardsPage() {
     }
   }, [selectedDeckId, renameName, renameDescription, deckDisciplina, renameDeck, decks, setDeckMeta]);
 
-  // 🔥 FUNÇÃO DE AVALIAÇÃO COM PROTEÇÃO
   const handleRating = useCallback(async (rating: Rating) => {
-    if (isRating) return; // impede múltiplos cliques
+    if (isRating) return;
     if (!currentCard) return;
     
     setIsRating(true);
     try {
       const result = await reviewCard(currentCard.id, rating);
       if (result) {
-        // Recarregar a lista de cards do deck
         if (selectedDeckId) {
           const updatedCards = await getAllCardsByDeck(selectedDeckId);
           setAllCardsInDeck(updatedCards);
         }
-        // Avançar para o próximo card devido
         if (currentCardIndex < deckCardsDue.length - 1) {
           setCurrentCardIndex((prev) => prev + 1);
           setVirado(false);
@@ -402,7 +402,6 @@ export default function FlashcardsPage() {
     if (isStarting) return;
     setIsStarting(true);
     try {
-      // Carregar todos os cards do deck para calcular os devidos
       const cards = await getAllCardsByDeck(deckId);
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
@@ -686,12 +685,7 @@ export default function FlashcardsPage() {
       );
     }
   } else {
-    // Lista de decks
-    const deckStatsForList = decks.map(d => ({
-      ...d,
-      ...getDeckStats(d.id),
-    }));
-
+    // 🔥 LISTAGEM DE DECKS (USA getDeckStats com getAllFlashcards)
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
@@ -708,13 +702,14 @@ export default function FlashcardsPage() {
         </div>
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Mini icon={<Layers className="h-4 w-4" />} l="Decks" v={decks?.length || 0} />
-          <Mini icon={<Sparkles className="h-4 w-4" />} l="Cards totais" v={totalCards} />
-          <Mini l="Para revisar" v={dueCount} tone="accent" />
-          <Mini l="Novos" v={novos} />
+          <Mini icon={<Sparkles className="h-4 w-4" />} l="Cards totais" v={stats.totalCards} />
+          <Mini l="Para revisar" v={stats.dueCards} tone="accent" />
+          <Mini l="Novos" v={dueCards.filter(c => c.reps === 0).length} />
         </div>
         {decks && decks.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2">
             {decks.map((deck) => {
+              // 🔥 Usa a função corrigida com getAllFlashcards
               const stats = getDeckStats(deck.id);
               const meta = getDeckMeta(deck.id);
               const deckColor = deck.color || '#14B8A6';
@@ -800,6 +795,7 @@ export default function FlashcardsPage() {
     </AppShell>
 );
 }
+
   // ============================================================
   // RENDERIZAÇÃO FINAL (conteúdo + modais)
   // ============================================================
