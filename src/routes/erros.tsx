@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
   Plus, X, AlertTriangle, Filter, ChevronLeft, Pencil, Trash2, 
-  RotateCw, Sparkles, Settings, Check, Circle
+  RotateCw, Sparkles, Settings, Check, Circle, Loader2
 } from "lucide-react";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useErrorSync } from "@/hooks/useErrorSync";
@@ -20,6 +20,11 @@ export default function ErrosPage() {
   const [isAreaModalOpen, setIsAreaModalOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState("");
   const [newAreaIcon, setNewAreaIcon] = useState("📚");
+
+  // 🔥 ESTADOS DE CARREGAMENTO
+  const [isSavingCreate, setIsSavingCreate] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [incrementingId, setIncrementingId] = useState<string | null>(null);
 
   // Contexto de erros
   const errorContext = useErrors();
@@ -69,65 +74,90 @@ export default function ErrosPage() {
   });
 
   // ============================================================
-  // FUNÇÕES
+  // FUNÇÕES (COM PROTEÇÃO CONTRA MÚLTIPLOS CLIQUES)
   // ============================================================
   const handleCreateError = async () => {
+    // Impede múltiplos cliques
+    if (isSavingCreate) return;
+
     if (!newError.question.trim() || !newError.correctAnswer.trim()) {
       alert('Preencha a questão e a resposta correta.');
       return;
     }
-    const errorData = {
-      question: newError.question.trim(),
-      correctAnswer: newError.correctAnswer.trim(),
-      yourAnswer: newError.yourAnswer.trim() || undefined,
-      area: newError.area || selectedArea || 'Não categorizado',
-      topic: newError.topic.trim() || undefined,
-      type: newError.type,
-      source: newError.source.trim() || undefined,
-      comment: newError.comment.trim() || undefined,
-    };
-    const createdError = await addError(errorData);
-    
-    if (newError.createFlashcard) {
-      const syncedError = await syncAddError(createdError);
-      if (syncedError.flashcardId) {
-        await editError(syncedError.id, { flashcardId: syncedError.flashcardId });
+
+    setIsSavingCreate(true);
+
+    try {
+      const errorData = {
+        question: newError.question.trim(),
+        correctAnswer: newError.correctAnswer.trim(),
+        yourAnswer: newError.yourAnswer.trim() || undefined,
+        area: newError.area || selectedArea || 'Não categorizado',
+        topic: newError.topic.trim() || undefined,
+        type: newError.type,
+        source: newError.source.trim() || undefined,
+        comment: newError.comment.trim() || undefined,
+      };
+      const createdError = await addError(errorData);
+      
+      if (newError.createFlashcard) {
+        const syncedError = await syncAddError(createdError);
+        if (syncedError.flashcardId) {
+          await editError(syncedError.id, { flashcardId: syncedError.flashcardId });
+        }
       }
+      
+      setIsCreateModalOpen(false);
+      setNewError({
+        area: '',
+        question: '',
+        correctAnswer: '',
+        yourAnswer: '',
+        type: 'Conceito',
+        topic: '',
+        source: '',
+        comment: '',
+        createFlashcard: true,
+      });
+    } catch (error) {
+      console.error('Erro ao criar erro:', error);
+      alert('Erro ao salvar. Tente novamente.');
+    } finally {
+      setIsSavingCreate(false);
     }
-    
-    setIsCreateModalOpen(false);
-    setNewError({
-      area: '',
-      question: '',
-      correctAnswer: '',
-      yourAnswer: '',
-      type: 'Conceito',
-      topic: '',
-      source: '',
-      comment: '',
-      createFlashcard: true,
-    });
   };
 
   const handleEditError = async () => {
+    // Impede múltiplos cliques
+    if (isSavingEdit) return;
     if (!editingError) return;
     if (!editForm.question.trim() || !editForm.correctAnswer.trim()) {
       alert('Preencha a questão e a resposta correta.');
       return;
     }
-    const updatedData = {
-      question: editForm.question.trim(),
-      correctAnswer: editForm.correctAnswer.trim(),
-      yourAnswer: editForm.yourAnswer.trim() || undefined,
-      type: editForm.type,
-      topic: editForm.topic.trim() || undefined,
-      comment: editForm.comment.trim() || undefined,
-    };
-    await editError(editingError.id, updatedData);
-    const updatedError = { ...editingError, ...updatedData };
-    await syncEditError(updatedError);
-    setIsEditModalOpen(false);
-    setEditingError(null);
+
+    setIsSavingEdit(true);
+
+    try {
+      const updatedData = {
+        question: editForm.question.trim(),
+        correctAnswer: editForm.correctAnswer.trim(),
+        yourAnswer: editForm.yourAnswer.trim() || undefined,
+        type: editForm.type,
+        topic: editForm.topic.trim() || undefined,
+        comment: editForm.comment.trim() || undefined,
+      };
+      await editError(editingError.id, updatedData);
+      const updatedError = { ...editingError, ...updatedData };
+      await syncEditError(updatedError);
+      setIsEditModalOpen(false);
+      setEditingError(null);
+    } catch (error) {
+      console.error('Erro ao editar erro:', error);
+      alert('Erro ao salvar alterações. Tente novamente.');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleDeleteError = async (id: string) => {
@@ -143,12 +173,22 @@ export default function ErrosPage() {
     }
   };
 
-  const handleIncrementRepetition = (id: string) => {
-    const error = records.find(e => e.id === id);
-    if (error) {
-      editError(id, {
-        repetitions: (error.repetitions || 0) + 1,
-      });
+  const handleIncrementRepetition = async (id: string) => {
+    // Impede múltiplos cliques no mesmo erro
+    if (incrementingId === id) return;
+
+    setIncrementingId(id);
+    try {
+      const error = records.find(e => e.id === id);
+      if (error) {
+        await editError(id, {
+          repetitions: (error.repetitions || 0) + 1,
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao incrementar repetição:', error);
+    } finally {
+      setIncrementingId(null);
     }
   };
 
@@ -279,6 +319,7 @@ export default function ErrosPage() {
             setNewError={setNewError}
             selectedArea={null}
             areas={areaStats.map(a => a.name)}
+            isSaving={isSavingCreate}
           />
         )}
 
@@ -393,11 +434,16 @@ export default function ErrosPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => handleIncrementRepetition(error.id)}
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-accent/50 hover:text-accent"
+                      disabled={incrementingId === error.id}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-accent/50 hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label="Marcar reincidência"
                       title="Marcar que você errou novamente"
                     >
-                      <RotateCw className="h-3.5 w-3.5" />
+                      {incrementingId === error.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCw className="h-3.5 w-3.5" />
+                      )}
                     </button>
                     <button
                       onClick={() => openEditModal(error)}
@@ -430,6 +476,7 @@ export default function ErrosPage() {
             setNewError={setNewError}
             selectedArea={selectedArea}
             areas={getAreaStats().map(a => a.name)}
+            isSaving={isSavingCreate}
           />
         )}
 
@@ -445,6 +492,7 @@ export default function ErrosPage() {
             editForm={editForm}
             setEditForm={setEditForm}
             editingError={editingError}
+            isSaving={isSavingEdit}
           />
         )}
       </>
@@ -455,7 +503,7 @@ export default function ErrosPage() {
 }
 
 // ============================================================
-// MODAL GERENCIAMENTO DE ÁREAS
+// MODAL GERENCIAMENTO DE ÁREAS (sem alterações)
 // ============================================================
 function AreaManagementModal({
   isOpen,
@@ -550,7 +598,7 @@ function AreaManagementModal({
 }
 
 // ============================================================
-// MODAL DE CRIAÇÃO DE ERRO (com checkbox para flashcard)
+// MODAL DE CRIAÇÃO DE ERRO (com proteção)
 // ============================================================
 function CreateErrorModal({
   isOpen,
@@ -560,6 +608,7 @@ function CreateErrorModal({
   setNewError,
   selectedArea,
   areas,
+  isSaving,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -568,6 +617,7 @@ function CreateErrorModal({
   setNewError: (data: any) => void;
   selectedArea: string | null;
   areas: string[];
+  isSaving: boolean;
 }) {
   if (!isOpen) return null;
 
@@ -659,8 +709,21 @@ function CreateErrorModal({
           </div>
         </div>
         <footer className="flex items-center justify-end gap-2 border-t border-border bg-background/30 p-4">
-          <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-foreground/65 hover:bg-white/5">Cancelar</button>
-          <button onClick={onSave} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">Salvar erro</button>
+          <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-foreground/65 hover:bg-white/5" disabled={isSaving}>Cancelar</button>
+          <button
+            onClick={onSave}
+            disabled={isSaving}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              'Salvar erro'
+            )}
+          </button>
         </footer>
       </div>
     </div>
@@ -668,7 +731,7 @@ function CreateErrorModal({
 }
 
 // ============================================================
-// MODAL DE EDIÇÃO DE ERRO
+// MODAL DE EDIÇÃO DE ERRO (com proteção)
 // ============================================================
 function EditErrorModal({
   isOpen,
@@ -678,6 +741,7 @@ function EditErrorModal({
   editForm,
   setEditForm,
   editingError,
+  isSaving,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -686,6 +750,7 @@ function EditErrorModal({
   editForm: any;
   setEditForm: (data: any) => void;
   editingError: ErrorRecord;
+  isSaving: boolean;
 }) {
   if (!isOpen) return null;
 
@@ -769,12 +834,26 @@ function EditErrorModal({
           <button
             onClick={onDelete}
             className="inline-flex items-center gap-1 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent hover:bg-accent/10"
+            disabled={isSaving}
           >
             <Trash2 className="h-3.5 w-3.5" /> Excluir
           </button>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-foreground/65 hover:bg-white/5">Cancelar</button>
-            <button onClick={onSave} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">Salvar alterações</button>
+            <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-foreground/65 hover:bg-white/5" disabled={isSaving}>Cancelar</button>
+            <button
+              onClick={onSave}
+              disabled={isSaving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Salvar alterações'
+              )}
+            </button>
           </div>
         </footer>
       </div>
@@ -783,7 +862,7 @@ function EditErrorModal({
 }
 
 // ============================================================
-// COMPONENTES AUXILIARES
+// COMPONENTES AUXILIARES (sem alterações)
 // ============================================================
 
 function Kpi({ label, value, accent }: { label: string; value: number; accent?: boolean }) {

@@ -2,8 +2,55 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>RevisaFlash</title>
+
+    <!-- ========================================================== -->
+    <!-- MANIFEST DO PWA (obrigatório para o ícone na tela inicial) -->
+    <!-- ========================================================== -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- ========================================================== -->
+    <!-- ÍCONES PARA DISPOSITIVOS MÓVEIS                            -->
+    <!-- ========================================================== -->
+    <!-- Ícone para dispositivos Apple (iOS) -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    
+    <!-- Favicon padrão (aparece na aba do navegador) -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512x512.png" />
+
+    <!-- ========================================================== -->
+    <!-- CORES DO TEMA (para a barra de navegação do navegador)     -->
+    <!-- ========================================================== -->
+    <meta name="theme-color" content="#0B0F1F" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="RevisaFlash" />
+
+    <!-- ========================================================== -->
+    <!-- DESCRIÇÃO E METADADOS (SEO)                               -->
+    <!-- ========================================================== -->
+    <meta name="description" content="Plataforma de estudos com flashcards, banco de erros, plano de estudos e revisões programadas." />
+    <meta name="keywords" content="flashcards, estudos, residência médica, concursos, revisão, plano de estudos" />
+    <meta name="author" content="RevisaFlash" />
+
+    <!-- ========================================================== -->
+    <!-- OPEN GRAPH (para compartilhamento em redes sociais)        -->
+    <!-- ========================================================== -->
+    <meta property="og:title" content="RevisaFlash" />
+    <meta property="og:description" content="Estude com flashcards, gerencie erros e acompanhe seu progresso." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/icons/icon-512x512.png" />
+
+    <!-- ========================================================== -->
+    <!-- TWEET CARD (para compartilhamento no Twitter/X)           -->
+    <!-- ========================================================== -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="RevisaFlash" />
+    <meta name="twitter:description" content="Estude com flashcards, gerencie erros e acompanhe seu progresso." />
+    <meta name="twitter:image" content="/icons/icon-512x512.png" />
   </head>
   <body>
     <div id="root"></div>

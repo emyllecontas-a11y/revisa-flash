@@ -4,7 +4,7 @@ import {
   Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
   Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
-  Camera, HelpCircle
+  Camera, HelpCircle, Save
 } from "lucide-react";
 import { useUser, useClerk } from "@clerk/clerk-react";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
@@ -33,6 +33,11 @@ export default function ConfigPage() {
   const [mensagem, setMensagem] = useState("");
   const [mensagemTipo, setMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
   const [uploading, setUploading] = useState(false);
+  
+  // 🔥 NOVOS ESTADOS PARA PLANO DE ESTUDOS
+  const [provaNome, setProvaNome] = useState<string>("ENARE Odontologia 2026");
+  const [provaData, setProvaData] = useState<string>("2026-09-13");
+  const [salvandoProva, setSalvandoProva] = useState(false);
   
   // Importar Anki
   const [importando, setImportando] = useState(false);
@@ -69,7 +74,7 @@ export default function ConfigPage() {
         const supabaseClient = await getSupabaseWithToken();
         const { data: profile, error } = await supabaseClient
           .from('profiles')
-          .select('name, avatar_url, theme')
+          .select('name, avatar_url, theme, prova_nome, prova_data')
           .eq('id', clerkUserId)
           .maybeSingle();
 
@@ -86,6 +91,9 @@ export default function ConfigPage() {
             localStorage.setItem('tema', profile.theme);
             aplicarTema(profile.theme);
           }
+          // 🔥 CARREGAR DADOS DO PLANO DE ESTUDOS
+          if (profile.prova_nome) setProvaNome(profile.prova_nome);
+          if (profile.prova_data) setProvaData(profile.prova_data);
         }
       } catch (e) {
         console.warn('Erro ao carregar usuário:', e);
@@ -136,6 +144,50 @@ export default function ConfigPage() {
   };
 
   // ============================================================
+  // 🔥 SALVAR PLANO DE ESTUDOS
+  // ============================================================
+  const handleSaveProva = useCallback(async () => {
+    if (!userId) {
+      setMensagem("❌ Usuário não autenticado.");
+      setMensagemTipo('error');
+      return;
+    }
+    if (!provaNome.trim()) {
+      setMensagem("⚠️ Digite o nome da prova.");
+      setMensagemTipo('warning');
+      return;
+    }
+
+    setSalvandoProva(true);
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+      const { error } = await supabaseClient
+        .from('profiles')
+        .upsert({
+          id: userId,
+          prova_nome: provaNome.trim(),
+          prova_data: provaData,
+          updated_at: new Date().toISOString()
+        })
+        .select();
+
+      if (error) throw error;
+
+      setMensagem("✅ Plano de estudos atualizado com sucesso!");
+      setMensagemTipo('success');
+      
+      // Atualizar o dashboard também, mas como é uma página separada, vamos apenas mostrar a mensagem
+      setTimeout(() => setMensagem(""), 4000);
+    } catch (error: any) {
+      console.error('Erro ao salvar plano de estudos:', error);
+      setMensagem("❌ Erro ao salvar: " + (error.message || 'Erro desconhecido'));
+      setMensagemTipo('error');
+    } finally {
+      setSalvandoProva(false);
+    }
+  }, [userId, provaNome, provaData]);
+
+  // ============================================================
   // UPLOAD DE FOTO DE PERFIL (CORRIGIDO DEFINITIVAMENTE)
   // ============================================================
   const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,10 +216,8 @@ export default function ConfigPage() {
       const fileExt = file.name.split('.').pop();
       const fileName = `${userId}/${Date.now()}.${fileExt}`;
 
-      // 👇 OBTÉM O CLIENTE AUTENTICADO UMA ÚNICA VEZ
       const supabaseClient = await getSupabaseWithToken();
 
-      // 👇 FAZ O UPLOAD COM O CLIENTE AUTENTICADO
       const { error: uploadError } = await supabaseClient.storage
         .from('avatars')
         .upload(fileName, file, {
@@ -177,14 +227,12 @@ export default function ConfigPage() {
 
       if (uploadError) throw uploadError;
 
-      // 👇 OBTÉM A URL PÚBLICA (não precisa de autenticação, mas usamos o mesmo cliente)
       const { data: urlData } = supabaseClient.storage
         .from('avatars')
         .getPublicUrl(fileName);
 
       const avatarUrl = urlData.publicUrl;
 
-      // 👇 ATUALIZA A TABELA PROFILES COM O MESMO CLIENTE
       const { error: updateError } = await supabaseClient
         .from('profiles')
         .upsert({ id: userId, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
@@ -196,7 +244,6 @@ export default function ConfigPage() {
       setMensagem('✅ Foto de perfil atualizada com sucesso!');
       setMensagemTipo('success');
       
-      // Recarregar a página para atualizar o sidebar
       setTimeout(() => window.location.reload(), 1500);
     } catch (error: any) {
       console.error('Erro ao fazer upload:', error);
@@ -555,11 +602,45 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* PLANO DE ESTUDOS */}
+          {/* 🔥 PLANO DE ESTUDOS (EDITÁVEL) */}
           <Section id="estudo" title="Plano de estudos" desc="Configurações da sua prova-alvo.">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Input label="Prova-alvo" defaultValue="ENARE Odontologia 2026" />
-              <Input label="Data da prova" type="date" defaultValue="2026-09-13" />
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground/70">Prova-alvo *</label>
+                <input
+                  type="text"
+                  value={provaNome}
+                  onChange={(e) => setProvaNome(e.target.value)}
+                  placeholder="Ex: ENARE Odontologia 2026"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground/70">Data da prova *</label>
+                <input
+                  type="date"
+                  value={provaData}
+                  onChange={(e) => setProvaData(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                onClick={handleSaveProva}
+                disabled={salvandoProva}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
+              >
+                {salvandoProva ? (
+                  <>
+                    <span className="inline-block animate-spin">⟳</span> Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" /> Salvar plano
+                  </>
+                )}
+              </button>
             </div>
           </Section>
 

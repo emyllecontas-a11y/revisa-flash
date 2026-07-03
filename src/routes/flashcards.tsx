@@ -1,10 +1,10 @@
 // src/routes/flashcards.tsx
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit, 
   CheckCircle, Search, Filter, Pencil, X, Bold, Italic, List,
-  History, AlertTriangle
+  History, AlertTriangle, Loader2
 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
@@ -27,6 +27,7 @@ export default function FlashcardsPage() {
     getCardMeta,
     setCardMeta,
     getCardHistory,
+    getAllCardsByDeck, // ← nova função que você adicionou no contexto
   } = useFlashcardContext();
 
   // ============================================================
@@ -46,7 +47,10 @@ export default function FlashcardsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  
+  const [isRating, setIsRating] = useState(false); // proteção para os botões de avaliação
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+
   // Deck form
   const [deckName, setDeckName] = useState("");
   const [deckDescription, setDeckDescription] = useState("");
@@ -68,7 +72,12 @@ export default function FlashcardsPage() {
   const [renameName, setRenameName] = useState("");
   const [renameDescription, setRenameDescription] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
-  
+
+  // 🔥 NOVOS ESTADOS PARA LISTA DE CARDS
+  const [filterStatus, setFilterStatus] = useState<"todos" | "para_revisar">("todos");
+  const [allCardsInDeck, setAllCardsInDeck] = useState<any[]>([]);
+  const [loadingCards, setLoadingCards] = useState(false);
+
   // Refs
   const editFrenteRef = useRef<HTMLTextAreaElement>(null);
   const editVersoRef = useRef<HTMLTextAreaElement>(null);
@@ -76,31 +85,94 @@ export default function FlashcardsPage() {
   const newVersoRef = useRef<HTMLTextAreaElement>(null);
 
   // ============================================================
-  // VARIÁVEIS DERIVADAS
+  // CARREGAR TODOS OS CARDS AO ABRIR UM DECK
   // ============================================================
-  const deckCards = dueCards.filter((c) => c.deck_id === selectedDeckId);
-  const currentCard = deckCards[currentCardIndex] || null;
+  useEffect(() => {
+    if (!selectedDeckId) {
+      setAllCardsInDeck([]);
+      return;
+    }
+    const loadAllCards = async () => {
+      setLoadingCards(true);
+      try {
+        const cards = await getAllCardsByDeck(selectedDeckId);
+        setAllCardsInDeck(cards);
+      } catch (error) {
+        console.error('Erro ao carregar cards:', error);
+        setErrorMessage('Erro ao carregar cards');
+      } finally {
+        setLoadingCards(false);
+      }
+    };
+    loadAllCards();
+  }, [selectedDeckId, getAllCardsByDeck]);
+
+  // ============================================================
+  // FILTRAR CARDS
+  // ============================================================
+  const deckCards = useMemo(() => {
+    if (filterStatus === "todos") {
+      return allCardsInDeck;
+    } else {
+      // "para_revisar": cards com dueDate <= hoje OU novos (reps === 0)
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      return allCardsInDeck.filter(c => {
+        const due = new Date(c.dueDate);
+        due.setHours(0, 0, 0, 0);
+        return c.reps === 0 || due <= hoje;
+      });
+    }
+  }, [allCardsInDeck, filterStatus]);
+
+  // ============================================================
+  // VARIÁVEIS DERIVADAS (para o modo de estudo)
+  // ============================================================
+  const deckCardsDue = useMemo(() => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    return allCardsInDeck.filter(c => {
+      const due = new Date(c.dueDate);
+      due.setHours(0, 0, 0, 0);
+      return c.reps === 0 || due <= hoje;
+    });
+  }, [allCardsInDeck]);
+
+  const currentCard = deckCardsDue[currentCardIndex] || null;
   const totalCards = stats.totalCards;
-  const dueCount = stats.dueCards;
-  const novos = dueCards.filter(c => c.reps === 0).length;
+  const dueCount = deckCardsDue.length;
+  const novos = deckCardsDue.filter(c => c.reps === 0).length;
 
   const getDeckStats = useCallback((deckId: string) => {
-    const cards = dueCards.filter((c) => c.deck_id === deckId);
+    const cards = allCardsInDeck.filter((c) => c.deck_id === deckId);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const due = cards.filter(c => {
+      const dueDate = new Date(c.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      return c.reps === 0 || dueDate <= hoje;
+    });
     return {
       total: cards.length,
-      due: cards.filter((c) => c.reps === 0 || new Date(c.dueDate) <= new Date()).length,
-      novos: cards.filter((c) => c.reps === 0).length,
+      due: due.length,
+      novos: cards.filter(c => c.reps === 0).length,
     };
-  }, [dueCards]);
+  }, [allCardsInDeck]);
 
   const getStatusBadge = (reps: number, dueDate?: string) => {
     if (reps === 0) return { label: "Novo", className: "bg-primary/15 text-primary" };
-    if (dueDate && new Date(dueDate) <= new Date()) return { label: "Para revisar", className: "bg-accent/10 text-accent" };
+    if (dueDate) {
+      const due = new Date(dueDate);
+      due.setHours(0, 0, 0, 0);
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      if (due <= hoje) return { label: "Para revisar", className: "bg-accent/10 text-accent" };
+    }
     return { label: "Revisado", className: "bg-white/5 text-foreground/55" };
   };
 
   // ============================================================
-  // FUNÇÕES DE FORMATAÇÃO
+  // FUNÇÕES DE FORMATAÇÃO (sem alterações)
   // ============================================================
   const applyFormatting = (
     ref: React.RefObject<HTMLTextAreaElement>, 
@@ -130,7 +202,7 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE CRUD
+  // FUNÇÕES DE CRUD (com proteção contra múltiplos cliques)
   // ============================================================
   const handleCreateDeck = useCallback(async () => {
     if (!deckName.trim()) {
@@ -140,16 +212,11 @@ export default function FlashcardsPage() {
     try {
       setIsSaving(true);
       setErrorMessage("");
-      
-      // Cria o deck com a cor selecionada
       await createDeck(deckName.trim(), deckDescription.trim(), deckCor);
-      
-      // Busca o deck recém-criado para adicionar a disciplina (metadado local)
       const newDeck = decks.find(d => d.name === deckName.trim());
       if (newDeck) {
         setDeckMeta(newDeck.id, { disciplina: deckDisciplina });
       }
-      
       setDeckName("");
       setDeckDescription("");
       setDeckDisciplina("");
@@ -176,7 +243,9 @@ export default function FlashcardsPage() {
     try {
       setIsSaving(true);
       await addCard(selectedDeckId, newCardFrente.trim(), newCardVerso.trim());
-      const newCard = dueCards.find(c => c.front === newCardFrente.trim() && c.deck_id === selectedDeckId);
+      // Buscar o card recém-criado para adicionar metadados
+      const allCards = await getAllCardsByDeck(selectedDeckId);
+      const newCard = allCards.find(c => c.front === newCardFrente.trim() && c.deck_id === selectedDeckId);
       if (newCard && newCardTopico.trim()) {
         setCardMeta(newCard.id, { topico: newCardTopico.trim() });
       }
@@ -188,13 +257,16 @@ export default function FlashcardsPage() {
       }
       setErrorMessage("");
       refreshFlashcards();
+      // Recarregar a lista de cards do deck
+      const updatedCards = await getAllCardsByDeck(selectedDeckId);
+      setAllCardsInDeck(updatedCards);
     } catch (error: any) {
       console.error("❌ Erro ao adicionar flashcard:", error);
       setErrorMessage("Erro ao adicionar flashcard: " + (error.message || "Erro desconhecido"));
     } finally {
       setIsSaving(false);
     }
-  }, [selectedDeckId, newCardFrente, newCardVerso, newCardTopico, addCard, setCardMeta, dueCards, refreshFlashcards]);
+  }, [selectedDeckId, newCardFrente, newCardVerso, newCardTopico, addCard, setCardMeta, refreshFlashcards, getAllCardsByDeck]);
 
   const handleEditCard = useCallback(async () => {
     if (!editCardId) return;
@@ -215,13 +287,18 @@ export default function FlashcardsPage() {
       setEditTopico("");
       setErrorMessage("");
       refreshFlashcards();
+      // Recarregar a lista de cards do deck
+      if (selectedDeckId) {
+        const updatedCards = await getAllCardsByDeck(selectedDeckId);
+        setAllCardsInDeck(updatedCards);
+      }
     } catch (error: any) {
       console.error("❌ Erro ao editar card:", error);
       setErrorMessage("Erro ao editar card: " + (error.message || "Erro desconhecido"));
     } finally {
       setIsSaving(false);
     }
-  }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards]);
+  }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards, selectedDeckId, getAllCardsByDeck]);
 
   const handleDeleteDeck = useCallback(async (deckId: string) => {
     if (!confirm("Tem certeza que deseja excluir este baralho e todos os seus flashcards?")) return;
@@ -241,11 +318,15 @@ export default function FlashcardsPage() {
     if (!confirm("Tem certeza que deseja excluir este flashcard?")) return;
     try {
       await deleteCard(cardId);
+      if (selectedDeckId) {
+        const updatedCards = await getAllCardsByDeck(selectedDeckId);
+        setAllCardsInDeck(updatedCards);
+      }
     } catch (error: any) {
       console.error("❌ Erro ao deletar flashcard:", error);
       setErrorMessage("Erro ao deletar flashcard: " + (error.message || "Erro desconhecido"));
     }
-  }, [deleteCard]);
+  }, [deleteCard, selectedDeckId, getAllCardsByDeck]);
 
   const handleRenameDeck = useCallback(async () => {
     if (!selectedDeckId || !renameName.trim()) {
@@ -255,18 +336,12 @@ export default function FlashcardsPage() {
     try {
       setIsRenaming(true);
       setErrorMessage("");
-      
-      // Obtém a cor atual do deck para manter
       const deck = decks.find(d => d.id === selectedDeckId);
       const currentColor = deck?.color || "#14B8A6";
-      
       await renameDeck(selectedDeckId, renameName.trim(), renameDescription.trim(), currentColor);
-      
-      // Atualiza a disciplina se fornecida
       if (deckDisciplina.trim()) {
         setDeckMeta(selectedDeckId, { disciplina: deckDisciplina.trim() });
       }
-      
       setIsRenameModalOpen(false);
       setRenameName("");
       setRenameDescription("");
@@ -281,40 +356,78 @@ export default function FlashcardsPage() {
     }
   }, [selectedDeckId, renameName, renameDescription, deckDisciplina, renameDeck, decks, setDeckMeta]);
 
+  // 🔥 FUNÇÃO DE AVALIAÇÃO COM PROTEÇÃO
   const handleRating = useCallback(async (rating: Rating) => {
+    if (isRating) return; // impede múltiplos cliques
     if (!currentCard) return;
-    const result = await reviewCard(currentCard.id, rating);
-    if (result) {
-      if (currentCardIndex < deckCards.length - 1) {
-        setCurrentCardIndex((prev) => prev + 1);
-        setVirado(false);
-      } else {
-        setModo("concluido");
-        setVirado(false);
+    
+    setIsRating(true);
+    try {
+      const result = await reviewCard(currentCard.id, rating);
+      if (result) {
+        // Recarregar a lista de cards do deck
+        if (selectedDeckId) {
+          const updatedCards = await getAllCardsByDeck(selectedDeckId);
+          setAllCardsInDeck(updatedCards);
+        }
+        // Avançar para o próximo card devido
+        if (currentCardIndex < deckCardsDue.length - 1) {
+          setCurrentCardIndex((prev) => prev + 1);
+          setVirado(false);
+        } else {
+          setModo("concluido");
+          setVirado(false);
+        }
       }
+    } catch (error) {
+      console.error("Erro ao avaliar card:", error);
+    } finally {
+      setIsRating(false);
     }
-  }, [currentCard, currentCardIndex, deckCards, reviewCard]);
+  }, [isRating, currentCard, reviewCard, selectedDeckId, getAllCardsByDeck, currentCardIndex, deckCardsDue]);
 
-  const voltarDaConclusao = useCallback(() => {
+  const voltarDaConclusao = useCallback(async () => {
     setModo("decks");
     setSelectedDeckId(null);
     setCurrentCardIndex(0);
     setVirado(false);
     refreshFlashcards();
-  }, [refreshFlashcards]);
-
-  const iniciarEstudo = useCallback((deckId: string) => {
-    const cards = dueCards.filter((c) => c.deck_id === deckId);
-    if (cards.length === 0) {
-      setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
-      setTimeout(() => setErrorMessage(""), 3000);
-      return;
+    if (selectedDeckId) {
+      const updatedCards = await getAllCardsByDeck(selectedDeckId);
+      setAllCardsInDeck(updatedCards);
     }
-    setSelectedDeckId(deckId);
-    setCurrentCardIndex(0);
-    setVirado(false);
-    setModo("estudo");
-  }, [dueCards]);
+  }, [refreshFlashcards, selectedDeckId, getAllCardsByDeck]);
+
+  const iniciarEstudo = useCallback(async (deckId: string) => {
+    if (isStarting) return;
+    setIsStarting(true);
+    try {
+      // Carregar todos os cards do deck para calcular os devidos
+      const cards = await getAllCardsByDeck(deckId);
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      const due = cards.filter(c => {
+        const dueDate = new Date(c.dueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        return c.reps === 0 || dueDate <= hoje;
+      });
+      if (due.length === 0) {
+        setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
+        setTimeout(() => setErrorMessage(""), 3000);
+        setIsStarting(false);
+        return;
+      }
+      setSelectedDeckId(deckId);
+      setCurrentCardIndex(0);
+      setVirado(false);
+      setModo("estudo");
+    } catch (error) {
+      console.error("Erro ao iniciar estudo:", error);
+      setErrorMessage("Erro ao iniciar estudo");
+    } finally {
+      setIsStarting(false);
+    }
+  }, [getAllCardsByDeck, isStarting]);
 
   const voltarParaDecks = useCallback(() => {
     setSelectedDeckId(null);
@@ -331,7 +444,7 @@ export default function FlashcardsPage() {
   }, [getCardMeta]);
 
   // ============================================================
-  // RENDERIZAÇÃO DO CONTEÚDO PRINCIPAL (sem modais)
+  // RENDERIZAÇÃO
   // ============================================================
   let conteudo = null;
 
@@ -348,10 +461,10 @@ export default function FlashcardsPage() {
         <div className="mx-auto max-w-2xl">
           <div className="mb-4 flex items-center justify-between text-xs">
             <span className="font-medium uppercase tracking-widest text-primary">{deck?.name || "Estudo"}</span>
-            <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {deckCards.length}</span>
+            <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {deckCardsDue.length}</span>
           </div>
           <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/5">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / deckCards.length) * 100}%` }} />
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / deckCardsDue.length) * 100}%` }} />
           </div>
           <button
             onClick={() => setVirado((v) => !v)}
@@ -373,10 +486,10 @@ export default function FlashcardsPage() {
           </button>
           {virado && (
             <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
-              <FsrsButton label="Errei" hint="10 min" tone="accent" onClick={() => handleRating("again")} />
-              <FsrsButton label="Difícil" hint="2 dias" onClick={() => handleRating("hard")} />
-              <FsrsButton label="Bom" hint="4 dias" primary onClick={() => handleRating("good")} />
-              <FsrsButton label="Fácil" hint="12 dias" onClick={() => handleRating("easy")} />
+              <FsrsButton label="Errei" hint="10 min" tone="accent" onClick={() => handleRating("again")} disabled={isRating} />
+              <FsrsButton label="Difícil" hint="2 dias" onClick={() => handleRating("hard")} disabled={isRating} />
+              <FsrsButton label="Bom" hint="4 dias" primary onClick={() => handleRating("good")} disabled={isRating} />
+              <FsrsButton label="Fácil" hint="12 dias" onClick={() => handleRating("easy")} disabled={isRating} />
             </div>
           )}
           {!virado && (
@@ -406,22 +519,40 @@ export default function FlashcardsPage() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <button onClick={voltarDaConclusao} className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">Voltar para os decks</button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (selectedDeckId) {
-                    const cards = dueCards.filter((c) => c.deck_id === selectedDeckId);
-                    if (cards.length > 0) {
-                      setModo("estudo");
-                      setCurrentCardIndex(0);
-                      setVirado(false);
-                    } else {
-                      setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
-                      setTimeout(() => setErrorMessage(""), 3000);
-                      voltarDaConclusao();
+                    setIsRestarting(true);
+                    try {
+                      const cards = await getAllCardsByDeck(selectedDeckId);
+                      const hoje = new Date();
+                      hoje.setHours(0, 0, 0, 0);
+                      const due = cards.filter(c => {
+                        const dueDate = new Date(c.dueDate);
+                        dueDate.setHours(0, 0, 0, 0);
+                        return c.reps === 0 || dueDate <= hoje;
+                      });
+                      if (due.length > 0) {
+                        setModo("estudo");
+                        setCurrentCardIndex(0);
+                        setVirado(false);
+                      } else {
+                        setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
+                        setTimeout(() => setErrorMessage(""), 3000);
+                        voltarDaConclusao();
+                      }
+                    } catch (error) {
+                      console.error(error);
+                    } finally {
+                      setIsRestarting(false);
                     }
                   }
                 }}
-                className="rounded-lg border border-border bg-surface-2 px-6 py-2.5 text-sm font-medium text-foreground/70 transition-colors hover:bg-white/5"
-              >Estudar novamente</button>
+                disabled={isRestarting}
+                className="rounded-lg border border-border bg-surface-2 px-6 py-2.5 text-sm font-medium text-foreground/70 transition-colors hover:bg-white/5 disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Estudar novamente
+              </button>
             </div>
           </div>
         </div>
@@ -435,8 +566,6 @@ export default function FlashcardsPage() {
       const deckStats = getDeckStats(selectedDeckId);
       const deckMeta = getDeckMeta(selectedDeckId);
       const isErrorDeck = deck.name === "Erros";
-      
-      // COR do deck (agora vem do objeto Deck)
       const deckColor = deck.color || '#14B8A6';
       
       conteudo = (
@@ -484,39 +613,72 @@ export default function FlashcardsPage() {
             <Mini l="Maturidade" v={deckStats.total > 0 ? `${Math.round((deckStats.total - deckStats.novos) / deckStats.total * 100)}%` : '0%'} />
           </div>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="inline-flex items-center gap-2 text-xs text-foreground/55"><Filter className="h-3.5 w-3.5" /> Todos os cards</div>
+            <div className="flex items-center gap-2">
+              <Filter className="h-3.5 w-3.5 text-foreground/40" />
+              <button
+                onClick={() => setFilterStatus("todos")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  filterStatus === "todos"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"
+                }`}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setFilterStatus("para_revisar")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  filterStatus === "para_revisar"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"
+                }`}
+              >
+                Para revisar
+              </button>
+              <span className="text-xs text-foreground/40 ml-1">
+                {loadingCards ? "(carregando...)" : `${deckCards.length} cards`}
+              </span>
+            </div>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
               <Search className="h-3.5 w-3.5 text-foreground/40" />
               <input placeholder="Buscar nesse baralho…" className="w-56 bg-transparent text-xs outline-none placeholder:text-foreground/35" value="" onChange={() => {}} />
             </div>
           </div>
           <div className="grid gap-3">
-            {deckCards.length > 0 ? (
+            {loadingCards ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : deckCards.length > 0 ? (
               deckCards.map((card, index) => {
-                const status = getStatusBadge(card.reps, card.due);
+                const status = getStatusBadge(card.reps, card.dueDate);
                 const meta = getCardMeta(card.id);
                 return (
-<article key={card.id} className="rf-card rf-card-hover group flex items-start gap-3 sm:gap-4 p-4 sm:p-5 w-full max-w-full overflow-hidden">
-  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
-  {isErrorDeck && <AlertTriangle className="h-3 w-3 text-accent ml-0.5" />}
-  <div className="min-w-0 flex-1">
-    <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
-      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
-      {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
-    </div>
-    <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">{card.front}</p>
-    <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">{card.back}</p>
-  </div>
-  <div className="flex items-center gap-1 shrink-0">
-    <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
-    <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-red-500/50 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
-  </div>
-</article>
+                  <article key={card.id} className="rf-card rf-card-hover group flex items-start gap-3 sm:gap-4 p-4 sm:p-5 w-full max-w-full overflow-hidden">
+                    <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
+                    {isErrorDeck && <AlertTriangle className="h-3 w-3 text-accent ml-0.5" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+                        {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
+                      </div>
+                      <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">{card.front}</p>
+                      <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">{card.back}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-red-500/50 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  </article>
                 );
               })
             ) : (
               <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
-                <p className="text-sm text-foreground/40">Nenhum flashcard neste baralho.</p>
+                <p className="text-sm text-foreground/40">
+                  {filterStatus === "todos" 
+                    ? "Nenhum flashcard neste baralho." 
+                    : "Nenhum flashcard para revisar agora. Volte mais tarde!"}
+                </p>
               </div>
             )}
           </div>
@@ -525,6 +687,11 @@ export default function FlashcardsPage() {
     }
   } else {
     // Lista de decks
+    const deckStatsForList = decks.map(d => ({
+      ...d,
+      ...getDeckStats(d.id),
+    }));
+
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
@@ -607,9 +774,10 @@ export default function FlashcardsPage() {
                   <div className="mt-4 flex items-center gap-2">
                     <button
                       onClick={(e) => { e.stopPropagation(); iniciarEstudo(deck.id); }}
-                      disabled={stats.due === 0}
-                      className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
+                      disabled={stats.due === 0 || isStarting}
+                      className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30 inline-flex items-center justify-center gap-2"
                     >
+                      {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       {stats.due > 0 ? `Estudar ${stats.due} cards` : "Nada para hoje"}
                     </button>
                     <button
@@ -1028,19 +1196,22 @@ export default function FlashcardsPage() {
 // COMPONENTES VISUAIS
 // ============================================================
 
-function FsrsButton({ label, hint, tone = "default", primary, onClick }: {
+function FsrsButton({ label, hint, tone = "default", primary, onClick, disabled }: {
   label: string;
   hint: string;
   tone?: "default" | "accent";
   primary?: boolean;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={[
         "flex flex-col items-center gap-0.5 rounded-xl border bg-background/60 px-2 py-3 transition-all hover:-translate-y-0.5",
         primary ? "border-primary/60 ring-1 ring-primary/30" : "border-border hover:border-primary/40",
+        disabled ? "opacity-50 cursor-not-allowed hover:-translate-y-0" : "",
       ].join(" ")}
     >
       <span className={["text-xs font-semibold", tone === "accent" ? "text-accent" : primary ? "text-primary" : "text-foreground/85"].join(" ")}>{label}</span>

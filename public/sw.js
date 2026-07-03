@@ -7,7 +7,7 @@ const CACHE_NAME = 'revisaflash-v4'; // versão incrementada
 const urlsToCache = [
   '/',
   '/index.html',
-  '/manifest.webmanifest',
+  '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png'

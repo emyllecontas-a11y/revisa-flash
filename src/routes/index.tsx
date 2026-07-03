@@ -10,7 +10,7 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useUser } from "@clerk/clerk-react";
 import { getDb } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
-import { OnboardingTour } from "@/components/OnboardingTour"; // <-- ADICIONADO
+import { OnboardingTour } from "@/components/OnboardingTour";
 
 // ============================================================
 // TIPOS
@@ -46,6 +46,10 @@ export default function DashboardPage() {
   const [diasAteProva, setDiasAteProva] = useState(0);
   const [loading, setLoading] = useState(true);
   const [proximasRevisoes, setProximasRevisoes] = useState<ProximaRevisao[]>([]);
+
+  // 🔥 NOVOS ESTADOS PARA PLANO DE ESTUDOS
+  const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
+  const [provaData, setProvaData] = useState<Date | null>(null);
 
   // Contextos
   const studyContext = useStudy();
@@ -83,17 +87,36 @@ export default function DashboardPage() {
         setUserId(clerkUserId);
         localStorage.setItem('revisaflash_user_id', clerkUserId);
 
-        // 2. Carrega o nome do perfil do Supabase com token
+        // 2. Carrega o perfil do Supabase com token (incluindo prova_nome e prova_data)
         let profileName = "Usuário";
+        let provaNomeTemp = "ENARE 2026";
+        let provaDataTemp: Date | null = null;
+
         try {
           const supabaseClient = await getSupabaseWithToken();
           const { data: profile } = await supabaseClient
             .from('profiles')
-            .select('name')
+            .select('name, prova_nome, prova_data')
             .eq('id', clerkUserId)
             .maybeSingle();
-          if (profile?.name) {
-            profileName = profile.name;
+
+          if (profile) {
+            if (profile.name) {
+              profileName = profile.name;
+            } else {
+              profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+            }
+
+            if (profile.prova_nome) {
+              provaNomeTemp = profile.prova_nome;
+            }
+
+            if (profile.prova_data) {
+              const date = new Date(profile.prova_data);
+              if (!isNaN(date.getTime())) {
+                provaDataTemp = date;
+              }
+            }
           } else {
             profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
           }
@@ -101,12 +124,23 @@ export default function DashboardPage() {
           console.warn('Erro ao carregar perfil:', e);
           profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
         }
+
         setUserName(profileName);
         localStorage.setItem('revisaflash_user_name', profileName);
 
-        // 3. Dias até a prova
-        const dataProva = new Date(2026, 8, 13);
+        // 🔥 ATUALIZAR PLANO DE ESTUDOS
+        setProvaNome(provaNomeTemp);
+        setProvaData(provaDataTemp);
+
+        // 3. Dias até a prova (usando dados do perfil ou fallback)
+        let dataProva = provaDataTemp;
+        if (!dataProva) {
+          // Fallback: 13 de setembro de 2026
+          dataProva = new Date(2026, 8, 13);
+        }
         const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        dataProva.setHours(0, 0, 0, 0);
         const diff = Math.ceil((dataProva.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
         setDiasAteProva(Math.max(0, diff));
 
@@ -279,7 +313,7 @@ export default function DashboardPage() {
 
       <p className="-mt-4 mb-8 max-w-2xl text-sm text-foreground/55">
         Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
-        e <span className="font-medium text-accent">{diasAteProva} dias</span> até a prova.
+        e <span className="font-medium text-accent">{diasAteProva} dias</span> até a <span className="font-medium text-foreground">{provaNome}</span>.
       </p>
 
       {/* Bento grid */}
@@ -289,7 +323,7 @@ export default function DashboardPage() {
           <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
           <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
           <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Erros ativos" value={totalErros} hint="banco de erros" tone="accent" />
-          <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint="ENARE 2026" />
+          <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint={provaNome} />
         </div>
 
         {/* Checklist */}
@@ -323,7 +357,7 @@ export default function DashboardPage() {
                 </span>
                 <button
                   onClick={() => removeChecklistItem(c.id)}
-                  className="text-foreground/20 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                  className="text-foreground/20 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

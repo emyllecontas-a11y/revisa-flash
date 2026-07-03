@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
-import { 
-  ChevronLeft, ChevronRight, Plus, Clock, BookOpen, Brain, 
-  FileText, Trash2, X, CheckCircle, Circle, Calendar as CalendarIcon, Sparkles 
+import {
+  ChevronLeft, ChevronRight, Plus, Clock, BookOpen, Brain,
+  FileText, Trash2, X, CheckCircle, Circle, Calendar as CalendarIcon, Sparkles, Loader2
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useStudy } from "@/contexts/StudyContext";
@@ -49,6 +49,10 @@ export default function CalendarioPage() {
   const [topicos, setTopicos] = useState<{ id: string; name: string; discipline_id: string; status: string }[]>([]);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
+
+  // 🔥 NOVOS ESTADOS DE CARREGAMENTO
+  const [isSaving, setIsSaving] = useState(false);
+  const [concluindoRevisaoId, setConcluindoRevisaoId] = useState<string | null>(null);
 
   const dataSelecionada = diaSelecionado !== null
     ? `${anoVisivel}-${String(mesVisivel + 1).padStart(2, '0')}-${String(diaSelecionado).padStart(2, '0')}`
@@ -123,11 +127,11 @@ export default function CalendarioPage() {
       const topics = await db.topics.find({
         selector: { user_id: userId, deletedAt: { $eq: null } }
       }).exec();
-      setTopicos(topics.map(t => ({ 
-        id: t.id, 
-        name: t.name, 
+      setTopicos(topics.map(t => ({
+        id: t.id,
+        name: t.name,
         discipline_id: t.discipline_id,
-        status: t.status 
+        status: t.status
       })));
     } catch (error) {
       console.error('Erro ao carregar disciplinas/tópicos:', error);
@@ -142,179 +146,186 @@ export default function CalendarioPage() {
   }, [userId, loadRevisoes, loadContentData]);
 
   // ============================================================
-  // FUNÇÃO PARA CONCLUIR UMA REVISÃO
+  // FUNÇÃO PARA CONCLUIR UMA REVISÃO (CORRIGIDA)
   // ============================================================
-const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
-  if (!userId) return;
+  const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
+    // 🔥 Impede cliques múltiplos na mesma revisão
+    if (concluindoRevisaoId === revisaoId) return;
+    if (!userId) return;
 
-  try {
-    const db = await getDb();
-    const now = new Date().toISOString();
+    setConcluindoRevisaoId(revisaoId);
 
-    // 1. Buscar a revisão atual
-    const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
-    if (!doc) {
-      console.warn('⚠️ Revisão não encontrada');
-      return;
-    }
-
-    const revisao = doc.toJSON() as Revisao;
-    const nivelAtual = revisao.review_level || 1;
-    const topicoId = revisao.topico_id;
-
-    // 2. Marcar a revisão atual como concluída
-    await doc.incrementalPatch({
-      completedAt: now,
-      updatedAt: now,
-    });
-
-    // 3. Atualizar estado local
-    setRevisoes(prev =>
-      prev.map(r =>
-        r.id === revisaoId
-          ? { ...r, completedAt: now, updatedAt: now }
-          : r
-      )
-    );
-
-    // 4. Sincronizar conclusão com Supabase
     try {
-      const { error } = await supabase
-        .from('revisoes')
-        .update({ completedAt: now, updatedAt: now })
-        .eq('id', revisaoId);
-      if (error) console.error('❌ Erro ao sincronizar revisão concluída:', error);
-    } catch (e) {
-      console.warn('⚠️ Supabase indisponível (offline), revisão concluída localmente.');
-    }
+      const db = await getDb();
+      const now = new Date().toISOString();
 
-    // 5. Se não for o nível 5, criar a próxima revisão
-    const niveis = [
-      { nivel: 1, dias: 1 },
-      { nivel: 2, dias: 7 },
-      { nivel: 3, dias: 15 },
-      { nivel: 4, dias: 30 },
-      { nivel: 5, dias: 60 },
-    ];
-
-    if (nivelAtual < 5) {
-      const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
-      if (proximoNivel) {
-        const nextDate = new Date();
-        nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
-
-        // Criar nova revisão para o próximo nível
-        const newRevisao = {
-          id: uid(),
-          user_id: userId,
-          topico_id: topicoId,
-          topicName: revisao.topicName,
-          discipline: revisao.discipline,
-          review_level: proximoNivel.nivel,
-          nextReviewDate: nextDate.toISOString(),
-          lastStudyDate: now,
-          completedAt: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        await db.revisoes.insert(newRevisao);
-        setRevisoes(prev => [...prev, newRevisao]);
-
-        // Tentar sincronizar nova revisão com Supabase
-        try {
-          const { error } = await supabase
-            .from('revisoes')
-            .upsert([{
-              id: newRevisao.id,
-              user_id: newRevisao.user_id,
-              topico_id: newRevisao.topico_id,
-              topicName: newRevisao.topicName,
-              discipline: newRevisao.discipline,
-              review_level: newRevisao.review_level,
-              nextReviewDate: newRevisao.nextReviewDate,
-              lastStudyDate: newRevisao.lastStudyDate,
-              completedAt: newRevisao.completedAt,
-              createdAt: newRevisao.createdAt,
-              updatedAt: newRevisao.updatedAt,
-            }], { onConflict: 'id' });
-          if (error) console.error('❌ Erro ao sincronizar nova revisão:', error);
-        } catch (e) {
-          console.warn('⚠️ Supabase indisponível para criar nova revisão (offline).');
-        }
-
-        console.log(`📌 Nova revisão de nível ${proximoNivel.nivel} criada para ${new Date(nextDate).toLocaleDateString('pt-BR')}`);
-      }
-    } else {
-      console.log('✅ Última revisão concluída (nível 5)');
-    }
-
-    // ============================================================
-    // 🔥 ATUALIZAR STATUS DO TÓPICO
-    // ============================================================
-
-    // 6. Buscar tópico
-    const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
-    if (topicoDoc) {
-      const topicoData = topicoDoc.toJSON();
-
-      // 7. Contar revisões concluídas do tópico
-      const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
-      const revisoesData = allRevisoes.map((d: any) => d.toJSON());
-      const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
-      const total = revisoesData.length;
-
-      console.log(`📊 Revisões do tópico: total=${total}, concluidas=${concluidas}`);
-
-      let novoStatus = topicoData.status;
-
-      // Se concluiu a primeira revisão (nível 1) e ainda não está revisado
-      if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
-        novoStatus = 'revisado';
-        console.log('📌 Primeira revisão concluída → status do tópico alterado para "revisado"');
+      // 1. Buscar a revisão atual
+      const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
+      if (!doc) {
+        console.warn('⚠️ Revisão não encontrada');
+        return;
       }
 
-      // Se todas as 5 revisões estão concluídas → dominado
-      if (total === 5 && concluidas === 5) {
-        novoStatus = 'dominado';
-        console.log('🏆 Todas as revisões concluídas → status do tópico alterado para "dominado"');
+      const revisao = doc.toJSON() as Revisao;
+      const nivelAtual = revisao.review_level || 1;
+      const topicoId = revisao.topico_id;
+
+      // 2. Marcar a revisão atual como concluída
+      await doc.incrementalPatch({
+        completedAt: now,
+        updatedAt: now,
+      });
+
+      // 3. Atualizar estado local
+      setRevisoes(prev =>
+        prev.map(r =>
+          r.id === revisaoId
+            ? { ...r, completedAt: now, updatedAt: now }
+            : r
+        )
+      );
+
+      // 4. Sincronizar conclusão com Supabase
+      try {
+        const { error } = await supabase
+          .from('revisoes')
+          .update({ completedAt: now, updatedAt: now })
+          .eq('id', revisaoId);
+        if (error) console.error('❌ Erro ao sincronizar revisão concluída:', error);
+      } catch (e) {
+        console.warn('⚠️ Supabase indisponível (offline), revisão concluída localmente.');
       }
 
-      // 8. Atualizar status se houver mudança
-      if (novoStatus !== topicoData.status) {
-        await topicoDoc.incrementalPatch({
-          status: novoStatus,
-          updatedAt: now,
-        });
+      // 5. Se não for o nível 5, criar a próxima revisão
+      const niveis = [
+        { nivel: 1, dias: 1 },
+        { nivel: 2, dias: 7 },
+        { nivel: 3, dias: 15 },
+        { nivel: 4, dias: 30 },
+        { nivel: 5, dias: 60 },
+      ];
 
-        // Tentar atualizar no Supabase
-        try {
-          const { error } = await supabase
-            .from('topics')
-            .update({ status: novoStatus, updatedAt: now })
-            .eq('id', topicoId);
-          if (error) {
-            console.warn('⚠️ Erro ao atualizar status do tópico no Supabase:', error);
-          } else {
-            console.log(`✅ Status do tópico "${topicoData.name}" atualizado para "${novoStatus}" no Supabase.`);
+      if (nivelAtual < 5) {
+        const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
+        if (proximoNivel) {
+          const nextDate = new Date();
+          nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
+
+          // Criar nova revisão para o próximo nível
+          const newRevisao = {
+            id: uid(),
+            user_id: userId,
+            topico_id: topicoId,
+            topicName: revisao.topicName,
+            discipline: revisao.discipline,
+            review_level: proximoNivel.nivel,
+            nextReviewDate: nextDate.toISOString(),
+            lastStudyDate: now,
+            completedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await db.revisoes.insert(newRevisao);
+          setRevisoes(prev => [...prev, newRevisao]);
+
+          // Tentar sincronizar nova revisão com Supabase
+          try {
+            const { error } = await supabase
+              .from('revisoes')
+              .upsert([{
+                id: newRevisao.id,
+                user_id: newRevisao.user_id,
+                topico_id: newRevisao.topico_id,
+                topicName: newRevisao.topicName,
+                discipline: newRevisao.discipline,
+                review_level: newRevisao.review_level,
+                nextReviewDate: newRevisao.nextReviewDate,
+                lastStudyDate: newRevisao.lastStudyDate,
+                completedAt: newRevisao.completedAt,
+                createdAt: newRevisao.createdAt,
+                updatedAt: newRevisao.updatedAt,
+              }], { onConflict: 'id' });
+            if (error) console.error('❌ Erro ao sincronizar nova revisão:', error);
+          } catch (e) {
+            console.warn('⚠️ Supabase indisponível para criar nova revisão (offline).');
           }
-        } catch (e) {
-          console.warn('⚠️ Supabase indisponível para atualizar status do tópico (offline).');
+
+          console.log(`📌 Nova revisão de nível ${proximoNivel.nivel} criada para ${new Date(nextDate).toLocaleDateString('pt-BR')}`);
         }
       } else {
-        console.log(`ℹ️ Status do tópico já é "${topicoData.status}"`);
+        console.log('✅ Última revisão concluída (nível 5)');
       }
+
+      // ============================================================
+      // 🔥 ATUALIZAR STATUS DO TÓPICO
+      // ============================================================
+
+      // 6. Buscar tópico
+      const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
+      if (topicoDoc) {
+        const topicoData = topicoDoc.toJSON();
+
+        // 7. Contar revisões concluídas do tópico
+        const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
+        const revisoesData = allRevisoes.map((d: any) => d.toJSON());
+        const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
+        const total = revisoesData.length;
+
+        console.log(`📊 Revisões do tópico: total=${total}, concluidas=${concluidas}`);
+
+        let novoStatus = topicoData.status;
+
+        // Se concluiu a primeira revisão (nível 1) e ainda não está revisado
+        if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
+          novoStatus = 'revisado';
+          console.log('📌 Primeira revisão concluída → status do tópico alterado para "revisado"');
+        }
+
+        // Se todas as 5 revisões estão concluídas → dominado
+        if (total === 5 && concluidas === 5) {
+          novoStatus = 'dominado';
+          console.log('🏆 Todas as revisões concluídas → status do tópico alterado para "dominado"');
+        }
+
+        // 8. Atualizar status se houver mudança
+        if (novoStatus !== topicoData.status) {
+          await topicoDoc.incrementalPatch({
+            status: novoStatus,
+            updatedAt: now,
+          });
+
+          // Tentar atualizar no Supabase
+          try {
+            const { error } = await supabase
+              .from('topics')
+              .update({ status: novoStatus, updatedAt: now })
+              .eq('id', topicoId);
+            if (error) {
+              console.warn('⚠️ Erro ao atualizar status do tópico no Supabase:', error);
+            } else {
+              console.log(`✅ Status do tópico "${topicoData.name}" atualizado para "${novoStatus}" no Supabase.`);
+            }
+          } catch (e) {
+            console.warn('⚠️ Supabase indisponível para atualizar status do tópico (offline).');
+          }
+        } else {
+          console.log(`ℹ️ Status do tópico já é "${topicoData.status}"`);
+        }
+      }
+
+      // 9. Recarregar dados
+      await loadRevisoes();
+
+      console.log('✅ Revisão concluída com sucesso');
+
+    } catch (error) {
+      console.error('❌ Erro ao concluir revisão:', error);
+    } finally {
+      setConcluindoRevisaoId(null);
     }
+  }, [userId, loadRevisoes, concluindoRevisaoId]);
 
-    // 9. Recarregar dados
-    await loadRevisoes();
-
-    console.log('✅ Revisão concluída com sucesso');
-
-  } catch (error) {
-    console.error('❌ Erro ao concluir revisão:', error);
-  }
-}, [userId, loadRevisoes]);
   // ============================================================
   // NAVEGAÇÃO
   // ============================================================
@@ -392,79 +403,87 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
     : [];
 
   // ============================================================
-  // FUNÇÃO PARA SALVAR ESTUDO (ATUALIZADA)
+  // FUNÇÃO PARA SALVAR ESTUDO (CORRIGIDA)
   // ============================================================
   const handleSalvar = async () => {
-  // Verifica se há um tópico selecionado
-  if (!selectedTopicId) {
-    alert('Selecione um tópico para registrar o estudo.');
-    return;
-  }
+    // 🔥 Impede múltiplos cliques
+    if (isSaving) return;
 
-  const topic = topicos.find(t => t.id === selectedTopicId);
-  if (!topic) {
-    alert('Tópico não encontrado.');
-    return;
-  }
-
-  const disciplina = disciplinas.find(d => d.id === selectedDisciplineId);
-
-  const recordData = {
-    date: formData.date,
-    type: tipo,
-    discipline: disciplina?.name || '',
-    topic: topic.name,
-    duration: formData.duration,
-    observations: formData.observations,
-    ...(tipo === 'teorico'
-      ? { material: formMaterial }
-      : {
-          questionsCount: formQuestions,
-          correctCount: formCorrect,
-          wrongCount: formWrong,
-        }
-    ),
-  };
-
-  console.log('📝 Dados do registro de estudo:', recordData);
-
-  try {
-    // 1. Criar registro de estudo (o contexto adiciona user_id e createdAt)
-    await addRecord(recordData);
-    console.log('✅ Registro de estudo criado com sucesso.');
-
-    // 2. Atualizar status do tópico (se necessário)
-    const currentStatus = topic.status;
-    let newStatus = currentStatus;
-
-    // Se o tópico estiver "nao_estudado", avançar para "estudando"
-    if (currentStatus === 'nao_estudado') {
-      newStatus = 'estudando';
+    // Verifica se há um tópico selecionado
+    if (!selectedTopicId) {
+      alert('Selecione um tópico para registrar o estudo.');
+      return;
     }
 
-    // Dentro do handleSalvar, após criar o registro (onde está a chamada do serviço)
-if (userId && newStatus !== currentStatus) {
-  try {
-    console.log(`🔄 Atualizando status do tópico para "${newStatus}"...`);
-    await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId);
-    await loadContentData();
-    console.log('✅ Status do tópico e revisões atualizados.');
-  } catch (error) {
-    // Se falhar, apenas loga o erro, mas não impede o salvamento do estudo
-    console.error('⚠️ Erro ao atualizar tópico, mas o registro de estudo foi salvo:', error);
-  }
-}
+    const topic = topicos.find(t => t.id === selectedTopicId);
+    if (!topic) {
+      alert('Tópico não encontrado.');
+      return;
+    }
 
-    setSalvo(true);
-    setTimeout(() => {
-      setSalvo(false);
-      setModo("calendario");
-    }, 1500);
-  } catch (error) {
-    console.error('❌ Erro ao salvar estudo:', error);
-    alert('Erro ao salvar registro. Verifique o console para mais detalhes.');
-  }
-};
+    const disciplina = disciplinas.find(d => d.id === selectedDisciplineId);
+
+    const recordData = {
+      date: formData.date,
+      type: tipo,
+      discipline: disciplina?.name || '',
+      topic: topic.name,
+      duration: formData.duration,
+      observations: formData.observations,
+      ...(tipo === 'teorico'
+        ? { material: formMaterial }
+        : {
+            questionsCount: formQuestions,
+            correctCount: formCorrect,
+            wrongCount: formWrong,
+          }
+      ),
+    };
+
+    console.log('📝 Dados do registro de estudo:', recordData);
+
+    setIsSaving(true);
+
+    try {
+      // 1. Criar registro de estudo (o contexto adiciona user_id e createdAt)
+      await addRecord(recordData);
+      console.log('✅ Registro de estudo criado com sucesso.');
+
+      // 2. Atualizar status do tópico (se necessário)
+      const currentStatus = topic.status;
+      let newStatus = currentStatus;
+
+      // Se o tópico estiver "nao_estudado", avançar para "estudando"
+      if (currentStatus === 'nao_estudado') {
+        newStatus = 'estudando';
+      }
+
+      // Dentro do handleSalvar, após criar o registro (onde está a chamada do serviço)
+      if (userId && newStatus !== currentStatus) {
+        try {
+          console.log(`🔄 Atualizando status do tópico para "${newStatus}"...`);
+          await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId);
+          await loadContentData();
+          console.log('✅ Status do tópico e revisões atualizados.');
+        } catch (error) {
+          // Se falhar, apenas loga o erro, mas não impede o salvamento do estudo
+          console.error('⚠️ Erro ao atualizar tópico, mas o registro de estudo foi salvo:', error);
+        }
+      }
+
+      setSalvo(true);
+      setTimeout(() => {
+        setSalvo(false);
+        setModo("calendario");
+      }, 1500);
+    } catch (error) {
+      console.error('❌ Erro ao salvar estudo:', error);
+      alert('Erro ao salvar registro. Verifique o console para mais detalhes.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // ============================================================
   // FUNÇÃO PARA EXCLUIR REGISTRO
   // ============================================================
@@ -634,7 +653,7 @@ if (userId && newStatus !== currentStatus) {
                             </div>
                             <button
                               onClick={() => handleDeleteRecord(r.id)}
-                              className="text-foreground/30 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                              className="text-foreground/30 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100"
                               aria-label="Excluir registro"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -674,12 +693,23 @@ if (userId && newStatus !== currentStatus) {
                                   {rev.discipline} · {label}
                                 </div>
                               </div>
+                              {/* 🔥 Botão Concluir com proteção contra múltiplos cliques */}
                               <button
                                 onClick={() => handleConcluirRevisao(rev.id)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-primary/20 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/30 transition-colors"
+                                disabled={concluindoRevisaoId === rev.id}
+                                className="inline-flex items-center gap-1 rounded-lg bg-primary/20 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <CheckCircle className="h-3.5 w-3.5" />
-                                Concluir
+                                {concluindoRevisaoId === rev.id ? (
+                                  <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Concluindo...
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle className="h-3.5 w-3.5" />
+                                    Concluir
+                                  </>
+                                )}
                               </button>
                             </li>
                           );
@@ -772,7 +802,7 @@ if (userId && newStatus !== currentStatus) {
                 setFormQuestions={setFormQuestions}
                 formCorrect={formCorrect}
                 setFormCorrect={setFormCorrect}
-                formWrong={formWrong}
+                formWrong={setFormWrong}
                 setFormWrong={setFormWrong}
                 disciplinas={disciplinas}
                 topicos={topicos}
@@ -815,14 +845,24 @@ if (userId && newStatus !== currentStatus) {
           <button
             onClick={() => setModo("calendario")}
             className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/65 hover:bg-white/5"
+            disabled={isSaving}
           >
             Cancelar
           </button>
+          {/* 🔥 Botão Salvar com proteção contra múltiplos cliques */}
           <button
             onClick={handleSalvar}
-            className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            disabled={isSaving}
+            className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
           >
-            Salvar estudo
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              'Salvar estudo'
+            )}
           </button>
         </footer>
       </AppShell>
@@ -833,7 +873,7 @@ if (userId && newStatus !== currentStatus) {
 }
 
 // ============================================================
-// COMPONENTES AUXILIARES
+// COMPONENTES AUXILIARES (MANTIDOS IGUAIS)
 // ============================================================
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -872,10 +912,10 @@ function TipoCard({ icon, label, desc, active, onClick }: {
   );
 }
 
-function TeoricoForm({ 
-  formData, 
-  setFormData, 
-  formMaterial, 
+function TeoricoForm({
+  formData,
+  setFormData,
+  formMaterial,
   setFormMaterial,
   disciplinas,
   topicos,
@@ -972,14 +1012,14 @@ function TeoricoForm({
   );
 }
 
-function PraticoForm({ 
-  formData, 
-  setFormData, 
-  formQuestions, 
-  setFormQuestions, 
-  formCorrect, 
-  setFormCorrect, 
-  formWrong, 
+function PraticoForm({
+  formData,
+  setFormData,
+  formQuestions,
+  setFormQuestions,
+  formCorrect,
+  setFormCorrect,
+  formWrong,
   setFormWrong,
   disciplinas,
   topicos,

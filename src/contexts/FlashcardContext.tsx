@@ -76,6 +76,8 @@ interface FlashcardContextType {
   getCardMeta: (cardId: string) => CardMeta;
   setCardMeta: (cardId: string, meta: CardMeta) => void;
   getCardHistory: (cardId: string) => any[];
+  // 🔥 NOVA FUNÇÃO ADICIONADA
+  getAllCardsByDeck: (deckId: string) => Promise<any[]>;
 }
 
 const FlashcardContext = createContext<FlashcardContextType | undefined>(undefined);
@@ -172,6 +174,22 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.error('❌ Erro ao carregar dados locais:', error);
       setDecksData([]);
       setAllFlashcards([]);
+    }
+  }, []);
+
+  // ============================================================
+  // 🔥 NOVA FUNÇÃO: BUSCAR TODOS OS CARDS DE UM DECK
+  // ============================================================
+  const getAllCardsByDeck = useCallback(async (deckId: string): Promise<any[]> => {
+    try {
+      const db = await getDb();
+      const result = await db.flashcards.find({
+        selector: { deck_id: deckId }
+      }).exec();
+      return result.map((doc: any) => doc.toJSON());
+    } catch (error) {
+      console.error('❌ Erro ao buscar cards do deck:', error);
+      return [];
     }
   }, []);
 
@@ -695,6 +713,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     getCardMeta,
     setCardMeta,
     getCardHistory,
+    // 🔥 NOVA FUNÇÃO EXPORTADA
+    getAllCardsByDeck,
   }), [
     refreshFlashcards,
     dueCards,
@@ -716,6 +736,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     getCardMeta,
     setCardMeta,
     getCardHistory,
+    getAllCardsByDeck,
   ]);
 
   return (
