@@ -44,7 +44,7 @@ export const getClerkToken = async (): Promise<string | null> => {
 
     // Obtém o token (usando o template "supabase" se existir)
     try {
-      const token = await session.getToken({ template: 'supabase' });
+      const token = await session.getToken({ template: 'supabase1' });
       if (token) {
         console.log('🔑 Token do Clerk obtido com sucesso!');
         return token;
