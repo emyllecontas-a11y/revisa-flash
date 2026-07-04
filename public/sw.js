@@ -1,10 +1,6 @@
 // public/sw.js
-// Service Worker com cache incremental e logging detalhado
-
-const CACHE_NAME = 'revisaflash-v4'; // versão incrementada
-
-// Arquivos essenciais para o app – se algum falhar, a instalação continua
-const urlsToCache = [
+const CACHE_NAME = 'revisaflash-v12';
+const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
@@ -14,109 +10,162 @@ const urlsToCache = [
 ];
 
 // ============================================================
-// INSTALAÇÃO – cacheia cada arquivo individualmente
+// INSTALAÇÃO – cacheia os assets listados no index.html
 // ============================================================
 self.addEventListener('install', (event) => {
+  console.log('[SW] Install');
+
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(async (cache) => {
-        console.log('📦 Service Worker: iniciando cache de arquivos essenciais...');
-        
-        // Cacheia cada URL separadamente para que uma falha não quebre tudo
-        for (const url of urlsToCache) {
-          try {
-            const response = await fetch(url);
-            if (response && response.status === 200) {
-              await cache.put(url, response);
-              console.log(`✅ Cacheado: ${url}`);
-            } else {
-              console.warn(`⚠️ Não foi possível cachear ${url} (status: ${response?.status})`);
-            }
-          } catch (error) {
-            console.warn(`⚠️ Erro ao cachear ${url}:`, error);
+    (async () => {
+      // 1. Abre o cache
+      const cache = await caches.open(CACHE_NAME);
+      console.log('[SW] Caching static assets...');
+
+      // 2. Cacheia os assets manuais (ícones, etc.)
+      for (const url of STATIC_ASSETS) {
+        try {
+          const response = await fetch(url);
+          if (response && response.ok) {
+            await cache.put(url, response);
+            console.log(`[SW] Cached: ${url}`);
+          }
+        } catch (err) {
+          console.warn(`[SW] Failed to cache ${url}:`, err);
+        }
+      }
+
+      // 3. Agora, busca o index.html e extrai todos os scripts e estilos
+      console.log('[SW] Fetching index.html to extract assets...');
+      const indexResponse = await fetch('/index.html');
+      if (indexResponse && indexResponse.ok) {
+        const html = await indexResponse.text();
+        // Extrai todas as URLs de scripts (src) e estilos (href)
+        const assetUrls = [];
+        // Scripts: <script src="...">
+        const scriptMatches = html.matchAll(/<script\s+[^>]*src="([^"]+)"/gi);
+        for (const match of scriptMatches) {
+          if (match[1]) assetUrls.push(match[1]);
+        }
+        // Estilos: <link rel="stylesheet" href="...">
+        const linkMatches = html.matchAll(/<link\s+[^>]*href="([^"]+)"[^>]*>/gi);
+        for (const match of linkMatches) {
+          if (match[1] && match[0].includes('stylesheet')) {
+            assetUrls.push(match[1]);
           }
         }
+        // Remove duplicatas
+        const uniqueUrls = [...new Set(assetUrls)];
+        console.log('[SW] Assets encontrados:', uniqueUrls);
 
-        console.log('✅ Service Worker: cache de arquivos essenciais concluído.');
-        return self.skipWaiting(); // força ativação
+        // Cacheia cada um
+        for (const url of uniqueUrls) {
+          try {
+            // Constrói URL absoluta
+            const absoluteUrl = new URL(url, self.location.origin).href;
+            const response = await fetch(absoluteUrl);
+            if (response && response.ok) {
+              await cache.put(absoluteUrl, response);
+              console.log(`[SW] Cached asset: ${absoluteUrl}`);
+            }
+          } catch (err) {
+            console.warn(`[SW] Failed to cache asset ${url}:`, err);
+          }
+        }
+      } else {
+        console.warn('[SW] Could not fetch index.html for asset extraction.');
+      }
+
+      console.log('[SW] All assets cached.');
+      await self.skipWaiting();
+    })()
+  );
+});
+
+// ============================================================
+// ATIVAÇÃO – limpa caches antigos e assume controle
+// ============================================================
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activate');
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => {
+        return Promise.all(
+          keys.map((key) => {
+            if (key !== CACHE_NAME) {
+              console.log(`[SW] Deleting old cache: ${key}`);
+              return caches.delete(key);
+            }
+          })
+        );
+      })
+      .then(() => {
+        console.log('[SW] Claiming clients...');
+        return self.clients.claim();
+      })
+      .then(() => {
+        console.log('[SW] Now controlling all clients.');
       })
   );
 });
 
 // ============================================================
-// ATIVAÇÃO – limpa caches antigos
-// ============================================================
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log(`🗑️ Removendo cache antigo: ${cacheName}`);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => {
-      console.log('✅ Service Worker ativado e controlando páginas.');
-      return self.clients.claim();
-    })
-  );
-});
-
-// ============================================================
-// INTERCEPTAÇÃO – stale-while-revalidate com cache automático
+// INTERCEPTAÇÃO – com fallback offline
 // ============================================================
 self.addEventListener('fetch', (event) => {
-  // Ignora requisições para extensões e analytics
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/_next/') || url.pathname.includes('chrome-extension')) {
+
+  // Ignora requisições não-GET e de terceiros (Clerk, Supabase, extensões)
+  if (
+    event.request.method !== 'GET' ||
+    url.hostname.includes('clerk') ||
+    url.hostname.includes('supabase') ||
+    url.hostname.includes('chrome-extension') ||
+    url.protocol === 'chrome-extension:'
+  ) {
     return;
   }
 
+  // Log para depuração
+  console.log(`[SW] Fetch: ${url.pathname}`);
+
   event.respondWith(
     caches.match(event.request)
-      .then((cachedResponse) => {
-        if (cachedResponse) {
-          // Devolve do cache e atualiza em segundo plano
+      .then((cached) => {
+        if (cached) {
+          console.log(`[SW] Cache hit: ${url.pathname}`);
+          // Atualiza em segundo plano (opcional, mas mantém o cache fresco)
           fetch(event.request)
             .then((networkResponse) => {
-              if (networkResponse && networkResponse.status === 200) {
+              if (networkResponse && networkResponse.ok) {
                 caches.open(CACHE_NAME).then((cache) => {
-                  cache.put(event.request, networkResponse.clone());
+                  cache.put(event.request, networkResponse);
                 });
               }
             })
             .catch(() => {});
-          return cachedResponse;
+          return cached;
         }
 
-        // Se não está no cache, busca da rede e guarda
-        return fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseToCache = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-              console.log(`💾 Novo arquivo cacheado: ${event.request.url}`);
-            });
-          }
-          return networkResponse;
-        }).catch(() => {
-          // Fallback offline
-          return new Response(
-            `<html>
-              <head><title>Offline</title></head>
-              <body style="background:#0B1020;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;text-align:center;">
-                <div>
-                  <h1>📶 Você está offline</h1>
-                  <p>Conecte-se à internet para acessar o RevisaFlash.</p>
-                  <button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;background:#14B8A6;border:none;border-radius:8px;color:white;font-weight:bold;cursor:pointer;">Tentar novamente</button>
-                </div>
-              </body>
-            </html>`,
-            { status: 503, headers: { 'Content-Type': 'text/html' } }
-          );
-        });
+        console.log(`[SW] Network fetch: ${url.pathname}`);
+        return fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.ok) {
+              const cloned = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, cloned);
+              });
+            }
+            return networkResponse;
+          })
+          .catch(() => {
+            // Fallback: se for navegação, retorna o index.html
+            if (event.request.mode === 'navigate') {
+              console.log(`[SW] Offline fallback: index.html`);
+              return caches.match('/index.html');
+            }
+            // Para outros recursos, retorna uma resposta vazia
+            return new Response('', { status: 404 });
+          });
       })
   );
 });

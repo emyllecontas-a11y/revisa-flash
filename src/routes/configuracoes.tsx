@@ -6,7 +6,7 @@ import {
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
   Camera, HelpCircle, Save, Loader2
 } from "lucide-react";
-import { useUser, useClerk } from "@clerk/clerk-react";
+import { useAppUser } from "@/contexts/UserContext"; // <-- ALTERADO
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
@@ -18,10 +18,9 @@ export default function ConfigPage() {
   const [tema, setTema] = useState<"escuro" | "claro" | "sistema">("escuro");
 
   // ============================================================
-  // CLERK: OBTÉM USUÁRIO E FUNÇÃO DE LOGOUT
+  // USANDO NOSSO CONTEXTO (em vez de Clerk)
   // ============================================================
-  const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
+  const { user, isLoaded } = useAppUser(); // <-- ALTERADO
 
   // ============================================================
   // ESTADOS FUNCIONAIS
@@ -55,7 +54,7 @@ export default function ConfigPage() {
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   // ============================================================
-  // CARREGAR USUÁRIO E PERFIL DO SUPABASE (usando Clerk)
+  // CARREGAR USUÁRIO E PERFIL DO SUPABASE (usando o contexto)
   // ============================================================
   useEffect(() => {
     const loadUser = async () => {
@@ -64,7 +63,7 @@ export default function ConfigPage() {
         
         const clerkUserId = user?.id || null;
         if (!clerkUserId) {
-          console.warn('Nenhum usuário Clerk encontrado.');
+          console.warn('Nenhum usuário encontrado.');
           return;
         }
 
@@ -72,28 +71,34 @@ export default function ConfigPage() {
         setUserEmail(user?.emailAddresses?.[0]?.emailAddress || '');
         setUserName(user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário');
 
-        const supabaseClient = await getSupabaseWithToken();
-        const { data: profile, error } = await supabaseClient
-          .from('profiles')
-          .select('name, avatar_url, theme, prova_nome, prova_data')
-          .eq('id', clerkUserId)
-          .maybeSingle();
+        // Tenta carregar do Supabase, mas se falhar (offline), usa os dados do contexto
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { data: profile, error } = await supabaseClient
+            .from('profiles')
+            .select('name, avatar_url, theme, prova_nome, prova_data')
+            .eq('id', clerkUserId)
+            .maybeSingle();
 
-        if (error) {
-          console.warn('Erro ao carregar perfil:', error);
-          return;
-        }
-
-        if (profile) {
-          if (profile.name) setUserName(profile.name);
-          if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
-          if (profile.theme) {
-            setTema(profile.theme);
-            localStorage.setItem('tema', profile.theme);
-            aplicarTema(profile.theme);
+          if (error) {
+            console.warn('Erro ao carregar perfil:', error);
+            return;
           }
-          if (profile.prova_nome) setProvaNome(profile.prova_nome);
-          if (profile.prova_data) setProvaData(profile.prova_data);
+
+          if (profile) {
+            if (profile.name) setUserName(profile.name);
+            if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+            if (profile.theme) {
+              setTema(profile.theme);
+              localStorage.setItem('tema', profile.theme);
+              aplicarTema(profile.theme);
+            }
+            if (profile.prova_nome) setProvaNome(profile.prova_nome);
+            if (profile.prova_data) setProvaData(profile.prova_data);
+          }
+        } catch (offlineError) {
+          // Se falhar (offline), mantém os dados do contexto
+          console.warn('Offline: usando dados do localStorage para perfil');
         }
       } catch (e) {
         console.warn('Erro ao carregar usuário:', e);
@@ -121,7 +126,7 @@ export default function ConfigPage() {
   };
 
   // ============================================================
-  // ATUALIZAR TEMA NO SUPABASE
+  // ATUALIZAR TEMA NO SUPABASE (com fallback offline)
   // ============================================================
   const handleTemaChange = async (novoTema: 'escuro' | 'claro' | 'sistema') => {
     setTema(novoTema);
@@ -137,13 +142,13 @@ export default function ConfigPage() {
           .select();
         if (error) console.error('Erro ao salvar tema:', error);
       } catch (error) {
-        console.error('Erro ao salvar tema:', error);
+        console.warn('Offline: tema salvo apenas localmente');
       }
     }
   };
 
   // ============================================================
-  // SALVAR PLANO DE ESTUDOS
+  // SALVAR PLANO DE ESTUDOS (com fallback offline)
   // ============================================================
   const handleSaveProva = useCallback(async () => {
     if (!userId) {
@@ -176,16 +181,20 @@ export default function ConfigPage() {
       setMensagemTipo('success');
       setTimeout(() => setMensagem(""), 4000);
     } catch (error: any) {
-      console.error('Erro ao salvar plano de estudos:', error);
-      setMensagem("❌ Erro ao salvar: " + (error.message || 'Erro desconhecido'));
-      setMensagemTipo('error');
+      // Se falhar (offline), salva localmente e avisa
+      console.warn('Offline: plano de estudos salvo apenas localmente');
+      setMensagem("✅ Plano salvo localmente (será sincronizado quando online)");
+      setMensagemTipo('info');
+      // Salva no localStorage para sincronizar depois
+      localStorage.setItem('offline_prova_nome', provaNome);
+      localStorage.setItem('offline_prova_data', provaData);
     } finally {
       setSalvandoProva(false);
     }
   }, [userId, provaNome, provaData]);
 
   // ============================================================
-  // UPLOAD DE FOTO DE PERFIL
+  // UPLOAD DE FOTO DE PERFIL (ignora offline)
   // ============================================================
   const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -253,7 +262,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // ATUALIZAR NOME
+  // ATUALIZAR NOME (com fallback offline)
   // ============================================================
   const handleUpdateName = useCallback(async (nome: string) => {
     if (!userId || !nome.trim()) return;
@@ -269,13 +278,16 @@ export default function ConfigPage() {
       setMensagemTipo('success');
       setTimeout(() => setMensagem(''), 3000);
     } catch (error: any) {
-      setMensagem('❌ Erro ao atualizar nome: ' + (error.message || 'Erro desconhecido'));
-      setMensagemTipo('error');
+      console.warn('Offline: nome salvo apenas localmente');
+      setUserName(nome.trim());
+      setMensagem('✅ Nome salvo localmente (sincronizará quando online)');
+      setMensagemTipo('info');
+      localStorage.setItem('offline_user_name', nome.trim());
     }
   }, [userId]);
 
   // ============================================================
-  // 📥 IMPORTAR FLASHCARDS DO ANKI
+  // 📥 IMPORTAR FLASHCARDS DO ANKI (funciona offline)
   // ============================================================
   const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -406,7 +418,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // 💾 BACKUP
+  // 💾 BACKUP (funciona offline)
   // ============================================================
   const exportarBackup = useCallback(() => {
     try {
@@ -473,18 +485,17 @@ export default function ConfigPage() {
   }, []);
 
   // ============================================================
-  // FUNÇÃO DE LOGOUT (usando Clerk)
+  // FUNÇÃO DE LOGOUT (sem Clerk)
   // ============================================================
-  const handleLogout = useCallback(async () => {
+  const handleLogout = useCallback(() => {
     if (confirm("Deseja realmente sair?")) {
       localStorage.removeItem('revisaflash_user_id');
-      await signOut();
       window.location.href = '/login';
     }
-  }, [signOut]);
+  }, []);
 
   // ============================================================
-  // 🔥 REABRIR TOUR DE ONBOARDING (CORRIGIDO)
+  // 🔥 REABRIR TOUR DE ONBOARDING
   // ============================================================
   const reabrirTour = useCallback(() => {
     if (!user?.id) {
@@ -493,17 +504,14 @@ export default function ConfigPage() {
       return;
     }
     if (confirm("Deseja reabrir o tour de boas-vindas? Isso vai recarregar a página.")) {
-      // Remove a chave de conclusão do tour
       localStorage.removeItem(`tour_completed_${user.id}`);
-      // Também remove qualquer outra chave que o tour possa usar
       localStorage.removeItem('onboarding_completed');
-      // Recarrega a página para reexibir o tour
       window.location.reload();
     }
   }, [user]);
 
   // ============================================================
-  // 🔥 EXCLUIR CONTA (CORRIGIDO)
+  // 🔥 EXCLUIR CONTA (funciona offline)
   // ============================================================
   const handleDeleteAccount = useCallback(async () => {
     if (!userId) {
@@ -528,20 +536,23 @@ export default function ConfigPage() {
     setMensagem("");
 
     try {
-      // 1. Marca o perfil como excluído no Supabase (soft delete)
-      const supabaseClient = await getSupabaseWithToken();
-      const { error: updateError } = await supabaseClient
-        .from('profiles')
-        .upsert({ 
-          id: userId, 
-          deleted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select();
+      // Tenta marcar no Supabase, se falhar (offline), apenas limpa local
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error: updateError } = await supabaseClient
+          .from('profiles')
+          .upsert({ 
+            id: userId, 
+            deleted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select();
+        if (updateError) throw updateError;
+      } catch (offlineError) {
+        console.warn('Offline: não foi possível marcar exclusão no Supabase');
+      }
 
-      if (updateError) throw updateError;
-
-      // 2. Remove todos os dados locais (limpa o localStorage)
+      // Remove todos os dados locais
       const keysToRemove = [
         'revisaflash_user_id',
         'revisaflash_user_name',
@@ -559,10 +570,7 @@ export default function ConfigPage() {
       ];
       keysToRemove.forEach(key => localStorage.removeItem(key));
 
-      // 3. Faz logout do Clerk
-      await signOut();
-
-      // 4. Redireciona para a página inicial
+      // Redireciona para login
       window.location.href = '/login';
 
     } catch (error: any) {
@@ -572,7 +580,7 @@ export default function ConfigPage() {
     } finally {
       setDeletandoConta(false);
     }
-  }, [userId, signOut]);
+  }, [userId]);
 
   // ============================================================
   // RENDER

@@ -12,6 +12,7 @@ import Conteudo from './routes/conteudo';
 import Configuracoes from './routes/configuracoes';
 import Calendario from './routes/calendario';
 import LandingPage from './routes/landing';
+// Importação do Flash IA foi removida
 
 // Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
@@ -36,7 +37,7 @@ export const router = createBrowserRouter([
     element: <Login />,
   },
   {
-    path: '/cadastro/*', // <-- CORRIGIDO: agora aceita sub-rotas como /cadastro/verify-email-address
+    path: '/cadastro/*',
     element: <Cadastro />,
   },
   {
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
+  // A rota /flash-ia foi removida
   {
     path: '*',
     element: <ClerkCatchAll />,

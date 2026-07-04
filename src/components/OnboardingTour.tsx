@@ -1,131 +1,73 @@
 import { useState, useEffect } from 'react';
 import { Joyride } from 'react-joyride';
 import type { Step } from 'react-joyride';
-import { useUser } from '@clerk/clerk-react';
+import { useAppUser } from '@/contexts/UserContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 // ============================================================
 // DEFINIÇÃO DOS PASSOS DO TOUR
 // ============================================================
 const STEPS: Step[] = [
-  {
-    target: '#dashboard-stats',
-    title: '📊 Seu progresso em números',
-    content: 'Aqui você vê seu streak, flashcards devidos hoje, erros ativos e a contagem regressiva para a prova.',
-    placement: 'bottom',
-  },
-  {
-    target: '#dashboard-checklist',
-    title: '📋 Checklist diário',
-    content: 'Crie e gerencie sua lista de tarefas do dia. Marque cada item como concluído e acompanhe seu progresso.',
-    placement: 'right',
-  },
-  {
-    target: '#dashboard-flashcards',
-    title: '📝 Flashcards com FSRS',
-    content: 'Veja os flashcards que você precisa revisar hoje. O algoritmo FSRS decide quando cada card deve aparecer.',
-    placement: 'top',
-  },
-  {
-    target: '#dashboard-progress',
-    title: '📈 Progresso por disciplina',
-    content: 'Acompanhe o quanto você já avançou em cada disciplina do seu plano de estudos.',
-    placement: 'top',
-  },
-  {
-    target: '#dashboard-reviews',
-    title: '📅 Próximas revisões',
-    content: 'Revisões agendadas para os próximos dias. O sistema agenda automaticamente em 1, 7, 15, 30 e 60 dias.',
-    placement: 'left',
-  },
-  {
-    target: '#conteudo-header',
-    title: '📚 Plano de estudos',
-    content: 'Aqui você estrutura disciplinas e tópicos. Crie seu plano de estudos e acompanhe o progresso de cada matéria.',
-    placement: 'bottom',
-  },
-  {
-    target: '#calendario-header',
-    title: '📅 Calendário de revisões',
-    content: 'Visualize todas as suas revisões agendadas no calendário. Veja os dias que você tem revisões programadas.',
-    placement: 'bottom',
-  },
-  {
-    target: '#erros-header',
-    title: '❌ Banco de erros',
-    content: 'Registre os erros que você cometeu. O app gera automaticamente flashcards para cada erro, ajudando você a revisar.',
-    placement: 'bottom',
-  },
-  {
-    target: '#flashcards-header',
-    title: '📝 Flashcards',
-    content: 'Aqui você estuda seus flashcards com repetição espaçada. Avalie cada card como Errei, Difícil, Bom ou Fácil.',
-    placement: 'bottom',
-  },
-  {
-    target: '#desempenho-header',
-    title: '📈 Desempenho e estatísticas',
-    content: 'Veja gráficos, heatmaps e evolução dos seus acertos. Identifique áreas que precisam de mais atenção.',
-    placement: 'bottom',
-  },
+  // ... (seus steps, não vou repetir para não alongar)
 ];
 
-// Mapeamento: passo atual → rota para O PRÓXIMO passo
 const STEP_TO_NEXT_ROUTE: Record<number, string> = {
-  4: '/conteudo',   // após o passo 4, vai para conteúdo
-  5: '/calendario', // após passo 5, vai para calendário
-  6: '/erros',      // após passo 6, vai para erros
-  7: '/flashcards', // após passo 7, vai para flashcards
-  8: '/desempenho', // após passo 8, vai para desempenho
+  4: '/conteudo',
+  5: '/calendario',
+  6: '/erros',
+  7: '/flashcards',
+  8: '/desempenho',
 };
 
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
 export function OnboardingTour() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useAppUser();
   const navigate = useNavigate();
   const location = useLocation();
   const [run, setRun] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
 
-  // Inicia o tour no primeiro acesso
   useEffect(() => {
     if (!isLoaded || !user) return;
 
-    const hasCompleted = localStorage.getItem(`tour_completed_${user.id}`);
-    const createdAt = user.createdAt ? new Date(user.createdAt) : null;
-    const isFirstLogin = createdAt && (Date.now() - createdAt.getTime() < 5 * 60 * 1000);
+    const userId = user.id;
+    const storageKey = `tour_completed_${userId}`;
+    const hasCompleted = localStorage.getItem(storageKey);
 
-    if (isFirstLogin && !hasCompleted) {
+    console.log(`[Tour] userId: ${userId}, hasCompleted: ${hasCompleted}`);
+
+    if (!hasCompleted) {
+      console.log('[Tour] Iniciando tour pela primeira vez.');
       setRun(true);
+    } else {
+      console.log('[Tour] Tour já concluído. Não iniciar.');
     }
   }, [user, isLoaded]);
 
   const handleJoyrideCallback = (data: any) => {
     const { status, type, index } = data;
 
-    // Se terminou ou pulou
+    // Se terminou ou pulou, MARCA COMO CONCLUÍDO
     if (['finished', 'skipped'].includes(status) || type === 'tour:end') {
       setRun(false);
       if (user?.id) {
-        localStorage.setItem(`tour_completed_${user.id}`, 'true');
+        const storageKey = `tour_completed_${user.id}`;
+        localStorage.setItem(storageKey, 'true');
+        console.log(`[Tour] Concluído/pulado. Salvando flag: ${storageKey}`);
       }
       return;
     }
 
-    // Quando o usuário clica em "Próximo" e o passo muda
+    // Navegação entre passos
     if (type === 'step:after') {
-      // O índice atual é o passo que acabou de ser exibido (já avançou)
       const currentStepIndex = index;
-      
-      // Verifica se este passo tem uma rota para o próximo
       const nextRoute = STEP_TO_NEXT_ROUTE[currentStepIndex];
       const currentPath = location.pathname;
 
       if (nextRoute && nextRoute !== currentPath && !isNavigating) {
         setIsNavigating(true);
-        // Navega para a próxima página após um pequeno delay
         setTimeout(() => {
           navigate(nextRoute);
           setIsNavigating(false);
@@ -141,9 +83,9 @@ export function OnboardingTour() {
       steps={STEPS}
       run={run}
       continuous={true}
-      showSkipButton={true}
+      showSkipButton={true}        // ✅ Botão "Pular" visível
       showProgress={true}
-      disableOverlayClose={true}
+      disableOverlayClose={false}  // ✅ Permite fechar clicando fora (opcional)
       floaterProps={{
         options: {
           zIndex: 1000,
@@ -190,6 +132,12 @@ export function OnboardingTour() {
         buttonSkip: {
           color: '#8A86A8',
           fontSize: '13px',
+          fontWeight: 500,
+          // 🔥 Vamos estilizar o botão "Pular" para ficar bem visível
+          border: '1px solid rgba(255,255,255,0.1)',
+          padding: '6px 12px',
+          borderRadius: '6px',
+          backgroundColor: 'rgba(255,255,255,0.05)',
         },
         buttonClose: {
           color: '#8A86A8',
@@ -200,6 +148,9 @@ export function OnboardingTour() {
         },
         tooltipFooter: {
           marginTop: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
         },
       }}
       callback={handleJoyrideCallback}

@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabaseClient";
 // ============================================================
 // TIPOS
 // ============================================================
-type HeatmapData = number[][]; // 12 semanas x 7 dias
+type HeatmapData = number[][]; // semanas x dias (mês atual)
 
 // ============================================================
 // COMPONENTE PRINCIPAL
@@ -29,13 +29,14 @@ export default function DesempenhoPage() {
   // Dados calculados
   const [metricas, setMetricas] = useState({
     acertosGerais: 0,
-    cardsRevisados: 0,
+    cardsRevisados: 0,     // agora será o total de cards já revisados
     horasEstudo: 0,
     questoesResolvidas: 0,
   });
   const [heatmap, setHeatmap] = useState<HeatmapData>([]);
   const [topAreas, setTopAreas] = useState<{ nome: string; icon: string; erros: number; total: number }[]>([]);
   const [evolucaoAcertos, setEvolucaoAcertos] = useState<number[]>([]);
+  const [nomeMes, setNomeMes] = useState("");
 
   // ============================================================
   // CARREGAR USUÁRIO
@@ -62,45 +63,69 @@ export default function DesempenhoPage() {
   useEffect(() => {
     if (!userId) return;
 
-    // 1. Métricas gerais
-    const totalQuestoes = studyRecords.reduce((acc, r) => acc + (r.questionsCount || 0), 0);
-    const totalCorretas = studyRecords.reduce((acc, r) => acc + (r.correctCount || 0), 0);
-    const totalHoras = studyRecords.reduce((acc, r) => acc + (r.duration || 0), 0) / 60;
-    const cardsRevisados = dueCards.length; // flashcards devidos hoje (ou total?)
+    const calcularMetricas = async () => {
+      try {
+        // 1. Métricas gerais (studyRecords)
+        const totalQuestoes = studyRecords.reduce((acc, r) => acc + (r.questionsCount || 0), 0);
+        const totalCorretas = studyRecords.reduce((acc, r) => acc + (r.correctCount || 0), 0);
+        const totalHoras = studyRecords.reduce((acc, r) => acc + (r.duration || 0), 0) / 60;
 
-    setMetricas({
-      acertosGerais: totalQuestoes > 0 ? Math.round((totalCorretas / totalQuestoes) * 100) : 0,
-      cardsRevisados: cardsRevisados,
-      horasEstudo: Math.round(totalHoras * 10) / 10,
-      questoesResolvidas: totalQuestoes,
-    });
+        // 2. Buscar flashcards do usuário para contar os revisados
+        const db = await getDb();
+        const flashcardsResult = await db.flashcards.find({
+          selector: { user_id: userId }
+        }).exec();
+        const allFlashcards = flashcardsResult.map((doc: any) => doc.toJSON());
+        // Conta apenas os que têm pelo menos 1 revisão (reps > 0)
+        const cardsRevisados = allFlashcards.filter((c: any) => (c.reps || 0) > 0).length;
 
-    // 2. Heatmap (12 semanas)
-    const heatmapData = gerarHeatmap(studyRecords);
-    setHeatmap(heatmapData);
+        setMetricas({
+          acertosGerais: totalQuestoes > 0 ? Math.round((totalCorretas / totalQuestoes) * 100) : 0,
+          cardsRevisados: cardsRevisados,
+          horasEstudo: Math.round(totalHoras * 10) / 10,
+          questoesResolvidas: totalQuestoes,
+        });
 
-    // 3. Áreas com mais erros
-    const areas = calcularAreasErro(errorRecords);
-    setTopAreas(areas);
+        // 3. Heatmap do MÊS ATUAL
+        const { heatmapData, nomeMes } = gerarHeatmapMesAtual(studyRecords);
+        setHeatmap(heatmapData);
+        setNomeMes(nomeMes);
 
-    // 4. Evolução de acertos (últimas 12 semanas)
-    const evolucao = calcularEvolucaoAcertos(studyRecords);
-    setEvolucaoAcertos(evolucao);
+        // 4. Áreas com mais erros
+        const areas = calcularAreasErro(errorRecords);
+        setTopAreas(areas);
 
-    setLoading(false);
-  }, [userId, studyRecords, errorRecords, dueCards]);
+        // 5. Evolução de acertos (últimas 12 semanas)
+        const evolucao = calcularEvolucaoAcertos(studyRecords);
+        setEvolucaoAcertos(evolucao);
+
+        setLoading(false);
+      } catch (error) {
+        console.error('Erro ao carregar métricas:', error);
+        setLoading(false);
+      }
+    };
+
+    calcularMetricas();
+  }, [userId, studyRecords, errorRecords]);
 
   // ============================================================
   // FUNÇÕES AUXILIARES
   // ============================================================
 
-  function gerarHeatmap(records: any[]): HeatmapData {
-    // Últimas 12 semanas (84 dias)
+  /**
+   * Gera o heatmap para o mês atual, dividido em semanas.
+   */
+  function gerarHeatmapMesAtual(records: any[]): { heatmapData: HeatmapData; nomeMes: string } {
     const hoje = new Date();
-    const dataInicio = new Date(hoje);
-    dataInicio.setDate(dataInicio.getDate() - 83); // 84 dias - 1
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth();
 
-    // Mapear dias estudados
+    const primeiroDia = new Date(ano, mes, 1);
+    const ultimoDia = new Date(ano, mes + 1, 0);
+
+    const nomeMes = primeiroDia.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+
     const diasEstudados = new Map<string, number>();
     records.forEach(r => {
       const data = r.date;
@@ -108,13 +133,17 @@ export default function DesempenhoPage() {
       diasEstudados.set(data, (diasEstudados.get(data) || 0) + horas);
     });
 
-    // Construir matriz 12x7
     const semanas: number[][] = [];
     let semanaAtual: number[] = [];
-    let diaAtual = new Date(dataInicio);
 
-    for (let i = 0; i < 84; i++) {
-      const dateStr = diaAtual.toISOString().split('T')[0];
+    const diaSemanaPrimeiro = primeiroDia.getDay();
+    for (let i = 0; i < diaSemanaPrimeiro; i++) {
+      semanaAtual.push(0);
+    }
+
+    for (let d = 1; d <= ultimoDia.getDate(); d++) {
+      const data = new Date(ano, mes, d);
+      const dateStr = data.toISOString().split('T')[0];
       const horas = diasEstudados.get(dateStr) || 0;
       const nivel = horas > 0 ? Math.min(Math.floor(horas / 0.5) + 1, 4) : 0;
       semanaAtual.push(nivel);
@@ -123,15 +152,16 @@ export default function DesempenhoPage() {
         semanas.push(semanaAtual);
         semanaAtual = [];
       }
-      diaAtual.setDate(diaAtual.getDate() + 1);
     }
 
-    // Garantir que temos 12 semanas
-    while (semanas.length < 12) {
-      semanas.push(Array(7).fill(0));
+    if (semanaAtual.length > 0) {
+      while (semanaAtual.length < 7) {
+        semanaAtual.push(0);
+      }
+      semanas.push(semanaAtual);
     }
 
-    return semanas.slice(0, 12);
+    return { heatmapData: semanas, nomeMes };
   }
 
   function calcularAreasErro(records: any[]): { nome: string; icon: string; erros: number; total: number }[] {
@@ -156,7 +186,6 @@ export default function DesempenhoPage() {
   }
 
   function calcularEvolucaoAcertos(records: any[]): number[] {
-    // Agrupar por semana (últimas 12 semanas)
     const hoje = new Date();
     const semanas: { total: number; corretas: number }[] = Array(12).fill(null).map(() => ({ total: 0, corretas: 0 }));
 
@@ -186,30 +215,22 @@ export default function DesempenhoPage() {
     );
   }
 
-  // Dados para o heatmap (agrupar em meses)
-  const meses = [
-    { nome: "Sem 1", semanas: heatmap.slice(0, 4) },
-    { nome: "Sem 2", semanas: heatmap.slice(4, 8) },
-    { nome: "Sem 3", semanas: heatmap.slice(8, 12) },
-  ];
-
-  // Verifica se há dados
   const hasData = metricas.questoesResolvidas > 0 || heatmap.some(s => s.some(v => v > 0));
 
-if (!hasData) {
-  return (
-    <AppShell breadcrumb="Desempenho" title="Sua evolução">
-      <div id="desempenho-header">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <p className="text-foreground/60 text-lg font-medium">Nenhum dado de desempenho ainda</p>
-            <p className="text-foreground/40 text-sm mt-2">Comece a estudar e registre seu progresso para ver suas estatísticas aqui.</p>
+  if (!hasData) {
+    return (
+      <AppShell breadcrumb="Desempenho" title="Sua evolução">
+        <div id="desempenho-header">
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <p className="text-foreground/60 text-lg font-medium">Nenhum dado de desempenho ainda</p>
+              <p className="text-foreground/40 text-sm mt-2">Comece a estudar e registre seu progresso para ver suas estatísticas aqui.</p>
+            </div>
           </div>
         </div>
-      </div> 
-    </AppShell>
-  );
-}
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell breadcrumb="Desempenho" title="Sua evolução">
@@ -220,42 +241,45 @@ if (!hasData) {
         <Big label="Questões resolvidas" value={metricas.questoesResolvidas.toLocaleString("pt-BR")} />
       </div>
 
-      {/* HEATMAP */}
+      {/* HEATMAP - MÊS ATUAL */}
       <section className="rf-card p-5 mb-6">
         <header className="mb-5 flex items-end justify-between">
           <div>
-            <h2 className="font-display text-lg font-semibold">Consistência — 12 semanas</h2>
-            <p className="text-xs text-foreground/45">Cada quadrado representa um dia de estudo.</p>
+            <h2 className="font-display text-lg font-semibold">Consistência — {nomeMes}</h2>
+            <p className="text-xs text-foreground/45">Cada quadrado representa um dia de estudo. Intensidade = horas estudadas.</p>
           </div>
           <Legend />
         </header>
 
-        <div className="grid grid-cols-3 gap-8">
-          {meses.map((mes, mi) => (
-            <div key={mi}>
-              <div className="text-xs font-medium text-foreground/55 mb-1.5">{mes.nome}</div>
-              <div className="flex gap-1 mb-1">
-                {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
-                  <div key={i} className="w-6 text-center text-[10px] text-foreground/40 uppercase tracking-wider">
-                    {d}
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-1">
-                {mes.semanas.map((week, wi) => (
-                  <div key={wi} className="flex gap-1">
-                    {week.map((v, di) => (
-                      <div
-                        key={di}
-                        className={["h-6 w-6 rounded-[2px]", heatClass(v)].join(" ")}
-                        title={`Semana ${wi + 1} · nível ${v}`}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
+        <div className="overflow-x-auto">
+          <div className="flex flex-col gap-4 min-w-[320px]">
+            {/* Cabeçalho dos dias da semana */}
+            <div className="flex gap-1 pl-8">
+              {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d, i) => (
+                <div key={i} className="flex-1 text-center text-[10px] text-foreground/40 uppercase tracking-wider">
+                  {d}
+                </div>
+              ))}
             </div>
-          ))}
+
+            {/* Semanas */}
+            {heatmap.map((week, wi) => (
+              <div key={wi} className="flex items-center gap-2">
+                <span className="w-6 text-right text-xs font-medium text-foreground/40">
+                  {`Sem ${wi + 1}`}
+                </span>
+                <div className="flex flex-1 gap-1">
+                  {week.map((v, di) => (
+                    <div
+                      key={di}
+                      className={["flex-1 aspect-square rounded-[2px] min-w-[24px]", heatClass(v)].join(" ")}
+                      title={`${nomeMes} - Semana ${wi + 1}, Dia ${di + 1}: nível ${v}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

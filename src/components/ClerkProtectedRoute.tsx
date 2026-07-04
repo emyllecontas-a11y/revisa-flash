@@ -1,11 +1,11 @@
-import { useUser } from '@clerk/clerk-react';
+import { useAppUser } from '@/contexts/UserContext'; // <-- ALTERADO
 import { Navigate } from 'react-router-dom';
 import { AccessExpired } from './AccessExpired';
 
 export function ClerkProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isLoaded, isSignedIn, user } = useUser();
+  const { isLoaded, isSignedIn, user } = useAppUser(); // <-- ALTERADO
 
-  // 1. Aguarda o carregamento do Clerk
+  // 1. Aguarda o carregamento (agora do nosso contexto)
   if (!isLoaded) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -19,12 +19,13 @@ export function ClerkProtectedRoute({ children }: { children: React.ReactNode })
     return <Navigate to="/login" replace />;
   }
 
-  // 3. Verifica o trial nos metadados públicos do usuário
-  const trialEndsAt = user?.publicMetadata?.trialEndsAt as string | undefined;
+  // 3. Verifica o trial nos metadados públicos do usuário (se disponível)
+  //    Como o user offline pode não ter publicMetadata, tratamos com fallback
+  const trialEndsAt = (user as any)?.publicMetadata?.trialEndsAt as string | undefined;
   const now = new Date();
   const trialDate = trialEndsAt ? new Date(trialEndsAt) : null;
 
-  // Se não houver trialEndsAt, permite acesso (fallback para usuários existentes)
+  // Se não houver trialEndsAt, permite acesso (fallback para usuários existentes ou offline)
   // Se houver, verifica se a data ainda é futura
   const hasAccess = !trialDate || trialDate > now;
 

@@ -20,11 +20,11 @@ import {
   Chrome,
 } from "lucide-react";
 import { useState } from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useAppUser } from "@/contexts/UserContext"; // <-- ALTERADO
 
 export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useAppUser(); // <-- ALTERADO
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">

@@ -287,7 +287,7 @@ export default function ErrosPage() {
                       <div className="grid h-10 w-10 place-items-center rounded-lg bg-background/60 text-lg">{area.icon}</div>
                       <div>
                         <h3 className="text-sm font-semibold">{area.name}</h3>
-                        <p className="text-[11px] text-foreground/45">{area.total} questões registradas</p>
+                        <p className="text-[11px] text-foreground/45">{area.errors} erros ativos</p>
                       </div>
                     </div>
                     {critico && (

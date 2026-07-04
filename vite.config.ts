@@ -23,6 +23,15 @@ export default defineConfig({
     exclude: ['broadcast-channel'],
   },
   ssr: false,
+  server: {
+    proxy: {
+      '/pdf': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        // NÃO use rewrite aqui! Mantenha o caminho original.
+      }
+    }
+  },
   build: {
     ssr: false,
     rollupOptions: {

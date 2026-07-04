@@ -5,7 +5,7 @@ import {
   Flame, LogOut, ChevronRight, User
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useUser, useClerk } from "@clerk/clerk-react";
+import { useAppUser } from "@/contexts/UserContext";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
@@ -53,10 +53,9 @@ export function AppShell({
   const navigate = useNavigate();
 
   // ============================================================
-  // CLERK
+  // USANDO NOSSO CONTEXTO (em vez de Clerk diretamente)
   // ============================================================
-  const { user, isSignedIn, isLoaded } = useUser();
-  const { signOut } = useClerk();
+  const { user, isSignedIn, isLoaded } = useAppUser();
 
   // ============================================================
   // NOME E AVATAR DO SUPABASE (fonte única)
@@ -78,8 +77,7 @@ export function AppShell({
         if (data?.avatar_url) setAvatarFromSupabase(data.avatar_url);
       } catch (error) {
         console.warn('Erro ao carregar perfil no AppShell:', error);
-        // Fallback para o Clerk
-        const fallbackName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+        const fallbackName = user?.fullName || user?.username || "Usuário";
         setProfileName(fallbackName);
       }
     };
@@ -126,12 +124,11 @@ export function AppShell({
   }, [studyRecords]);
 
   // ============================================================
-  // HANDLE LOGOUT
+  // HANDLE LOGOUT (sem Clerk)
   // ============================================================
   const handleLogout = async () => {
     if (confirm("Deseja realmente sair?")) {
       localStorage.removeItem('revisaflash_user_id');
-      await signOut();
       navigate('/login');
     }
   };
@@ -141,7 +138,6 @@ export function AppShell({
   // ============================================================
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* TOUR DE ONBOARDING – aparece em todas as páginas */}
       <OnboardingTour />
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-sidebar-border bg-sidebar lg:flex">
@@ -166,7 +162,6 @@ export function AppShell({
           ))}
         </nav>
 
-        {/* Perfil do usuário - com nome e avatar do Supabase */}
         <div className="border-t border-sidebar-border p-3">
           <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/5">
             {avatarFromSupabase ? (
@@ -195,7 +190,6 @@ export function AppShell({
         </div>
       </aside>
 
-      {/* Main */}
       <div className="lg:pl-[248px]">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">

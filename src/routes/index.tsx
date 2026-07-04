@@ -7,7 +7,7 @@ import {
 import { useStudy } from "@/contexts/StudyContext";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
-import { useUser } from "@clerk/clerk-react";
+import { useAppUser } from "@/contexts/UserContext";
 import { getDb } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { OnboardingTour } from "@/components/OnboardingTour";
@@ -34,7 +34,7 @@ interface ProximaRevisao {
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function DashboardPage() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useAppUser();
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("Usuário");
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -47,11 +47,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [proximasRevisoes, setProximasRevisoes] = useState<ProximaRevisao[]>([]);
 
-  // 🔥 NOVOS ESTADOS PARA PLANO DE ESTUDOS
   const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
   const [provaData, setProvaData] = useState<Date | null>(null);
 
-  // Contextos
   const studyContext = useStudy();
   const { records: studyRecords } = studyContext;
   const errorContext = useErrors();
@@ -70,14 +68,13 @@ export default function DashboardPage() {
   };
 
   // ============================================================
-  // CARREGAR DADOS (COM CLERK)
+  // CARREGAR DADOS
   // ============================================================
   useEffect(() => {
     const loadAllData = async () => {
       try {
         setLoading(true);
 
-        // 1. Obtém userId do Clerk
         const clerkUserId = user?.id || null;
         if (!clerkUserId) {
           setLoading(false);
@@ -87,7 +84,6 @@ export default function DashboardPage() {
         setUserId(clerkUserId);
         localStorage.setItem('revisaflash_user_id', clerkUserId);
 
-        // 2. Carrega o perfil do Supabase com token (incluindo prova_nome e prova_data)
         let profileName = "Usuário";
         let provaNomeTemp = "ENARE 2026";
         let provaDataTemp: Date | null = null;
@@ -106,45 +102,39 @@ export default function DashboardPage() {
             } else {
               profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
             }
-
-            if (profile.prova_nome) {
-              provaNomeTemp = profile.prova_nome;
-            }
-
+            if (profile.prova_nome) provaNomeTemp = profile.prova_nome;
             if (profile.prova_data) {
               const date = new Date(profile.prova_data);
-              if (!isNaN(date.getTime())) {
-                provaDataTemp = date;
-              }
+              if (!isNaN(date.getTime())) provaDataTemp = date;
             }
           } else {
             profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
           }
         } catch (e) {
-          console.warn('Erro ao carregar perfil:', e);
+          console.warn('Erro ao carregar perfil (offline ou erro):', e);
           profileName = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || "Usuário";
+          const savedProvaNome = localStorage.getItem('offline_prova_nome');
+          const savedProvaData = localStorage.getItem('offline_prova_data');
+          if (savedProvaNome) provaNomeTemp = savedProvaNome;
+          if (savedProvaData) {
+            const date = new Date(savedProvaData);
+            if (!isNaN(date.getTime())) provaDataTemp = date;
+          }
         }
 
         setUserName(profileName);
         localStorage.setItem('revisaflash_user_name', profileName);
-
-        // 🔥 ATUALIZAR PLANO DE ESTUDOS
         setProvaNome(provaNomeTemp);
         setProvaData(provaDataTemp);
 
-        // 3. Dias até a prova (usando dados do perfil ou fallback)
         let dataProva = provaDataTemp;
-        if (!dataProva) {
-          // Fallback: 13 de setembro de 2026
-          dataProva = new Date(2026, 8, 13);
-        }
+        if (!dataProva) dataProva = new Date(2026, 8, 13);
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
         dataProva.setHours(0, 0, 0, 0);
         const diff = Math.ceil((dataProva.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
         setDiasAteProva(Math.max(0, diff));
 
-        // 4. Streak
         if (studyRecords.length > 0) {
           const datas = [...new Set(studyRecords.map(r => r.date))].sort();
           if (datas.length > 0) {
@@ -157,15 +147,12 @@ export default function DashboardPage() {
                 const dataAnterior = new Date(dataAtual);
                 dataAnterior.setDate(dataAnterior.getDate() - 1);
                 dataAtual = dataAnterior.toISOString().split('T')[0];
-              } else {
-                break;
-              }
+              } else break;
             }
             setStreak(streakCount);
           }
         }
 
-        // 5. Progresso por disciplina
         try {
           const db = await getDb();
           const disciplinesResult = await db.disciplines.find({
@@ -186,21 +173,17 @@ export default function DashboardPage() {
             const pct = Math.round((concluidos / total) * 100);
             return { nome: d.name, progresso: pct };
           });
-
           progresso.sort((a, b) => b.progresso - a.progresso);
           setDisciplinasProgresso(progresso.slice(0, 4));
         } catch (error) {
           console.error('Erro ao carregar progresso:', error);
         }
 
-        // 6. Total de erros
         setTotalErros(getTotalErrors());
 
-        // 7. Próximas revisões
         try {
           const db = await getDb();
           const hojeStr = new Date().toISOString().split('T')[0];
-
           const revisoesResult = await db.revisoes.find({
             selector: { user_id: clerkUserId }
           }).exec();
@@ -228,7 +211,6 @@ export default function DashboardPage() {
                 date: date
               };
             });
-
           setProximasRevisoes(proximas);
         } catch (error) {
           console.error('Erro ao carregar próximas revisões:', error);
@@ -253,23 +235,47 @@ export default function DashboardPage() {
     const saved = localStorage.getItem('dashboard_checklist');
     if (saved) {
       try {
-        setChecklist(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setChecklist(parsed);
+          return;
+        }
       } catch {
-        setChecklist([]);
+        // ignore
       }
-    } else {
-      const defaultItems: ChecklistItem[] = [
-        { id: '1', titulo: 'Revisar flashcards devidos', feito: false },
-        { id: '2', titulo: 'Estudar 1 disciplina', feito: false },
-        { id: '3', titulo: 'Anotar erros do dia', feito: false },
-      ];
-      setChecklist(defaultItems);
     }
+    // Define itens padrão apenas se não houver nada salvo
+    const defaultItems: ChecklistItem[] = [
+      { id: crypto.randomUUID(), titulo: 'Revisar flashcards devidos', feito: false },
+      { id: crypto.randomUUID(), titulo: 'Estudar 1 disciplina', feito: false },
+      { id: crypto.randomUUID(), titulo: 'Anotar erros do dia', feito: false },
+    ];
+    setChecklist(defaultItems);
+    localStorage.setItem('dashboard_checklist', JSON.stringify(defaultItems));
   }, []);
 
+  // 🔥 Sincroniza com localStorage sempre que o checklist mudar
   useEffect(() => {
     localStorage.setItem('dashboard_checklist', JSON.stringify(checklist));
   }, [checklist]);
+
+  // 🔥 Escuta mudanças no localStorage (para sincronizar entre abas)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'dashboard_checklist' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setChecklist(parsed);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const toggleChecklist = useCallback((id: string) => {
     setChecklist(prev => prev.map(item =>
@@ -280,7 +286,7 @@ export default function DashboardPage() {
   const addChecklistItem = useCallback(() => {
     if (!newChecklistText.trim()) return;
     const newItem: ChecklistItem = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       titulo: newChecklistText.trim(),
       feito: false,
     };
@@ -308,7 +314,6 @@ export default function DashboardPage() {
 
   return (
     <AppShell breadcrumb="Início" title={`${getSaudacao()}, ${userName.split(" ")[0]}.`}>
-      {/* TOUR DE ONBOARDING */}
       <OnboardingTour />
 
       <p className="-mt-4 mb-8 max-w-2xl text-sm text-foreground/55">
@@ -316,9 +321,7 @@ export default function DashboardPage() {
         e <span className="font-medium text-accent">{diasAteProva} dias</span> até a <span className="font-medium text-foreground">{provaNome}</span>.
       </p>
 
-      {/* Bento grid */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Stat cards */}
         <div id="dashboard-stats" className="col-span-12 grid grid-cols-12 gap-4">
           <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
           <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
@@ -326,7 +329,6 @@ export default function DashboardPage() {
           <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint={provaNome} />
         </div>
 
-        {/* Checklist */}
         <section id="dashboard-checklist" className="col-span-12 rf-card p-5 lg:col-span-5">
           <header className="mb-4 flex items-center justify-between">
             <div>
@@ -368,7 +370,6 @@ export default function DashboardPage() {
             <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${checklist.length > 0 ? (checklist.filter(c => c.feito).length / checklist.length) * 100 : 0}%` }} />
           </div>
 
-          {/* Modal adicionar checklist */}
           {isAddingChecklist && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
               <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
@@ -401,7 +402,6 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Flashcards devidos hoje */}
         <section id="dashboard-flashcards" className="col-span-12 rf-card p-5 lg:col-span-7">
           <header className="mb-4 flex items-center justify-between">
             <div>
@@ -445,7 +445,6 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Disciplinas mini */}
         <section id="dashboard-progress" className="col-span-12 rf-card p-5 lg:col-span-7">
           <header className="mb-4 flex items-center justify-between">
             <div>
@@ -476,7 +475,6 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Próximas revisões */}
         <section id="dashboard-reviews" className="col-span-12 rf-card p-5 lg:col-span-5">
           <header className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-base font-semibold">Próximas revisões</h2>
