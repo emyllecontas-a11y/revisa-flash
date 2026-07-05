@@ -11,6 +11,7 @@ import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
+import { syncWithSupabase } from "@/lib/db"; // 🔥 NOVA IMPORTAÇÃO
 
 // ============================================================
 // COMPONENTE DE LOADING (estilo raio)
@@ -79,7 +80,7 @@ export function AppShell({
 
   // Contextos
   const { user, isSignedIn, isLoaded } = useAppUser();
-  const { loading: flashcardsLoading } = useFlashcardContext();
+  const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
   const studyContext = useStudy();
   const { records: studyRecords } = studyContext;
 
@@ -146,6 +147,26 @@ export function AppShell({
 
     setStreak(streakCount);
   }, [studyRecords]);
+
+  // ============================================================
+  // 🔥 NOVO: Sincronização automática ao abrir o app
+  // ============================================================
+  useEffect(() => {
+    // Só executa quando o usuário e os dados estiverem carregados
+    if (isLoaded && !flashcardsLoading) {
+      const syncAndRefresh = async () => {
+        try {
+          console.log('🔄 [AppShell] Iniciando sincronização automática...');
+          await syncWithSupabase();
+          refreshFlashcards();
+          console.log('✅ [AppShell] Sincronização automática concluída!');
+        } catch (error) {
+          console.error('❌ [AppShell] Erro na sincronização automática:', error);
+        }
+      };
+      syncAndRefresh();
+    }
+  }, [isLoaded, flashcardsLoading, refreshFlashcards]);
 
   // ============================================================
   // 🔥 EARLY RETURN (AGORA DEPOIS DE TODOS OS HOOKS)
