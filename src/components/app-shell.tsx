@@ -2,14 +2,36 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, BarChart3, Settings,
-  Flame, LogOut, ChevronRight, User
+  Flame, LogOut, ChevronRight, User, Zap
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
+import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
+
+// ============================================================
+// COMPONENTE DE LOADING (estilo raio)
+// ============================================================
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="text-center">
+        <div className="relative mx-auto h-16 w-16">
+          {/* Efeito de pulso ao redor do raio */}
+          <div className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+            <Zap className="h-8 w-8 text-primary" />
+          </div>
+        </div>
+        <p className="mt-4 text-sm font-medium text-foreground/70">Carregando...</p>
+        <p className="mt-1 text-xs text-foreground/40">Preparando seus dados</p>
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // ROTAS
@@ -51,6 +73,19 @@ export function AppShell({
   const location = useLocation();
   const pathname = location.pathname;
   const navigate = useNavigate();
+
+  // ============================================================
+  // CONTEXTOS PARA LOADING
+  // ============================================================
+  const { isLoaded: userLoaded } = useAppUser();
+  const { loading: flashcardsLoading } = useFlashcardContext();
+
+  // ============================================================
+  // SE AINDA ESTIVER CARREGANDO, MOSTRA TELA DE LOADING
+  // ============================================================
+  if (!userLoaded || flashcardsLoading) {
+    return <LoadingScreen />;
+  }
 
   // ============================================================
   // USANDO NOSSO CONTEXTO (em vez de Clerk diretamente)
@@ -124,7 +159,7 @@ export function AppShell({
   }, [studyRecords]);
 
   // ============================================================
-  // HANDLE LOGOUT (sem Clerk)
+  // HANDLE LOGOUT
   // ============================================================
   const handleLogout = async () => {
     if (confirm("Deseja realmente sair?")) {
