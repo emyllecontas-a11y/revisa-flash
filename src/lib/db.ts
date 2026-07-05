@@ -312,14 +312,28 @@ export async function syncWithSupabase(userId: string) {
       if (!collection) continue;
 
       // 1. PULL
-      let query = supabaseClient
-        .from(name)
-        .select('*')
-        .eq('user_id', userId)
-        .gte('updated_at', lastSync);
-
-      if (['decks', 'disciplines', 'topics'].includes(name)) {
-        query = query.is('deletedAt', null);
+      let query;
+      if (name === 'decks') {
+        // 🔥 CORREÇÃO: busca decks próprios OU compartilhados com o usuário
+        query = supabaseClient
+          .from(name)
+          .select('*')
+          .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
+          .gte('updated_at', lastSync)
+          .is('deletedAt', null);
+      } else if (['disciplines', 'topics'].includes(name)) {
+        query = supabaseClient
+          .from(name)
+          .select('*')
+          .eq('user_id', userId)
+          .gte('updated_at', lastSync)
+          .is('deletedAt', null);
+      } else {
+        query = supabaseClient
+          .from(name)
+          .select('*')
+          .eq('user_id', userId)
+          .gte('updated_at', lastSync);
       }
 
       const { data: supabaseData, error } = await query;
