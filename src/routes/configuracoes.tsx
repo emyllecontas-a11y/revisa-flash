@@ -6,7 +6,8 @@ import {
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
   Camera, HelpCircle, Save, Loader2
 } from "lucide-react";
-import { useAppUser } from "@/contexts/UserContext"; // <-- ALTERADO
+import { useAppUser } from "@/contexts/UserContext";
+import { useClerk } from "@clerk/clerk-react"; // <-- Importando Clerk
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
@@ -20,7 +21,8 @@ export default function ConfigPage() {
   // ============================================================
   // USANDO NOSSO CONTEXTO (em vez de Clerk)
   // ============================================================
-  const { user, isLoaded } = useAppUser(); // <-- ALTERADO
+  const { user, isLoaded } = useAppUser();
+  const { signOut } = useClerk(); // <-- Obtendo a função signOut
 
   // ============================================================
   // ESTADOS FUNCIONAIS
@@ -485,14 +487,22 @@ export default function ConfigPage() {
   }, []);
 
   // ============================================================
-  // FUNÇÃO DE LOGOUT (sem Clerk)
+  // FUNÇÃO DE LOGOUT (CORRIGIDA)
   // ============================================================
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     if (confirm("Deseja realmente sair?")) {
-      localStorage.removeItem('revisaflash_user_id');
-      window.location.href = '/login';
+      try {
+        await signOut(); // Encerra a sessão do Clerk
+        localStorage.removeItem('revisaflash_user_id');
+        window.location.href = '/login';
+      } catch (error) {
+        console.error("Erro ao fazer logout:", error);
+        // Fallback: remove manualmente e redireciona
+        localStorage.removeItem('revisaflash_user_id');
+        window.location.href = '/login';
+      }
     }
-  }, []);
+  }, [signOut]);
 
   // ============================================================
   // 🔥 REABRIR TOUR DE ONBOARDING
@@ -511,7 +521,7 @@ export default function ConfigPage() {
   }, [user]);
 
   // ============================================================
-  // 🔥 EXCLUIR CONTA (funciona offline)
+  // 🔥 EXCLUIR CONTA (CORRIGIDA)
   // ============================================================
   const handleDeleteAccount = useCallback(async () => {
     if (!userId) {
@@ -522,12 +532,10 @@ export default function ConfigPage() {
 
     const confirmar = confirm(
       "⚠️ ATENÇÃO: Essa ação é irreversível!\n\n" +
-      "Todos os seus dados serão permanentemente excluídos, incluindo:\n" +
-      "- Flashcards e decks\n" +
-      "- Erros registrados\n" +
-      "- Progresso de estudos\n" +
-      "- Plano de estudos\n\n" +
-      "Deseja realmente excluir sua conta?"
+      "Todos os seus dados serão permanentemente excluídos.\n\n" +
+      "Para excluir sua conta, você será redirecionado para o painel do Clerk.\n" +
+      "Lá, você pode excluir o usuário manualmente.\n\n" +
+      "Deseja continuar?"
     );
 
     if (!confirmar) return;
@@ -570,17 +578,28 @@ export default function ConfigPage() {
       ];
       keysToRemove.forEach(key => localStorage.removeItem(key));
 
-      // Redireciona para login
-      window.location.href = '/login';
+      // Redireciona para o Clerk Dashboard para exclusão manual
+      window.open('https://dashboard.clerk.com/users', '_blank');
+      
+      // Faz logout
+      await signOut();
+
+      setMensagem("📋 Redirecionado para o Clerk. Exclua seu usuário manualmente.");
+      setMensagemTipo('info');
+      
+      // Redireciona para login após alguns segundos
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 3000);
 
     } catch (error: any) {
-      console.error('❌ Erro ao excluir conta:', error);
-      setMensagem("❌ Erro ao excluir conta: " + (error.message || 'Erro desconhecido'));
+      console.error("❌ Erro ao excluir conta:", error);
+      setMensagem("❌ Erro ao excluir conta. Tente novamente.");
       setMensagemTipo('error');
     } finally {
       setDeletandoConta(false);
     }
-  }, [userId]);
+  }, [userId, signOut]);
 
   // ============================================================
   // RENDER

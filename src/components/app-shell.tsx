@@ -7,11 +7,12 @@ import {
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
+import { useClerk } from "@clerk/clerk-react"; // <-- NOVA IMPORTAÇÃO
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
-import { syncWithSupabase } from "@/lib/db"; // 🔥 NOVA IMPORTAÇÃO
+import { syncWithSupabase } from "@/lib/db";
 
 // ============================================================
 // COMPONENTE DE LOADING (estilo raio)
@@ -73,10 +74,7 @@ export function AppShell({
   const location = useLocation();
   const pathname = location.pathname;
   const navigate = useNavigate();
-
-  // ============================================================
-  // 🔥 TODOS OS HOOKS DEVEM VIR ANTES DE QUALQUER EARLY RETURN
-  // ============================================================
+  const { signOut } = useClerk(); // <-- OBTÉM A FUNÇÃO DE LOGOUT
 
   // Contextos
   const { user, isSignedIn, isLoaded } = useAppUser();
@@ -88,10 +86,6 @@ export function AppShell({
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
-
-  // ============================================================
-  // 🔥 EFFECTS (TAMBÉM DEVEM VIR ANTES DO EARLY RETURN)
-  // ============================================================
 
   // Carrega perfil do Supabase
   useEffect(() => {
@@ -148,11 +142,8 @@ export function AppShell({
     setStreak(streakCount);
   }, [studyRecords]);
 
-  // ============================================================
-  // 🔥 NOVO: Sincronização automática ao abrir o app
-  // ============================================================
+  // Sincronização automática
   useEffect(() => {
-    // Só executa quando o usuário e os dados estiverem carregados
     if (isLoaded && !flashcardsLoading) {
       const syncAndRefresh = async () => {
         try {
@@ -168,22 +159,26 @@ export function AppShell({
     }
   }, [isLoaded, flashcardsLoading, refreshFlashcards]);
 
-  // ============================================================
-  // 🔥 EARLY RETURN (AGORA DEPOIS DE TODOS OS HOOKS)
-  // ============================================================
-
   // Se ainda está carregando, mostra tela de loading
   if (!isLoaded || flashcardsLoading) {
     return <LoadingScreen />;
   }
 
   // ============================================================
-  // HANDLE LOGOUT
+  // 🔥 HANDLE LOGOUT CORRIGIDO (USANDO CLERK)
   // ============================================================
   const handleLogout = async () => {
     if (confirm("Deseja realmente sair?")) {
-      localStorage.removeItem('revisaflash_user_id');
-      navigate('/login');
+      try {
+        await signOut(); // Encerra a sessão do Clerk
+        localStorage.removeItem('revisaflash_user_id');
+        navigate('/login');
+      } catch (error) {
+        console.error("Erro ao fazer logout:", error);
+        // Fallback: tenta remover manualmente e redirecionar
+        localStorage.removeItem('revisaflash_user_id');
+        window.location.href = '/login';
+      }
     }
   };
 
