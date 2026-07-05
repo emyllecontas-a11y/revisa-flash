@@ -1,13 +1,13 @@
-// src/routes/flashcards.tsx (ou src/pages/FlashcardsPage.tsx)
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit, 
   CheckCircle, Search, Filter, Pencil, X, Bold, Italic, List,
-  History, AlertTriangle, Loader2
+  History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart
 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function FlashcardsPage() {
   const flashcardContext = useFlashcardContext();
@@ -29,7 +29,7 @@ export default function FlashcardsPage() {
     setCardMeta,
     getCardHistory,
     getAllCardsByDeck,
-    getAllFlashcards, // 🔥 NOVA FUNÇÃO
+    getAllFlashcards,
   } = flashcardContext;
 
   // ============================================================
@@ -39,6 +39,19 @@ export default function FlashcardsPage() {
   const [virado, setVirado] = useState(false);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [sessaoCards, setSessaoCards] = useState<any[]>([]);
+  
+  // 🔥 NOVOS ESTADOS PARA SESSÃO
+  const [sessionStats, setSessionStats] = useState<{ 
+    again: number; 
+    hard: number; 
+    good: number; 
+    easy: number; 
+    novos: number;
+    total: number;
+  } | null>(null);
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [editFromStudy, setEditFromStudy] = useState(false);
 
   // ============================================================
   // ESTADOS DOS MODAIS
@@ -75,7 +88,7 @@ export default function FlashcardsPage() {
   const [renameDescription, setRenameDescription] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
 
-  // 🔥 ESTADOS PARA LISTA DE CARDS
+  // Lista de cards
   const [filterStatus, setFilterStatus] = useState<"todos" | "para_revisar">("todos");
   const [allCardsInDeck, setAllCardsInDeck] = useState<any[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
@@ -116,7 +129,6 @@ export default function FlashcardsPage() {
     if (filterStatus === "todos") {
       return allCardsInDeck;
     } else {
-      // "para_revisar": cards com dueDate <= hoje OU novos (reps === 0)
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
       return allCardsInDeck.filter(c => {
@@ -128,25 +140,7 @@ export default function FlashcardsPage() {
   }, [allCardsInDeck, filterStatus]);
 
   // ============================================================
-  // VARIÁVEIS DERIVADAS (para o modo de estudo)
-  // ============================================================
-  const deckCardsDue = useMemo(() => {
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    return allCardsInDeck.filter(c => {
-      const due = new Date(c.dueDate);
-      due.setHours(0, 0, 0, 0);
-      return c.reps === 0 || due <= hoje;
-    });
-  }, [allCardsInDeck]);
-
-  const currentCard = deckCardsDue[currentCardIndex] || null;
-  const totalCards = stats.totalCards;
-  const dueCount = deckCardsDue.length;
-  const novos = deckCardsDue.filter(c => c.reps === 0).length;
-
-  // ============================================================
-  // 🔥 FUNÇÃO PARA ESTATÍSTICAS DOS DECKS (USANDO getAllFlashcards)
+  // FUNÇÃO PARA ESTATÍSTICAS DOS DECKS
   // ============================================================
   const getDeckStats = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
@@ -163,6 +157,42 @@ export default function FlashcardsPage() {
       due: due.length,
       novos: cards.filter(c => c.reps === 0).length,
     };
+  }, [getAllFlashcards]);
+
+  // ============================================================
+  // 🔥 FUNÇÃO PARA DADOS DO GRÁFICO DE PROGRESSO (Melhoria 6)
+  // ============================================================
+  const getStabilityOverTime = useCallback((deckId: string) => {
+    const allFlashcards = getAllFlashcards();
+    const cards = allFlashcards.filter(c => c.deck_id === deckId);
+    if (cards.length === 0) return [];
+    
+    // Agrupa por mês de criação
+    const grouped: Record<string, { total: number; sum: number; count: number }> = {};
+    cards.forEach(c => {
+      const date = new Date(c.createdAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      if (!grouped[key]) {
+        grouped[key] = { total: 0, sum: 0, count: 0 };
+      }
+      grouped[key].sum += c.stability || 0;
+      grouped[key].count += 1;
+    });
+    
+    // Converte para array de objetos para o gráfico
+    const sortedKeys = Object.keys(grouped).sort();
+    return sortedKeys.map(key => {
+      const data = grouped[key];
+      const avgStability = data.count > 0 ? data.sum / data.count : 0;
+      // Pega o nome do mês por extenso
+      const [year, month] = key.split('-');
+      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      return {
+        month: `${monthNames[parseInt(month) - 1]}/${year.slice(2)}`,
+        stability: Math.round(avgStability * 10) / 10,
+        count: data.count,
+      };
+    });
   }, [getAllFlashcards]);
 
   const getStatusBadge = (reps: number, dueDate?: string) => {
@@ -284,6 +314,17 @@ export default function FlashcardsPage() {
       if (editTopico.trim()) {
         setCardMeta(editCardId, { topico: editTopico.trim() });
       }
+      
+      // 🔥 Se a edição veio do estudo, atualiza o card na lista da sessão
+      if (editFromStudy) {
+        setSessaoCards(prev => prev.map(card => 
+          card.id === editCardId 
+            ? { ...card, front: editFrente.trim(), back: editVerso.trim() }
+            : card
+        ));
+        setEditFromStudy(false);
+      }
+      
       setIsEditModalOpen(false);
       setEditCardId(null);
       setEditFrente("");
@@ -301,7 +342,7 @@ export default function FlashcardsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards, selectedDeckId, getAllCardsByDeck]);
+  }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards, selectedDeckId, getAllCardsByDeck, editFromStudy]);
 
   const handleDeleteDeck = useCallback(async (deckId: string) => {
     if (!confirm("Tem certeza que deseja excluir este baralho e todos os seus flashcards?")) return;
@@ -325,11 +366,18 @@ export default function FlashcardsPage() {
         const updatedCards = await getAllCardsByDeck(selectedDeckId);
         setAllCardsInDeck(updatedCards);
       }
+      // Se estiver no modo estudo, remove da lista da sessão
+      if (modo === "estudo") {
+        setSessaoCards(prev => prev.filter(c => c.id !== cardId));
+        if (sessaoCards.length === 1) {
+          setModo("concluido");
+        }
+      }
     } catch (error: any) {
       console.error("❌ Erro ao deletar flashcard:", error);
       setErrorMessage("Erro ao deletar flashcard: " + (error.message || "Erro desconhecido"));
     }
-  }, [deleteCard, selectedDeckId, getAllCardsByDeck]);
+  }, [deleteCard, selectedDeckId, getAllCardsByDeck, modo, sessaoCards.length]);
 
   const handleRenameDeck = useCallback(async () => {
     if (!selectedDeckId || !renameName.trim()) {
@@ -359,45 +407,9 @@ export default function FlashcardsPage() {
     }
   }, [selectedDeckId, renameName, renameDescription, deckDisciplina, renameDeck, decks, setDeckMeta]);
 
-  const handleRating = useCallback(async (rating: Rating) => {
-    if (isRating) return;
-    if (!currentCard) return;
-    
-    setIsRating(true);
-    try {
-      const result = await reviewCard(currentCard.id, rating);
-      if (result) {
-        if (selectedDeckId) {
-          const updatedCards = await getAllCardsByDeck(selectedDeckId);
-          setAllCardsInDeck(updatedCards);
-        }
-        if (currentCardIndex < deckCardsDue.length - 1) {
-          setCurrentCardIndex((prev) => prev + 1);
-          setVirado(false);
-        } else {
-          setModo("concluido");
-          setVirado(false);
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao avaliar card:", error);
-    } finally {
-      setIsRating(false);
-    }
-  }, [isRating, currentCard, reviewCard, selectedDeckId, getAllCardsByDeck, currentCardIndex, deckCardsDue]);
-
-  const voltarDaConclusao = useCallback(async () => {
-    setModo("decks");
-    setSelectedDeckId(null);
-    setCurrentCardIndex(0);
-    setVirado(false);
-    refreshFlashcards();
-    if (selectedDeckId) {
-      const updatedCards = await getAllCardsByDeck(selectedDeckId);
-      setAllCardsInDeck(updatedCards);
-    }
-  }, [refreshFlashcards, selectedDeckId, getAllCardsByDeck]);
-
+  // ============================================================
+  // 🔥 FUNÇÃO DE INICIAR ESTUDO (COM ORDENAÇÃO - Melhoria 4)
+  // ============================================================
   const iniciarEstudo = useCallback(async (deckId: string) => {
     if (isStarting) return;
     setIsStarting(true);
@@ -416,6 +428,20 @@ export default function FlashcardsPage() {
         setIsStarting(false);
         return;
       }
+      
+      // 🔥 ORDENAÇÃO: mais antigos primeiro (por dueDate)
+      const sortedDue = due.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+      
+      setSessaoCards(sortedDue);
+      setSessionStats({
+        again: 0,
+        hard: 0,
+        good: 0,
+        easy: 0,
+        novos: due.filter(c => c.reps === 0).length,
+        total: due.length,
+      });
+      setSessionStartTime(new Date());
       setSelectedDeckId(deckId);
       setCurrentCardIndex(0);
       setVirado(false);
@@ -428,10 +454,79 @@ export default function FlashcardsPage() {
     }
   }, [getAllCardsByDeck, isStarting]);
 
+  // ============================================================
+  // 🔥 FUNÇÃO DE AVALIAÇÃO (COM CONTADORES - Melhoria 1)
+  // ============================================================
+  const handleRating = useCallback(async (rating: Rating) => {
+    if (isRating) return;
+    const currentCard = sessaoCards[currentCardIndex];
+    if (!currentCard) return;
+    
+    setIsRating(true);
+    try {
+      const result = await reviewCard(currentCard.id, rating);
+      if (result) {
+        // Atualiza estatísticas da sessão
+        setSessionStats(prev => {
+          if (!prev) return prev;
+          const newStats = { ...prev };
+          if (rating === 'again') newStats.again += 1;
+          else if (rating === 'hard') newStats.hard += 1;
+          else if (rating === 'good') newStats.good += 1;
+          else if (rating === 'easy') newStats.easy += 1;
+          return newStats;
+        });
+        
+        // Avança para o próximo card
+        if (currentCardIndex < sessaoCards.length - 1) {
+          setCurrentCardIndex((prev) => prev + 1);
+          setVirado(false);
+        } else {
+          setModo("concluido");
+          setVirado(false);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao avaliar card:", error);
+    } finally {
+      setIsRating(false);
+    }
+  }, [isRating, sessaoCards, currentCardIndex, reviewCard]);
+
+  // ============================================================
+  // VOLTAR DA CONCLUSÃO
+  // ============================================================
+  const voltarDaConclusao = useCallback(async () => {
+    setModo("decks");
+    setSelectedDeckId(null);
+    setCurrentCardIndex(0);
+    setVirado(false);
+    setSessaoCards([]);
+    setSessionStats(null);
+    setSessionStartTime(null);
+    refreshFlashcards();
+  }, [refreshFlashcards]);
+
   const voltarParaDecks = useCallback(() => {
     setSelectedDeckId(null);
     setModo("decks");
+    setSessaoCards([]);
+    setSessionStats(null);
+    setSessionStartTime(null);
   }, []);
+
+  // ============================================================
+  // 🔥 ABRIR MODAL DE EDIÇÃO A PARTIR DO ESTUDO (Melhoria 5)
+  // ============================================================
+  const openEditFromStudy = useCallback((card: any) => {
+    const meta = getCardMeta(card.id);
+    setEditCardId(card.id);
+    setEditFrente(card.front);
+    setEditVerso(card.back);
+    setEditTopico(meta.topico || "");
+    setEditFromStudy(true);
+    setIsEditModalOpen(true);
+  }, [getCardMeta]);
 
   const openEditModal = useCallback((card: any) => {
     const meta = getCardMeta(card.id);
@@ -439,6 +534,7 @@ export default function FlashcardsPage() {
     setEditFrente(card.front);
     setEditVerso(card.back);
     setEditTopico(meta.topico || "");
+    setEditFromStudy(false);
     setIsEditModalOpen(true);
   }, [getCardMeta]);
 
@@ -447,60 +543,90 @@ export default function FlashcardsPage() {
   // ============================================================
   let conteudo = null;
 
-  if (modo === "estudo" && currentCard) {
+  if (modo === "estudo") {
+    const currentCard = sessaoCards[currentCardIndex] || null;
     const deck = decks?.find((d) => d.id === selectedDeckId);
-    conteudo = (
-      <AppShell breadcrumb="Flashcards · Estudo">
-        <button
-          onClick={() => { setModo("decks"); setVirado(false); setSelectedDeckId(null); setCurrentCardIndex(0); }}
-          className="mb-6 inline-flex items-center gap-1 text-xs font-medium text-foreground/55 hover:text-foreground"
-        >
-          <ChevronLeft className="h-3.5 w-3.5" /> Voltar aos decks
-        </button>
-        <div className="mx-auto max-w-2xl">
-          <div className="mb-4 flex items-center justify-between text-xs">
-            <span className="font-medium uppercase tracking-widest text-primary">{deck?.name || "Estudo"}</span>
-            <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {deckCardsDue.length}</span>
-          </div>
-          <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/5">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / deckCardsDue.length) * 100}%` }} />
-          </div>
+
+    if (currentCard) {
+      conteudo = (
+        <AppShell breadcrumb="Flashcards · Estudo">
           <button
-            onClick={() => setVirado((v) => !v)}
-            className="mt-6 grid min-h-[300px] w-full place-items-center rounded-2xl border border-border bg-surface p-10 text-center transition-all hover:border-primary/40 sm:min-h-[360px]"
-            style={{ boxShadow: virado ? "var(--shadow-glow)" : undefined }}
+            onClick={() => { 
+              setModo("decks"); 
+              setVirado(false); 
+              setSelectedDeckId(null); 
+              setCurrentCardIndex(0); 
+              setSessaoCards([]);
+              setSessionStats(null);
+              setSessionStartTime(null);
+            }}
+            className="mb-6 inline-flex items-center gap-1 text-xs font-medium text-foreground/55 hover:text-foreground"
           >
-            {!virado ? (
-              <div className="space-y-5">
-                <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Pergunta</div>
-                <p className="font-display text-balance text-xl font-medium leading-snug sm:text-2xl">{currentCard.front}</p>
-                <p className="text-xs text-foreground/40">Clique para revelar a resposta</p>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Resposta</div>
-                <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">{currentCard.back}</p>
+            <ChevronLeft className="h-3.5 w-3.5" /> Voltar aos decks
+          </button>
+          <div className="mx-auto max-w-2xl">
+            <div className="mb-4 flex items-center justify-between text-xs">
+              <span className="font-medium uppercase tracking-widest text-primary">{deck?.name || "Estudo"}</span>
+              <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {sessaoCards.length}</span>
+            </div>
+            <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/5">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / sessaoCards.length) * 100}%` }} />
+            </div>
+            
+            {/* 🔥 BOTÃO DE EDITAR DURANTE O ESTUDO */}
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={() => openEditFromStudy(currentCard)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors"
+              >
+                <Edit className="h-3.5 w-3.5" /> Editar card
+              </button>
+            </div>
+            
+            <button
+              onClick={() => setVirado((v) => !v)}
+              className="mt-2 grid min-h-[300px] w-full place-items-center rounded-2xl border border-border bg-surface p-10 text-center transition-all hover:border-primary/40 sm:min-h-[360px]"
+              style={{ boxShadow: virado ? "var(--shadow-glow)" : undefined }}
+            >
+              {!virado ? (
+                <div className="space-y-5">
+                  <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Pergunta</div>
+                  <p className="font-display text-balance text-xl font-medium leading-snug sm:text-2xl">{currentCard.front}</p>
+                  <p className="text-xs text-foreground/40">Clique para revelar a resposta</p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Resposta</div>
+                  <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">{currentCard.back}</p>
+                </div>
+              )}
+            </button>
+            {virado && (
+              <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
+                <FsrsButton label="Errei" hint="10 min" tone="accent" onClick={() => handleRating("again")} disabled={isRating} />
+                <FsrsButton label="Difícil" hint="2 dias" onClick={() => handleRating("hard")} disabled={isRating} />
+                <FsrsButton label="Bom" hint="4 dias" primary onClick={() => handleRating("good")} disabled={isRating} />
+                <FsrsButton label="Fácil" hint="12 dias" onClick={() => handleRating("easy")} disabled={isRating} />
               </div>
             )}
-          </button>
-          {virado && (
-            <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
-              <FsrsButton label="Errei" hint="10 min" tone="accent" onClick={() => handleRating("again")} disabled={isRating} />
-              <FsrsButton label="Difícil" hint="2 dias" onClick={() => handleRating("hard")} disabled={isRating} />
-              <FsrsButton label="Bom" hint="4 dias" primary onClick={() => handleRating("good")} disabled={isRating} />
-              <FsrsButton label="Fácil" hint="12 dias" onClick={() => handleRating("easy")} disabled={isRating} />
-            </div>
-          )}
-          {!virado && (
-            <div className="mt-6 flex items-center justify-center gap-2 text-xs text-foreground/40">
-              <RotateCw className="h-3 w-3" /> Espaço para virar · 1/2/3/4 para avaliar
-            </div>
-          )}
-        </div>
-      </AppShell>
-    );
+            {!virado && (
+              <div className="mt-6 flex items-center justify-center gap-2 text-xs text-foreground/40">
+                <RotateCw className="h-3 w-3" /> Espaço para virar · 1/2/3/4 para avaliar
+              </div>
+            )}
+          </div>
+        </AppShell>
+      );
+    } else {
+      setModo("concluido");
+    }
   } else if (modo === "concluido") {
     const deck = decks?.find((d) => d.id === selectedDeckId);
+    const stats = sessionStats;
+    const duration = sessionStartTime 
+      ? Math.round((new Date().getTime() - sessionStartTime.getTime()) / 1000 / 60) 
+      : 0;
+    
     conteudo = (
       <AppShell breadcrumb="Flashcards · Concluído">
         <div className="mx-auto max-w-2xl text-center">
@@ -514,7 +640,30 @@ export default function FlashcardsPage() {
             <p className="mt-2 text-sm text-foreground/55">
               Você revisou todos os flashcards do baralho <span className="font-medium text-foreground">{deck?.name}</span>.
             </p>
-            <p className="mt-1 text-xs text-foreground/40">Excelente trabalho! Continue assim.</p>
+            
+            {/* 🔥 RESUMO DA SESSÃO (Melhoria 1) */}
+            {stats && (
+              <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
+                <div className="rounded-lg bg-background/40 p-4">
+                  <div className="text-2xl font-bold text-green-400">{stats.good + stats.easy}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Acertos (Bom/Fácil)</div>
+                </div>
+                <div className="rounded-lg bg-background/40 p-4">
+                  <div className="text-2xl font-bold text-accent">{stats.again + stats.hard}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Erros (Errei/Difícil)</div>
+                </div>
+                <div className="rounded-lg bg-background/40 p-4">
+                  <div className="text-2xl font-bold text-primary">{stats.novos}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Novos cards</div>
+                </div>
+                <div className="rounded-lg bg-background/40 p-4">
+                  <div className="text-2xl font-bold text-white">{duration}m</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Tempo total</div>
+                </div>
+              </div>
+            )}
+            
+            <p className="mt-6 text-xs text-foreground/40">Excelente trabalho! Continue assim.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <button onClick={voltarDaConclusao} className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">Voltar para os decks</button>
               <button
@@ -531,6 +680,17 @@ export default function FlashcardsPage() {
                         return c.reps === 0 || dueDate <= hoje;
                       });
                       if (due.length > 0) {
+                        const sortedDue = due.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+                        setSessaoCards(sortedDue);
+                        setSessionStats({
+                          again: 0,
+                          hard: 0,
+                          good: 0,
+                          easy: 0,
+                          novos: due.filter(c => c.reps === 0).length,
+                          total: due.length,
+                        });
+                        setSessionStartTime(new Date());
                         setModo("estudo");
                         setCurrentCardIndex(0);
                         setVirado(false);
@@ -566,6 +726,9 @@ export default function FlashcardsPage() {
       const deckMeta = getDeckMeta(selectedDeckId);
       const isErrorDeck = deck.name === "Erros";
       const deckColor = deck.color || '#14B8A6';
+      
+      // 🔥 DADOS PARA O GRÁFICO (Melhoria 6)
+      const chartData = getStabilityOverTime(selectedDeckId);
       
       conteudo = (
         <AppShell breadcrumb={`Flashcards · ${deck.name}`}>
@@ -605,6 +768,40 @@ export default function FlashcardsPage() {
               ><Plus className="h-3.5 w-3.5" /> Novo flashcard</button>
             </div>
           </header>
+          
+          {/* 🔥 GRÁFICO DE PROGRESSO (Melhoria 6) */}
+          {chartData.length > 0 && (
+            <div className="mb-6 rf-card p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Evolução da Estabilidade Média</h3>
+                <span className="text-xs text-foreground/40">(por mês)</span>
+              </div>
+              <div className="h-[200px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                    <XAxis dataKey="month" tick={{ fill: '#8899aa', fontSize: 10 }} />
+                    <YAxis 
+                      domain={[0, 'auto']} 
+                      tick={{ fill: '#8899aa', fontSize: 10 }} 
+                      label={{ value: 'Estabilidade', angle: -90, position: 'insideLeft', fill: '#8899aa', fontSize: 10 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: '8px' }}
+                      labelStyle={{ color: '#cccccc' }}
+                      formatter={(value: any) => [`${value}`, 'Estabilidade média']}
+                    />
+                    <Line type="monotone" dataKey="stability" stroke="#14B8A6" strokeWidth={2} dot={{ fill: '#14B8A6', r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2 text-center text-[10px] text-foreground/30">
+                {chartData.length} meses de dados · Média geral: {(chartData.reduce((acc, d) => acc + d.stability, 0) / chartData.length).toFixed(1)}
+              </div>
+            </div>
+          )}
+          
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Mini l="Cards" v={deckStats.total} />
             <Mini l="Para revisar" v={deckStats.due} tone="accent" />
@@ -685,7 +882,7 @@ export default function FlashcardsPage() {
       );
     }
   } else {
-    // 🔥 LISTAGEM DE DECKS (USA getDeckStats com getAllFlashcards)
+    // LISTAGEM DE DECKS
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
@@ -709,7 +906,6 @@ export default function FlashcardsPage() {
         {decks && decks.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2">
             {decks.map((deck) => {
-              // 🔥 Usa a função corrigida com getAllFlashcards
               const stats = getDeckStats(deck.id);
               const meta = getDeckMeta(deck.id);
               const deckColor = deck.color || '#14B8A6';
@@ -793,8 +989,8 @@ export default function FlashcardsPage() {
         )}
       </div>
     </AppShell>
-);
-}
+  );
+  }
 
   // ============================================================
   // RENDERIZAÇÃO FINAL (conteúdo + modais)
