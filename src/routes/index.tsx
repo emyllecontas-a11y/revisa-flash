@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
-  Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X
+  Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X, RefreshCw, Loader2
 } from "lucide-react";
 import { useStudy } from "@/contexts/StudyContext";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useAppUser } from "@/contexts/UserContext";
-import { getDb } from "@/lib/db";
+import { getDb, syncWithSupabase } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { OnboardingTour } from "@/components/OnboardingTour";
 
@@ -49,6 +49,10 @@ export default function DashboardPage() {
 
   const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
   const [provaData, setProvaData] = useState<Date | null>(null);
+
+  // 🔥 NOVOS ESTADOS PARA SINCRONIZAÇÃO
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
 
   const studyContext = useStudy();
   const { records: studyRecords } = studyContext;
@@ -216,6 +220,13 @@ export default function DashboardPage() {
           console.error('Erro ao carregar próximas revisões:', error);
         }
 
+        // 🔥 CARREGAR ÚLTIMA SINCRONIZAÇÃO
+        const syncTime = localStorage.getItem('lastSyncTimestamp');
+        if (syncTime) {
+          const date = new Date(syncTime);
+          setLastSync(date.toLocaleTimeString());
+        }
+
       } catch (error) {
         console.error('Erro ao carregar dashboard:', error);
       } finally {
@@ -227,6 +238,34 @@ export default function DashboardPage() {
       loadAllData();
     }
   }, [studyRecords, getTotalErrors, user, isLoaded]);
+
+  // ============================================================
+  // 🔥 FUNÇÃO DE SINCORNIZAÇÃO MANUAL
+  // ============================================================
+  const handleSync = useCallback(async () => {
+    if (!userId) {
+      alert('Usuário não autenticado');
+      return;
+    }
+    if (isSyncing) return;
+
+    setIsSyncing(true);
+    try {
+      console.log('🔄 Sincronização manual iniciada...');
+      await syncWithSupabase(userId);
+      const syncTime = localStorage.getItem('lastSyncTimestamp');
+      if (syncTime) {
+        const date = new Date(syncTime);
+        setLastSync(date.toLocaleTimeString());
+      }
+      alert('✅ Sincronização concluída com sucesso!');
+    } catch (error) {
+      console.error('❌ Erro na sincronização:', error);
+      alert('❌ Falha ao sincronizar. Verifique o console para mais detalhes.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [userId, isSyncing]);
 
   // ============================================================
   // CHECKLIST
@@ -254,12 +293,10 @@ export default function DashboardPage() {
     localStorage.setItem('dashboard_checklist', JSON.stringify(defaultItems));
   }, []);
 
-  // 🔥 Sincroniza com localStorage sempre que o checklist mudar
   useEffect(() => {
     localStorage.setItem('dashboard_checklist', JSON.stringify(checklist));
   }, [checklist]);
 
-  // 🔥 Escuta mudanças no localStorage (para sincronizar entre abas)
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'dashboard_checklist' && e.newValue) {
@@ -320,6 +357,27 @@ export default function DashboardPage() {
         Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
         e <span className="font-medium text-accent">{diasAteProva} dias</span> até a <span className="font-medium text-foreground">{provaNome}</span>.
       </p>
+
+      {/* 🔥 BOTÃO DE SINCORNIZAÇÃO */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-4 text-sm text-foreground/55">
+          <span>Última sincronização: {lastSync || 'Nunca'}</span>
+          {isSyncing && (
+            <span className="inline-flex items-center gap-1 text-primary">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Sincronizando...
+            </span>
+          )}
+        </div>
+        <button
+          onClick={handleSync}
+          disabled={isSyncing}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Sincronizar
+        </button>
+      </div>
 
       <div className="grid grid-cols-12 gap-4">
         <div id="dashboard-stats" className="col-span-12 grid grid-cols-12 gap-4">

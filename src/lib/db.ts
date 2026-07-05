@@ -1,11 +1,9 @@
-// src/lib/db.ts
-
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
 
 // ============================================================
-// SCHEMAS (todos em camelCase, com updated_at)
+// SCHEMAS
 // ============================================================
 
 const deckSchema = {
@@ -21,7 +19,10 @@ const deckSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     color: { type: 'string' },
-    deletedAt: { type: ['string', 'null'] }
+    deletedAt: { type: ['string', 'null'] },
+    is_shared: { type: 'boolean' },
+    owner_id: { type: 'string' },
+    shared_with: { type: 'array', items: { type: 'string' } }
   },
   required: ['id', 'name', 'user_id']
 };
@@ -48,7 +49,8 @@ const flashcardSchema = {
     elapsed_days: { type: 'number' },
     scheduled_days: { type: 'number' },
     createdAt: { type: 'string' },
-    updated_at: { type: 'string' }
+    updated_at: { type: 'string' },
+    shared_card_id: { type: ['string', 'null'] }
   },
   required: ['id', 'deck_id', 'user_id', 'front', 'back']
 };
@@ -202,9 +204,10 @@ const pendingOperationSchema = {
     id: { type: 'string' },
     type: { type: 'string' },
     collection: { type: 'string' },
-    data: { type: 'object' },
+    data: { type: 'object', additionalProperties: true },
     timestamp: { type: 'string' },
-    retries: { type: 'number' }
+    retries: { type: 'number' },
+    updated_at: { type: 'string' }
   },
   required: ['id', 'type', 'collection', 'data', 'timestamp']
 };
@@ -294,7 +297,6 @@ export async function syncWithSupabase(userId: string) {
     const database = await getDb();
     const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
 
-    // 👇 OBTÉM O CLIENTE SUPABASE COM O TOKEN DO CLERK
     const supabaseClient = await getSupabaseWithToken();
 
     console.log('🔍 Cliente Supabase com token:', supabaseClient);

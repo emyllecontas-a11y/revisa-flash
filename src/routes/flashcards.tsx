@@ -3,11 +3,13 @@ import { AppShell } from "@/components/app-shell";
 import { 
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit, 
   CheckCircle, Search, Filter, Pencil, X, Bold, Italic, List,
-  History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart
+  History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart,
+  Users, UserPlus, UserMinus, UserCheck
 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { findUserByEmail, findUsersByIds } from "@/services/clerkService";
 
 export default function FlashcardsPage() {
   const flashcardContext = useFlashcardContext();
@@ -30,6 +32,9 @@ export default function FlashcardsPage() {
     getCardHistory,
     getAllCardsByDeck,
     getAllFlashcards,
+    addMemberToDeck,
+    removeMemberFromDeck,
+    addMemberByEmail,
   } = flashcardContext;
 
   // ============================================================
@@ -41,7 +46,6 @@ export default function FlashcardsPage() {
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [sessaoCards, setSessaoCards] = useState<any[]>([]);
   
-  // 🔥 NOVOS ESTADOS PARA SESSÃO
   const [sessionStats, setSessionStats] = useState<{ 
     again: number; 
     hard: number; 
@@ -60,6 +64,15 @@ export default function FlashcardsPage() {
   const [isAddCardModalOpen, setIsAddCardModalOpen] = useState(false);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
+  const [newMemberId, setNewMemberId] = useState("");
+  const [isManagingMember, setIsManagingMember] = useState(false);
+  
+  // 🔥 NOVOS ESTADOS PARA MEMBROS E PROGRESSO
+  const [membersInfo, setMembersInfo] = useState<Record<string, { name: string; email: string }>>({});
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [copyProgress, setCopyProgress] = useState<{ current: number; total: number } | null>(null);
+
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isRating, setIsRating] = useState(false);
@@ -72,7 +85,10 @@ export default function FlashcardsPage() {
   const [deckDisciplina, setDeckDisciplina] = useState("");
   const [deckCor, setDeckCor] = useState("#14B8A6");
   
-  // Card form (criação)
+  const [isShared, setIsShared] = useState(false);
+  const [sharedWithInput, setSharedWithInput] = useState("");
+  
+  // Card form
   const [newCardFrente, setNewCardFrente] = useState("");
   const [newCardVerso, setNewCardVerso] = useState("");
   const [newCardTopico, setNewCardTopico] = useState("");
@@ -123,7 +139,35 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, getAllCardsByDeck]);
 
   // ============================================================
-  // FILTRAR CARDS (dentro do deck)
+  // 🔥 CARREGAR INFORMAÇÕES DOS MEMBROS QUANDO O MODAL ABRIR
+  // ============================================================
+  useEffect(() => {
+    if (isMembersModalOpen && selectedDeckId) {
+      const deck = decks.find(d => d.id === selectedDeckId);
+      if (deck) {
+        const allMemberIds = [deck.owner_id, ...deck.shared_with];
+        if (allMemberIds.length > 0) {
+          setLoadingMembers(true);
+          findUsersByIds(allMemberIds)
+            .then(users => {
+              const infoMap: Record<string, { name: string; email: string }> = {};
+              users.forEach(user => {
+                infoMap[user.id] = { 
+                  name: user.name || user.id, 
+                  email: user.email || '' 
+                };
+              });
+              setMembersInfo(infoMap);
+            })
+            .catch(error => console.error('Erro ao buscar membros:', error))
+            .finally(() => setLoadingMembers(false));
+        }
+      }
+    }
+  }, [isMembersModalOpen, selectedDeckId, decks]);
+
+  // ============================================================
+  // FILTRAR CARDS
   // ============================================================
   const deckCards = useMemo(() => {
     if (filterStatus === "todos") {
@@ -160,14 +204,13 @@ export default function FlashcardsPage() {
   }, [getAllFlashcards]);
 
   // ============================================================
-  // 🔥 FUNÇÃO PARA DADOS DO GRÁFICO DE PROGRESSO (Melhoria 6)
+  // FUNÇÃO PARA DADOS DO GRÁFICO
   // ============================================================
   const getStabilityOverTime = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
     const cards = allFlashcards.filter(c => c.deck_id === deckId);
     if (cards.length === 0) return [];
     
-    // Agrupa por mês de criação
     const grouped: Record<string, { total: number; sum: number; count: number }> = {};
     cards.forEach(c => {
       const date = new Date(c.createdAt);
@@ -179,12 +222,10 @@ export default function FlashcardsPage() {
       grouped[key].count += 1;
     });
     
-    // Converte para array de objetos para o gráfico
     const sortedKeys = Object.keys(grouped).sort();
     return sortedKeys.map(key => {
       const data = grouped[key];
       const avgStability = data.count > 0 ? data.sum / data.count : 0;
-      // Pega o nome do mês por extenso
       const [year, month] = key.split('-');
       const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
       return {
@@ -238,17 +279,36 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE CRUD
+  // FUNÇÕES DE CRUD (TODAS MANTIDAS)
   // ============================================================
   const handleCreateDeck = useCallback(async () => {
     if (!deckName.trim()) {
       setErrorMessage("Digite um nome para o baralho");
       return;
     }
+    
+    let sharedWithArray: string[] = [];
+    if (isShared) {
+      sharedWithArray = sharedWithInput
+        .split(',')
+        .map(id => id.trim())
+        .filter(id => id.length > 0);
+      if (sharedWithArray.length === 0) {
+        setErrorMessage("Para compartilhar, digite pelo menos um user_id.");
+        return;
+      }
+    }
+    
     try {
       setIsSaving(true);
       setErrorMessage("");
-      await createDeck(deckName.trim(), deckDescription.trim(), deckCor);
+      await createDeck(
+        deckName.trim(),
+        deckDescription.trim(),
+        deckCor,
+        isShared,
+        sharedWithArray
+      );
       const newDeck = decks.find(d => d.name === deckName.trim());
       if (newDeck) {
         setDeckMeta(newDeck.id, { disciplina: deckDisciplina });
@@ -257,6 +317,8 @@ export default function FlashcardsPage() {
       setDeckDescription("");
       setDeckDisciplina("");
       setDeckCor("#14B8A6");
+      setIsShared(false);
+      setSharedWithInput("");
       setIsModalOpen(false);
       setErrorMessage("");
     } catch (error: any) {
@@ -265,7 +327,7 @@ export default function FlashcardsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [deckName, deckDescription, deckDisciplina, deckCor, createDeck, setDeckMeta, decks]);
+  }, [deckName, deckDescription, deckDisciplina, deckCor, isShared, sharedWithInput, createDeck, setDeckMeta, decks]);
 
   const handleAddCard = useCallback(async (keepOpen: boolean = false) => {
     if (!selectedDeckId) {
@@ -315,7 +377,6 @@ export default function FlashcardsPage() {
         setCardMeta(editCardId, { topico: editTopico.trim() });
       }
       
-      // 🔥 Se a edição veio do estudo, atualiza o card na lista da sessão
       if (editFromStudy) {
         setSessaoCards(prev => prev.map(card => 
           card.id === editCardId 
@@ -366,7 +427,6 @@ export default function FlashcardsPage() {
         const updatedCards = await getAllCardsByDeck(selectedDeckId);
         setAllCardsInDeck(updatedCards);
       }
-      // Se estiver no modo estudo, remove da lista da sessão
       if (modo === "estudo") {
         setSessaoCards(prev => prev.filter(c => c.id !== cardId));
         if (sessaoCards.length === 1) {
@@ -408,7 +468,108 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, renameName, renameDescription, deckDisciplina, renameDeck, decks, setDeckMeta]);
 
   // ============================================================
-  // 🔥 FUNÇÃO DE INICIAR ESTUDO (COM ORDENAÇÃO - Melhoria 4)
+  // 🔥 FUNÇÕES PARA GERENCIAR MEMBROS (COM PROGRESSO)
+  // ============================================================
+  const handleAddMember = useCallback(async () => {
+    if (!selectedDeckId) return;
+    if (!newMemberId.trim()) {
+      setErrorMessage("Digite um e-mail válido");
+      return;
+    }
+    try {
+      setIsManagingMember(true);
+      setCopyProgress(null);
+      setErrorMessage("");
+
+      // 1. Busca o user_id pelo e-mail
+      const foundUserId = await findUserByEmail(newMemberId.trim());
+      if (!foundUserId) {
+        throw new Error(`Nenhum usuário encontrado com o e-mail: ${newMemberId.trim()}`);
+      }
+
+      // 2. Adiciona o membro com callback de progresso
+      await addMemberToDeck(
+        selectedDeckId, 
+        foundUserId, 
+        (current: number, total: number) => {
+          if (total === 0) {
+            setCopyProgress(null);
+          } else {
+            setCopyProgress({ current, total });
+          }
+        }
+      );
+
+      setNewMemberId("");
+      refreshFlashcards();
+
+      // 3. Atualiza a lista de membros (busca novamente)
+      const deck = decks.find(d => d.id === selectedDeckId);
+      if (deck) {
+        const allMemberIds = [deck.owner_id, ...deck.shared_with];
+        if (allMemberIds.length > 0) {
+          const users = await findUsersByIds(allMemberIds);
+          const infoMap: Record<string, { name: string; email: string }> = {};
+          users.forEach(user => {
+            infoMap[user.id] = { 
+              name: user.name || user.id, 
+              email: user.email || '' 
+            };
+          });
+          setMembersInfo(infoMap);
+        }
+      }
+
+      setErrorMessage("✅ Membro adicionado com sucesso!");
+      setTimeout(() => setErrorMessage(""), 3000);
+    } catch (error: any) {
+      console.error("❌ Erro ao adicionar membro:", error);
+      setErrorMessage("Erro: " + (error.message || "Não foi possível adicionar"));
+    } finally {
+      setIsManagingMember(false);
+      setCopyProgress(null);
+    }
+  }, [selectedDeckId, newMemberId, addMemberToDeck, refreshFlashcards, decks]);
+
+  const handleRemoveMember = useCallback(async (userIdToRemove: string) => {
+    if (!selectedDeckId) return;
+    if (!confirm(`Tem certeza que deseja remover este membro?`)) return;
+    try {
+      setIsManagingMember(true);
+      await removeMemberFromDeck(selectedDeckId, userIdToRemove);
+      refreshFlashcards();
+      
+      // Atualiza a lista de membros
+      const deck = decks.find(d => d.id === selectedDeckId);
+      if (deck) {
+        const allMemberIds = [deck.owner_id, ...deck.shared_with];
+        if (allMemberIds.length > 0) {
+          const users = await findUsersByIds(allMemberIds);
+          const infoMap: Record<string, { name: string; email: string }> = {};
+          users.forEach(user => {
+            infoMap[user.id] = { 
+              name: user.name || user.id, 
+              email: user.email || '' 
+            };
+          });
+          setMembersInfo(infoMap);
+        } else {
+          setMembersInfo({});
+        }
+      }
+      
+      setErrorMessage("✅ Membro removido com sucesso!");
+      setTimeout(() => setErrorMessage(""), 3000);
+    } catch (error: any) {
+      console.error("❌ Erro ao remover membro:", error);
+      setErrorMessage("Erro: " + (error.message || "Não foi possível remover"));
+    } finally {
+      setIsManagingMember(false);
+    }
+  }, [selectedDeckId, removeMemberFromDeck, refreshFlashcards, decks]);
+
+  // ============================================================
+  // FUNÇÃO DE INICIAR ESTUDO
   // ============================================================
   const iniciarEstudo = useCallback(async (deckId: string) => {
     if (isStarting) return;
@@ -429,7 +590,6 @@ export default function FlashcardsPage() {
         return;
       }
       
-      // 🔥 ORDENAÇÃO: mais antigos primeiro (por dueDate)
       const sortedDue = due.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       
       setSessaoCards(sortedDue);
@@ -455,7 +615,7 @@ export default function FlashcardsPage() {
   }, [getAllCardsByDeck, isStarting]);
 
   // ============================================================
-  // 🔥 FUNÇÃO DE AVALIAÇÃO (COM CONTADORES - Melhoria 1)
+  // FUNÇÃO DE AVALIAÇÃO
   // ============================================================
   const handleRating = useCallback(async (rating: Rating) => {
     if (isRating) return;
@@ -466,7 +626,6 @@ export default function FlashcardsPage() {
     try {
       const result = await reviewCard(currentCard.id, rating);
       if (result) {
-        // Atualiza estatísticas da sessão
         setSessionStats(prev => {
           if (!prev) return prev;
           const newStats = { ...prev };
@@ -477,7 +636,6 @@ export default function FlashcardsPage() {
           return newStats;
         });
         
-        // Avança para o próximo card
         if (currentCardIndex < sessaoCards.length - 1) {
           setCurrentCardIndex((prev) => prev + 1);
           setVirado(false);
@@ -494,7 +652,7 @@ export default function FlashcardsPage() {
   }, [isRating, sessaoCards, currentCardIndex, reviewCard]);
 
   // ============================================================
-  // VOLTAR DA CONCLUSÃO
+  // VOLTAR
   // ============================================================
   const voltarDaConclusao = useCallback(async () => {
     setModo("decks");
@@ -515,9 +673,6 @@ export default function FlashcardsPage() {
     setSessionStartTime(null);
   }, []);
 
-  // ============================================================
-  // 🔥 ABRIR MODAL DE EDIÇÃO A PARTIR DO ESTUDO (Melhoria 5)
-  // ============================================================
   const openEditFromStudy = useCallback((card: any) => {
     const meta = getCardMeta(card.id);
     setEditCardId(card.id);
@@ -573,7 +728,6 @@ export default function FlashcardsPage() {
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / sessaoCards.length) * 100}%` }} />
             </div>
             
-            {/* 🔥 BOTÃO DE EDITAR DURANTE O ESTUDO */}
             <div className="flex justify-end mb-2">
               <button
                 onClick={() => openEditFromStudy(currentCard)}
@@ -641,7 +795,6 @@ export default function FlashcardsPage() {
               Você revisou todos os flashcards do baralho <span className="font-medium text-foreground">{deck?.name}</span>.
             </p>
             
-            {/* 🔥 RESUMO DA SESSÃO (Melhoria 1) */}
             {stats && (
               <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
                 <div className="rounded-lg bg-background/40 p-4">
@@ -726,9 +879,10 @@ export default function FlashcardsPage() {
       const deckMeta = getDeckMeta(selectedDeckId);
       const isErrorDeck = deck.name === "Erros";
       const deckColor = deck.color || '#14B8A6';
-      
-      // 🔥 DADOS PARA O GRÁFICO (Melhoria 6)
       const chartData = getStabilityOverTime(selectedDeckId);
+      
+const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
+const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.user_id === currentUserId);
       
       conteudo = (
         <AppShell breadcrumb={`Flashcards · ${deck.name}`}>
@@ -747,12 +901,35 @@ export default function FlashcardsPage() {
                 <Layers className="h-6 w-6" />
               </div>
               <div>
-                <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">{deckMeta.disciplina || "Baralho"}</span>
+                <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">
+                  {deckMeta.disciplina || "Baralho"}
+                  {deck.is_shared && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-primary">
+                      <Users className="h-3 w-3" /> Compartilhado
+                    </span>
+                  )}
+                </span>
                 <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{deck.name}</h1>
                 <p className="mt-1 text-sm text-foreground/55">{deck.description || "Sem descrição"}</p>
+                {deck.is_shared && (
+                  <p className="mt-1 text-xs text-foreground/40">
+                    👥 {deck.shared_with.length + 1} membros (Dono + {deck.shared_with.length} convidadas)
+                  </p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isOwner && (
+                <button
+                  onClick={() => {
+                    setIsMembersModalOpen(true);
+                    setErrorMessage("");
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                >
+                  <Users className="h-3.5 w-3.5" /> Gerenciar membros
+                </button>
+              )}
               <button
                 onClick={() => { 
                   setRenameName(deck.name); 
@@ -769,7 +946,6 @@ export default function FlashcardsPage() {
             </div>
           </header>
           
-          {/* 🔥 GRÁFICO DE PROGRESSO (Melhoria 6) */}
           {chartData.length > 0 && (
             <div className="mb-6 rf-card p-4">
               <div className="flex items-center gap-2 mb-4">
@@ -882,7 +1058,6 @@ export default function FlashcardsPage() {
       );
     }
   } else {
-    // LISTAGEM DE DECKS
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
@@ -929,7 +1104,14 @@ export default function FlashcardsPage() {
                         <Layers className="h-5 w-5" />
                       </div>
                       <div>
-                        <h3 className="font-display text-base font-semibold hover:text-primary">{deck.name}</h3>
+                        <h3 className="font-display text-base font-semibold hover:text-primary">
+                          {deck.name}
+                          {deck.is_shared && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary">
+                              <Users className="h-3 w-3" /> Compartilhado
+                            </span>
+                          )}
+                        </h3>
                         {deck.name === "Erros" && <AlertTriangle className="h-4 w-4 text-accent inline-block ml-1" />}
                         <p className="mt-0.5 text-xs text-foreground/45">{deck.description || "Sem descrição"}</p>
                         {meta.disciplina && <span className="text-[10px] text-foreground/40">{meta.disciplina}</span>}
@@ -999,14 +1181,14 @@ export default function FlashcardsPage() {
     <>
       {conteudo}
 
-      {/* MODAL: CRIAR BARALHO */}
+      {/* MODAL: CRIAR BARALHO (ATUALIZADO) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-foreground">Criar novo baralho</h3>
               <button
-                onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setErrorMessage(""); }}
+                onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
                 className="text-foreground/50 hover:text-foreground transition-colors"
               >
                 <X className="h-5 w-5" />
@@ -1058,9 +1240,44 @@ export default function FlashcardsPage() {
                   </div>
                 </div>
               </div>
+              
+              <div className="border-t border-border/50 pt-4 mt-2">
+                <div className="flex items-center gap-3 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsShared(!isShared)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isShared ? 'bg-primary' : 'bg-white/10'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isShared ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                  <span className="text-sm font-medium text-foreground/80 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" />
+                    Compartilhar este baralho com amigas
+                  </span>
+                </div>
+                
+                {isShared && (
+                  <div className="animate-fadeIn">
+                    <label className="text-sm font-medium text-foreground/70">
+                      IDs das convidadas (separados por vírgula)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: user_abc123, user_def456"
+                      value={sharedWithInput}
+                      onChange={(e) => setSharedWithInput(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
+                    />
+                    <p className="mt-1 text-[10px] text-foreground/40">
+                      💡 Digite o user_id de cada amiga. Elas verão os cards, mas com estatísticas próprias.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setErrorMessage(""); }}
+                  onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
                   className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
                   disabled={isSaving}
                 >
@@ -1093,7 +1310,6 @@ export default function FlashcardsPage() {
               </button>
             </div>
             <div className="space-y-4">
-              {/* Pergunta */}
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1116,7 +1332,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Resposta */}
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1139,7 +1354,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Tópico */}
               <div>
                 <label className="text-sm font-medium text-foreground/70">Tópico</label>
                 <input
@@ -1151,7 +1365,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Botões */}
               <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
@@ -1278,7 +1491,6 @@ export default function FlashcardsPage() {
             </div>
 
             <div className="space-y-4">
-              {/* Pergunta */}
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1301,7 +1513,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Resposta */}
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1324,7 +1535,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Tópico */}
               <div>
                 <label className="text-sm font-medium text-foreground/70">Tópico</label>
                 <input
@@ -1336,7 +1546,6 @@ export default function FlashcardsPage() {
                 />
               </div>
 
-              {/* Histórico de revisões */}
               {editCardId && (
                 <div className="rf-card p-5 border border-border">
                   <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">
@@ -1359,7 +1568,6 @@ export default function FlashcardsPage() {
                 </div>
               )}
 
-              {/* Botões */}
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
@@ -1375,6 +1583,125 @@ export default function FlashcardsPage() {
                 >
                   {isSaving ? "Salvando..." : "Salvar alterações"}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔥 MODAL GERENCIAR MEMBROS (COM NOMES E PROGRESSO) */}
+      {isMembersModalOpen && selectedDeckId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Gerenciar membros
+              </h3>
+              <button
+                onClick={() => { setIsMembersModalOpen(false); setNewMemberId(""); setErrorMessage(""); }}
+                className="text-foreground/50 hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto">
+              <div className="space-y-2 mb-4">
+                <p className="text-xs text-foreground/40">Membros atuais:</p>
+                {(() => {
+                  const deck = decks.find(d => d.id === selectedDeckId);
+                  if (!deck) return <p className="text-sm text-foreground/55">Carregando...</p>;
+                  const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
+                  const allMembers = [deck.owner_id, ...deck.shared_with];
+                  
+                  if (loadingMembers) {
+                    return <div className="flex justify-center py-2"><Loader2 className="h-5 w-5 animate-spin text-primary/60" /></div>;
+                  }
+                  
+                  if (allMembers.length === 0) return <p className="text-sm text-foreground/40">Nenhum membro encontrado.</p>;
+                  
+                  return allMembers.map((memberId, idx) => {
+                    const isOwner = memberId === deck.owner_id;
+                    const isYou = memberId === currentUserId;
+                    const info = membersInfo[memberId];
+                    const displayName = info?.name || memberId;
+                    const displayEmail = info?.email ? ` (${info.email})` : '';
+                    
+                    return (
+                      <div key={idx} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <UserCheck className="h-4 w-4 text-primary/60 shrink-0" />
+                          <span className="text-sm font-medium text-foreground truncate">
+                            {displayName}{displayEmail}
+                            {isYou && <span className="ml-2 text-[10px] text-primary shrink-0">(você)</span>}
+                            {isOwner && <span className="ml-2 text-[10px] text-foreground/40 shrink-0">(dona)</span>}
+                          </span>
+                        </div>
+                        {!isOwner && isYou && (
+                          <span className="text-[10px] text-foreground/30 shrink-0">Convidada</span>
+                        )}
+                        {isOwner && !isYou && (
+                          <span className="text-[10px] text-foreground/30 shrink-0">Dona</span>
+                        )}
+                        {!isOwner && !isYou && (
+                          <button
+                            onClick={() => handleRemoveMember(memberId)}
+                            disabled={isManagingMember}
+                            className="text-red-400/60 hover:text-red-400 transition-colors disabled:opacity-30 shrink-0 ml-2"
+                          >
+                            <UserMinus className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              
+              <div className="border-t border-border/50 pt-4">
+                <label className="text-sm font-medium text-foreground/70">Adicionar por e-mail</label>
+                <div className="flex gap-2 mt-1">
+                  <input
+                    type="email"
+                    placeholder="Digite o e-mail da amiga"
+                    value={newMemberId}
+                    onChange={(e) => setNewMemberId(e.target.value)}
+                    className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
+                  />
+                  <button
+                    onClick={handleAddMember}
+                    disabled={isManagingMember || !newMemberId.trim()}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity inline-flex items-center gap-1"
+                  >
+                    {isManagingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                    Adicionar
+                  </button>
+                </div>
+                <p className="mt-1 text-[10px] text-foreground/40">
+                  💡 Digite o e-mail cadastrado na conta da pessoa.
+                </p>
+
+                {/* 🔥 BARRA DE PROGRESSO */}
+                {copyProgress && copyProgress.total > 0 && (
+                  <div className="mt-3 animate-fadeIn">
+                    <div className="flex items-center justify-between text-xs text-foreground/60">
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Copiando cards...
+                      </span>
+                      <span className="tabular-nums">
+                        {Math.round((copyProgress.current / copyProgress.total) * 100)}% ({copyProgress.current}/{copyProgress.total})
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                        style={{ width: `${(copyProgress.current / copyProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
