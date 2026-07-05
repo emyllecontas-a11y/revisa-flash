@@ -8,7 +8,7 @@ import {
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { uid, gerenciarRevisao } from "@/utils/helpers";
 import { getDb, syncWithSupabase } from "@/lib/db";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
 import { enqueueOperation } from "@/services/queueService"; // 🔥 IMPORTADO
 
@@ -434,126 +434,126 @@ export default function ConteudoPage() {
     }
   }, [selectedTopicId, loadData]);
 
-  // ---------- ATUALIZAR STATUS DO TÓPICO (COM FILA) ----------
-  const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-      const doc = await db.topics.findOne({ selector: { id } }).exec();
-      if (doc) {
-        const topicoData = doc.toJSON();
-        const disciplina = getDisciplinaById(topicoData.discipline_id);
+// ---------- GERENCIAR REVISÕES (COM FILA) ----------
+const gerenciarRevisoesTopico = useCallback(async (
+  topicoId: string,
+  topicoNome: string,
+  disciplinaNome: string,
+  novoStatus: string
+) => {
+  if (!userId) return;
+  try {
+    const db = await getDb();
+    
+    const existingDocs = await db.revisoes.find({
+      selector: { user_id: userId, topico_id: topicoId }
+    }).exec();
+    const existingRevisoes = existingDocs.map((doc: any) => doc.toJSON());
 
-        // 1. Atualiza localmente
-        await doc.incrementalPatch({
-          status: newStatus,
-          updatedAt: now
-        });
+    const novasRevisoes = gerenciarRevisao(
+      topicoId,
+      topicoNome,
+      disciplinaNome,
+      novoStatus,
+      existingRevisoes
+    );
 
-        // 2. Enfileira atualização
-        await enqueueOperation('update', 'topics', { id, status: newStatus, updatedAt: now });
-
-        // 3. Gerencia revisões (também com fila)
-        await gerenciarRevisoesTopico(
-          id,
-          topicoData.name,
-          disciplina?.name || 'Disciplina',
-          newStatus
-        );
-
-        await loadData();
-        console.log('✅ Status do tópico atualizado com sucesso (local e fila)');
+    const novosIds = novasRevisoes.map(r => r.id);
+    for (const doc of existingDocs) {
+      if (!novosIds.includes(doc.id)) {
+        await doc.remove();
+        await enqueueOperation('delete', 'revisoes', { id: doc.id });
       }
-    } catch (error: any) {
-      console.error("❌ Erro ao atualizar status do tópico:", error);
-      setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
     }
-  }, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
 
-  // ---------- GERENCIAR REVISÕES (COM FILA) ----------
-  const gerenciarRevisoesTopico = useCallback(async (
-    topicoId: string,
-    topicoNome: string,
-    disciplinaNome: string,
-    novoStatus: string
-  ) => {
-    if (!userId) return;
-    try {
-      const db = await getDb();
-      
-      const existingDocs = await db.revisoes.find({
-        selector: { user_id: userId, topico_id: topicoId }
-      }).exec();
-      const existingRevisoes = existingDocs.map((doc: any) => doc.toJSON());
+    for (const rev of novasRevisoes) {
+      const topicoIdFinal = rev.topicoId || topicoId;
+      const topicNameFinal = rev.topicoNome || topicoNome;
+      const disciplineFinal = rev.disciplina || disciplinaNome;
+      const reviewLevelFinal = rev.reviewLevel || 1;
+      const nextReviewDateFinal = rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString();
+      const lastStudyDateFinal = rev.lastStudyDate || new Date().toISOString();
 
-      const novasRevisoes = gerenciarRevisao(
-        topicoId,
-        topicoNome,
-        disciplinaNome,
-        novoStatus,
-        existingRevisoes
-      );
+      const existingDoc = existingDocs.find(d => d.id === rev.id);
+      const revisaoData = {
+        id: rev.id,
+        user_id: userId,
+        topico_id: topicoIdFinal,
+        topicName: topicNameFinal,
+        discipline: disciplineFinal,
+        review_level: reviewLevelFinal,
+        nextReviewDate: nextReviewDateFinal,
+        lastStudyDate: lastStudyDateFinal,
+        completedAt: rev.completedAt || null,
+        createdAt: rev.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
 
-      const novosIds = novasRevisoes.map(r => r.id);
-      for (const doc of existingDocs) {
-        if (!novosIds.includes(doc.id)) {
-          await doc.remove();
-          await enqueueOperation('delete', 'revisoes', { id: doc.id });
-        }
-      }
-
-      for (const rev of novasRevisoes) {
-        const topicoIdFinal = rev.topicoId || topicoId;
-        const topicNameFinal = rev.topicoNome || topicoNome;
-        const disciplineFinal = rev.disciplina || disciplinaNome;
-        const reviewLevelFinal = rev.reviewLevel || 1;
-        const nextReviewDateFinal = rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString();
-        const lastStudyDateFinal = rev.lastStudyDate || new Date().toISOString();
-
-        const existingDoc = existingDocs.find(d => d.id === rev.id);
-        const revisaoData = {
-          id: rev.id,
-          user_id: userId,
-          topico_id: topicoIdFinal,
-          topicName: topicNameFinal,
-          discipline: disciplineFinal,
+      if (existingDoc) {
+        await existingDoc.incrementalPatch({
           review_level: reviewLevelFinal,
           nextReviewDate: nextReviewDateFinal,
           lastStudyDate: lastStudyDateFinal,
           completedAt: rev.completedAt || null,
-          createdAt: rev.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString()
-        };
-
-        if (existingDoc) {
-          await existingDoc.incrementalPatch({
-            review_level: reviewLevelFinal,
-            nextReviewDate: nextReviewDateFinal,
-            lastStudyDate: lastStudyDateFinal,
-            completedAt: rev.completedAt || null,
-            updatedAt: new Date().toISOString()
-          });
-          await enqueueOperation('update', 'revisoes', { 
-            id: rev.id, 
-            review_level: reviewLevelFinal,
-            nextReviewDate: nextReviewDateFinal,
-            lastStudyDate: lastStudyDateFinal,
-            completedAt: rev.completedAt || null,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          await db.revisoes.insert(revisaoData);
-          await enqueueOperation('create', 'revisoes', revisaoData);
-        }
+        });
+        await enqueueOperation('update', 'revisoes', { 
+          id: rev.id, 
+          review_level: reviewLevelFinal,
+          nextReviewDate: nextReviewDateFinal,
+          lastStudyDate: lastStudyDateFinal,
+          completedAt: rev.completedAt || null,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        await db.revisoes.insert(revisaoData);
+        await enqueueOperation('create', 'revisoes', revisaoData);
       }
+    }
+
+    await loadData();
+    console.log('✅ Revisões atualizadas com sucesso (local e fila)');
+  } catch (error) {
+    console.error('❌ Erro ao gerenciar revisões:', error);
+    throw error;
+  }
+}, [userId, loadData]);
+
+// ---------- ATUALIZAR STATUS DO TÓPICO (COM FILA) ----------
+const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
+  try {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const doc = await db.topics.findOne({ selector: { id } }).exec();
+    if (doc) {
+      const topicoData = doc.toJSON();
+      const disciplina = getDisciplinaById(topicoData.discipline_id);
+
+      // 1. Atualiza localmente
+      await doc.incrementalPatch({
+        status: newStatus,
+        updatedAt: now
+      });
+
+      // 2. Enfileira atualização
+      await enqueueOperation('update', 'topics', { id, status: newStatus, updatedAt: now });
+
+      // 3. Gerencia revisões (também com fila)
+      await gerenciarRevisoesTopico(
+        id,
+        topicoData.name,
+        disciplina?.name || 'Disciplina',
+        newStatus
+      );
 
       await loadData();
-      console.log('✅ Revisões atualizadas com sucesso (local e fila)');
-    } catch (error) {
-      console.error('❌ Erro ao gerenciar revisões:', error);
-      throw error;
+      console.log('✅ Status do tópico atualizado com sucesso (local e fila)');
     }
-  }, [userId, loadData]);
+  } catch (error: any) {
+    console.error("❌ Erro ao atualizar status do tópico:", error);
+    setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
+  }
+}, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
 
   // ============================================================
   // NAVEGAÇÃO

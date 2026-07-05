@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, BarChart3, Settings,
   Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2
@@ -78,7 +78,7 @@ export function AppShell({
   const { signOut } = useClerk();
 
   // Contextos
-  const { user, isSignedIn, isLoaded } = useAppUser();
+  const { user, isLoaded } = useAppUser();
   const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
   const studyContext = useStudy();
   const { records: studyRecords } = studyContext;
@@ -89,6 +89,9 @@ export function AppShell({
   const [streak, setStreak] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+
+  // 🔥 REF para evitar múltiplas sincronizações simultâneas
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ============================================================
   // CARREGA PERFIL DO SUPABASE
@@ -150,7 +153,7 @@ export function AppShell({
   }, [studyRecords]);
 
   // ============================================================
-  // 🔥 FUNÇÃO DE SINCRONIZAÇÃO (com userId e fila)
+  // 🔥 FUNÇÃO DE SINCRONIZAÇÃO (estável, com ref)
   // ============================================================
   const performSync = useCallback(async (showFeedback: boolean = false) => {
     const userId = localStorage.getItem('revisaflash_user_id');
@@ -166,16 +169,16 @@ export function AppShell({
 
     setIsSyncing(true);
     try {
-      console.log('🔄 [AppShell] Iniciando sincronização manual...');
+      console.log('🔄 [AppShell] Iniciando sincronização...');
 
-      // 🔥 1. Processa a fila de operações pendentes
+      // Processa a fila de operações pendentes
       console.log('📦 [AppShell] Processando fila de operações...');
       await processPendingOperations();
 
-      // 🔥 2. Sincroniza com Supabase
+      // Sincroniza com Supabase
       await syncWithSupabase(userId);
 
-      // 🔥 3. Atualiza a interface
+      // Atualiza a interface
       refreshFlashcards();
 
       const now = new Date();
@@ -197,42 +200,62 @@ export function AppShell({
   }, [isSyncing, refreshFlashcards]);
 
   // ============================================================
-  // 🔥 SINCRONIZAÇÃO AUTOMÁTICA (intervalo, foco, online)
+  // 🔥 SINCRONIZAÇÃO AUTOMÁTICA (com debounce)
   // ============================================================
   useEffect(() => {
     if (!isLoaded || flashcardsLoading) return;
 
-    // 1. Sincronização inicial
-    performSync();
+    // 🔥 Função agendada com debounce
+    const scheduleSync = () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+      syncTimeoutRef.current = setTimeout(() => {
+        performSync();
+        syncTimeoutRef.current = null;
+      }, 1000); // espera 1 segundo antes de sincronizar
+    };
 
-    // 2. Intervalo a cada 30 segundos
+    // 1. Sincronização inicial (apenas uma vez)
+    const initialSync = setTimeout(() => {
+      performSync();
+    }, 2000);
+
+    // 2. Intervalo a cada 60 segundos (em vez de 30)
     const syncInterval = setInterval(() => {
       performSync();
-    }, 30000);
+    }, 60000);
 
-    // 3. Quando a aba ganhar foco
+    // 3. Quando a aba ganhar foco (com debounce)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('🔄 [AppShell] Aba focada, sincronizando...');
-        performSync();
+        console.log('🔄 [AppShell] Aba focada, agendando sincronização...');
+        scheduleSync();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 4. Quando a conexão for restaurada
+    // 4. Quando a conexão for restaurada (com debounce)
     const handleOnline = () => {
-      console.log('📶 [AppShell] Conexão restaurada, sincronizando...');
-      performSync();
+      console.log('📶 [AppShell] Conexão restaurada, agendando sincronização...');
+      scheduleSync();
     };
     window.addEventListener('online', handleOnline);
 
     // Limpeza
     return () => {
+      clearTimeout(initialSync);
       clearInterval(syncInterval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('online', handleOnline);
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
     };
-  }, [isLoaded, flashcardsLoading, performSync]);
+    // 🔥 DEPENDÊNCIAS CORRETAS: apenas isLoaded e flashcardsLoading, NÃO performSync
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, flashcardsLoading]);
 
   // ============================================================
   // HANDLE LOGOUT
