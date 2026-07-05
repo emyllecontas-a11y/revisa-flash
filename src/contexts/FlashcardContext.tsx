@@ -672,7 +672,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
       // 3. Remove cada card (localmente)
       for (const doc of allCards) {
-        await doc.remove();
+        await doc.incrementalPatch({ deletedAt: now });
         // Limpa metadados
         setCardMetas(prev => {
           const newMetas = { ...prev };

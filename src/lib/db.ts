@@ -1,6 +1,7 @@
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
+import { processPendingOperations } from '@/services/queueService';
 
 // ============================================================
 // SCHEMAS
@@ -294,6 +295,9 @@ export async function syncWithSupabase(userId: string) {
   isSyncing = true;
 
   try {
+    console.log('📦 Processando operações pendentes...');
+    await processPendingOperations();
+    
     const database = await getDb();
     const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
 

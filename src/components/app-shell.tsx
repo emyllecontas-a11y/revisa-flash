@@ -1,18 +1,19 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, BarChart3, Settings,
-  Flame, LogOut, ChevronRight, User, Zap
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
-import { useClerk } from "@clerk/clerk-react"; // <-- NOVA IMPORTAÇÃO
+import { useClerk } from "@clerk/clerk-react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { syncWithSupabase } from "@/lib/db";
+import { processPendingOperations } from "@/services/queueService";
 
 // ============================================================
 // COMPONENTE DE LOADING (estilo raio)
@@ -74,7 +75,7 @@ export function AppShell({
   const location = useLocation();
   const pathname = location.pathname;
   const navigate = useNavigate();
-  const { signOut } = useClerk(); // <-- OBTÉM A FUNÇÃO DE LOGOUT
+  const { signOut } = useClerk();
 
   // Contextos
   const { user, isSignedIn, isLoaded } = useAppUser();
@@ -86,8 +87,12 @@ export function AppShell({
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
-  // Carrega perfil do Supabase
+  // ============================================================
+  // CARREGA PERFIL DO SUPABASE
+  // ============================================================
   useEffect(() => {
     const loadProfile = async () => {
       if (!user?.id) return;
@@ -111,7 +116,9 @@ export function AppShell({
     }
   }, [user, isLoaded]);
 
-  // Calcula streak
+  // ============================================================
+  // STREAK
+  // ============================================================
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
       setStreak(0);
@@ -142,40 +149,102 @@ export function AppShell({
     setStreak(streakCount);
   }, [studyRecords]);
 
-  // Sincronização automática
-  useEffect(() => {
-    if (isLoaded && !flashcardsLoading) {
-      const syncAndRefresh = async () => {
-        try {
-          console.log('🔄 [AppShell] Iniciando sincronização automática...');
-          await syncWithSupabase();
-          refreshFlashcards();
-          console.log('✅ [AppShell] Sincronização automática concluída!');
-        } catch (error) {
-          console.error('❌ [AppShell] Erro na sincronização automática:', error);
-        }
-      };
-      syncAndRefresh();
+  // ============================================================
+  // 🔥 FUNÇÃO DE SINCRONIZAÇÃO (com userId e fila)
+  // ============================================================
+  const performSync = useCallback(async (showFeedback: boolean = false) => {
+    const userId = localStorage.getItem('revisaflash_user_id');
+    if (!userId) {
+      console.warn('⚠️ [AppShell] Nenhum userId encontrado para sincronizar.');
+      return;
     }
-  }, [isLoaded, flashcardsLoading, refreshFlashcards]);
 
-  // Se ainda está carregando, mostra tela de loading
-  if (!isLoaded || flashcardsLoading) {
-    return <LoadingScreen />;
-  }
+    if (isSyncing) {
+      console.log('⏳ [AppShell] Sincronização já em andamento.');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      console.log('🔄 [AppShell] Iniciando sincronização manual...');
+
+      // 🔥 1. Processa a fila de operações pendentes
+      console.log('📦 [AppShell] Processando fila de operações...');
+      await processPendingOperations();
+
+      // 🔥 2. Sincroniza com Supabase
+      await syncWithSupabase(userId);
+
+      // 🔥 3. Atualiza a interface
+      refreshFlashcards();
+
+      const now = new Date();
+      setLastSyncTime(now.toLocaleTimeString());
+      localStorage.setItem('lastSyncTimestamp', now.toISOString());
+
+      console.log('✅ [AppShell] Sincronização concluída com sucesso!');
+      if (showFeedback) {
+        alert('✅ Sincronização concluída com sucesso!');
+      }
+    } catch (error) {
+      console.error('❌ [AppShell] Erro na sincronização:', error);
+      if (showFeedback) {
+        alert('❌ Falha ao sincronizar. Verifique o console para mais detalhes.');
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing, refreshFlashcards]);
 
   // ============================================================
-  // 🔥 HANDLE LOGOUT CORRIGIDO (USANDO CLERK)
+  // 🔥 SINCRONIZAÇÃO AUTOMÁTICA (intervalo, foco, online)
+  // ============================================================
+  useEffect(() => {
+    if (!isLoaded || flashcardsLoading) return;
+
+    // 1. Sincronização inicial
+    performSync();
+
+    // 2. Intervalo a cada 30 segundos
+    const syncInterval = setInterval(() => {
+      performSync();
+    }, 30000);
+
+    // 3. Quando a aba ganhar foco
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('🔄 [AppShell] Aba focada, sincronizando...');
+        performSync();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 4. Quando a conexão for restaurada
+    const handleOnline = () => {
+      console.log('📶 [AppShell] Conexão restaurada, sincronizando...');
+      performSync();
+    };
+    window.addEventListener('online', handleOnline);
+
+    // Limpeza
+    return () => {
+      clearInterval(syncInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [isLoaded, flashcardsLoading, performSync]);
+
+  // ============================================================
+  // HANDLE LOGOUT
   // ============================================================
   const handleLogout = async () => {
     if (confirm("Deseja realmente sair?")) {
       try {
-        await signOut(); // Encerra a sessão do Clerk
+        await signOut();
         localStorage.removeItem('revisaflash_user_id');
         navigate('/login');
       } catch (error) {
         console.error("Erro ao fazer logout:", error);
-        // Fallback: tenta remover manualmente e redirecionar
         localStorage.removeItem('revisaflash_user_id');
         window.location.href = '/login';
       }
@@ -185,6 +254,10 @@ export function AppShell({
   // ============================================================
   // RENDER
   // ============================================================
+  if (!isLoaded || flashcardsLoading) {
+    return <LoadingScreen />;
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <OnboardingTour />
@@ -258,6 +331,21 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* 🔥 BOTÃO DE SINCRONIZAÇÃO MANUAL */}
+            <button
+              onClick={() => performSync(true)}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors disabled:opacity-50"
+              title="Sincronizar dados com o servidor"
+            >
+              {isSyncing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">Sincronizar</span>
+            </button>
+
             <div className="hidden items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 sm:flex">
               <span className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">Prova</span>
               <span className="text-xs font-medium text-foreground">13 set 2026</span>
@@ -270,6 +358,11 @@ export function AppShell({
                 <span className="h-1.5 w-1.5 rounded-full bg-primary rf-pulse" />
                 <span className="text-xs font-medium text-primary">{streak}d</span>
               </div>
+            )}
+            {lastSyncTime && (
+              <span className="hidden text-[10px] text-foreground/30 lg:inline">
+                Última sync: {lastSyncTime}
+              </span>
             )}
           </div>
         </header>

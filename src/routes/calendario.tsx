@@ -148,183 +148,126 @@ export default function CalendarioPage() {
   // ============================================================
   // FUNÇÃO PARA CONCLUIR UMA REVISÃO (CORRIGIDA)
   // ============================================================
-  const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
-    // 🔥 Impede cliques múltiplos na mesma revisão
-    if (concluindoRevisaoId === revisaoId) return;
-    if (!userId) return;
+const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
+  if (concluindoRevisaoId === revisaoId) return;
+  if (!userId) return;
 
-    setConcluindoRevisaoId(revisaoId);
+  setConcluindoRevisaoId(revisaoId);
 
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
+  try {
+    const db = await getDb();
+    const now = new Date().toISOString();
 
-      // 1. Buscar a revisão atual
-      const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
-      if (!doc) {
-        console.warn('⚠️ Revisão não encontrada');
-        return;
-      }
-
-      const revisao = doc.toJSON() as Revisao;
-      const nivelAtual = revisao.review_level || 1;
-      const topicoId = revisao.topico_id;
-
-      // 2. Marcar a revisão atual como concluída
-      await doc.incrementalPatch({
-        completedAt: now,
-        updatedAt: now,
-      });
-
-      // 3. Atualizar estado local
-      setRevisoes(prev =>
-        prev.map(r =>
-          r.id === revisaoId
-            ? { ...r, completedAt: now, updatedAt: now }
-            : r
-        )
-      );
-
-      // 4. Sincronizar conclusão com Supabase
-      try {
-        const { error } = await supabase
-          .from('revisoes')
-          .update({ completedAt: now, updatedAt: now })
-          .eq('id', revisaoId);
-        if (error) console.error('❌ Erro ao sincronizar revisão concluída:', error);
-      } catch (e) {
-        console.warn('⚠️ Supabase indisponível (offline), revisão concluída localmente.');
-      }
-
-      // 5. Se não for o nível 5, criar a próxima revisão
-      const niveis = [
-        { nivel: 1, dias: 1 },
-        { nivel: 2, dias: 7 },
-        { nivel: 3, dias: 15 },
-        { nivel: 4, dias: 30 },
-        { nivel: 5, dias: 60 },
-      ];
-
-      if (nivelAtual < 5) {
-        const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
-        if (proximoNivel) {
-          const nextDate = new Date();
-          nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
-
-          // Criar nova revisão para o próximo nível
-          const newRevisao = {
-            id: uid(),
-            user_id: userId,
-            topico_id: topicoId,
-            topicName: revisao.topicName,
-            discipline: revisao.discipline,
-            review_level: proximoNivel.nivel,
-            nextReviewDate: nextDate.toISOString(),
-            lastStudyDate: now,
-            completedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          };
-
-          await db.revisoes.insert(newRevisao);
-          setRevisoes(prev => [...prev, newRevisao]);
-
-          // Tentar sincronizar nova revisão com Supabase
-          try {
-            const { error } = await supabase
-              .from('revisoes')
-              .upsert([{
-                id: newRevisao.id,
-                user_id: newRevisao.user_id,
-                topico_id: newRevisao.topico_id,
-                topicName: newRevisao.topicName,
-                discipline: newRevisao.discipline,
-                review_level: newRevisao.review_level,
-                nextReviewDate: newRevisao.nextReviewDate,
-                lastStudyDate: newRevisao.lastStudyDate,
-                completedAt: newRevisao.completedAt,
-                createdAt: newRevisao.createdAt,
-                updatedAt: newRevisao.updatedAt,
-              }], { onConflict: 'id' });
-            if (error) console.error('❌ Erro ao sincronizar nova revisão:', error);
-          } catch (e) {
-            console.warn('⚠️ Supabase indisponível para criar nova revisão (offline).');
-          }
-
-          console.log(`📌 Nova revisão de nível ${proximoNivel.nivel} criada para ${new Date(nextDate).toLocaleDateString('pt-BR')}`);
-        }
-      } else {
-        console.log('✅ Última revisão concluída (nível 5)');
-      }
-
-      // ============================================================
-      // 🔥 ATUALIZAR STATUS DO TÓPICO
-      // ============================================================
-
-      // 6. Buscar tópico
-      const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
-      if (topicoDoc) {
-        const topicoData = topicoDoc.toJSON();
-
-        // 7. Contar revisões concluídas do tópico
-        const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
-        const revisoesData = allRevisoes.map((d: any) => d.toJSON());
-        const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
-        const total = revisoesData.length;
-
-        console.log(`📊 Revisões do tópico: total=${total}, concluidas=${concluidas}`);
-
-        let novoStatus = topicoData.status;
-
-        // Se concluiu a primeira revisão (nível 1) e ainda não está revisado
-        if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
-          novoStatus = 'revisado';
-          console.log('📌 Primeira revisão concluída → status do tópico alterado para "revisado"');
-        }
-
-        // Se todas as 5 revisões estão concluídas → dominado
-        if (total === 5 && concluidas === 5) {
-          novoStatus = 'dominado';
-          console.log('🏆 Todas as revisões concluídas → status do tópico alterado para "dominado"');
-        }
-
-        // 8. Atualizar status se houver mudança
-        if (novoStatus !== topicoData.status) {
-          await topicoDoc.incrementalPatch({
-            status: novoStatus,
-            updatedAt: now,
-          });
-
-          // Tentar atualizar no Supabase
-          try {
-            const { error } = await supabase
-              .from('topics')
-              .update({ status: novoStatus, updatedAt: now })
-              .eq('id', topicoId);
-            if (error) {
-              console.warn('⚠️ Erro ao atualizar status do tópico no Supabase:', error);
-            } else {
-              console.log(`✅ Status do tópico "${topicoData.name}" atualizado para "${novoStatus}" no Supabase.`);
-            }
-          } catch (e) {
-            console.warn('⚠️ Supabase indisponível para atualizar status do tópico (offline).');
-          }
-        } else {
-          console.log(`ℹ️ Status do tópico já é "${topicoData.status}"`);
-        }
-      }
-
-      // 9. Recarregar dados
-      await loadRevisoes();
-
-      console.log('✅ Revisão concluída com sucesso');
-
-    } catch (error) {
-      console.error('❌ Erro ao concluir revisão:', error);
-    } finally {
-      setConcluindoRevisaoId(null);
+    // 1. Buscar a revisão atual
+    const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
+    if (!doc) {
+      console.warn('⚠️ Revisão não encontrada');
+      return;
     }
-  }, [userId, loadRevisoes, concluindoRevisaoId]);
+
+    const revisao = doc.toJSON() as Revisao;
+    const nivelAtual = revisao.review_level || 1;
+    const topicoId = revisao.topico_id;
+
+    // 2. Marcar a revisão atual como concluída
+    await doc.incrementalPatch({
+      completedAt: now,
+      updatedAt: now,
+    });
+
+    setRevisoes(prev =>
+      prev.map(r =>
+        r.id === revisaoId
+          ? { ...r, completedAt: now, updatedAt: now }
+          : r
+      )
+    );
+
+    // 🔥 ENFILEIRA A ATUALIZAÇÃO DA REVISÃO CONCLUÍDA
+    await enqueueOperation('update', 'revisoes', {
+      id: revisaoId,
+      completedAt: now,
+      updatedAt: now,
+    });
+
+    // 3. Se não for o nível 5, criar a próxima revisão
+    const niveis = [
+      { nivel: 1, dias: 1 },
+      { nivel: 2, dias: 7 },
+      { nivel: 3, dias: 15 },
+      { nivel: 4, dias: 30 },
+      { nivel: 5, dias: 60 },
+    ];
+
+    if (nivelAtual < 5) {
+      const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
+      if (proximoNivel) {
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
+
+        const newRevisao = {
+          id: uid(),
+          user_id: userId,
+          topico_id: topicoId,
+          topicName: revisao.topicName,
+          discipline: revisao.discipline,
+          review_level: proximoNivel.nivel,
+          nextReviewDate: nextDate.toISOString(),
+          lastStudyDate: now,
+          completedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        await db.revisoes.insert(newRevisao);
+        setRevisoes(prev => [...prev, newRevisao]);
+
+        // 🔥 ENFILEIRA A CRIAÇÃO DA NOVA REVISÃO
+        await enqueueOperation('create', 'revisoes', newRevisao);
+      }
+    }
+
+    // 4. Atualizar status do tópico (enfileirando a operação)
+    const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
+    if (topicoDoc) {
+      const topicoData = topicoDoc.toJSON();
+      const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
+      const revisoesData = allRevisoes.map((d: any) => d.toJSON());
+      const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
+      const total = revisoesData.length;
+
+      let novoStatus = topicoData.status;
+      if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
+        novoStatus = 'revisado';
+      }
+      if (total === 5 && concluidas === 5) {
+        novoStatus = 'dominado';
+      }
+
+      if (novoStatus !== topicoData.status) {
+        await topicoDoc.incrementalPatch({
+          status: novoStatus,
+          updatedAt: now,
+        });
+
+        // 🔥 ENFILEIRA A ATUALIZAÇÃO DO TÓPICO
+        await enqueueOperation('update', 'topics', {
+          id: topicoId,
+          status: novoStatus,
+          updatedAt: now,
+        });
+      }
+    }
+
+    await loadRevisoes();
+    console.log('✅ Revisão concluída com sucesso (enfileirada)');
+
+  } catch (error) {
+    console.error('❌ Erro ao concluir revisão:', error);
+  } finally {
+    setConcluindoRevisaoId(null);
+  }
+}, [userId, loadRevisoes, concluindoRevisaoId]);
 
   // ============================================================
   // NAVEGAÇÃO

@@ -32,6 +32,7 @@ type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt' | 'updated_
 interface StudyContextType {
   records: StudyRecord[];
   addRecord: (data: AddStudyData) => Promise<void>;
+  editRecord: (id: string, data: Partial<Omit<StudyRecord, 'id' | 'user_id' | 'createdAt'>>) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   getRecordsForDate: (date: string) => StudyRecord[];
   getMonthStats: (year: number, month: number) => {
@@ -55,14 +56,13 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [loading, setLoading] = useState(true);
 
   // ============================================================
-  // CARREGAR DADOS (agora com Clerk)
+  // CARREGAR DADOS
   // ============================================================
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       let userIdFromAuth: string | null = null;
 
-      // Tenta pegar do localStorage (vem do Clerk)
       const cachedId = localStorage.getItem('revisaflash_user_id');
       if (cachedId) {
         userIdFromAuth = cachedId;
@@ -118,7 +118,6 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => [...prev, newRecord]);
       console.log('📚 [StudyContext] Registro adicionado e salvo no RxDB:', newRecord);
 
-      // Tenta sincronizar com Supabase usando token do Clerk
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -137,7 +136,49 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [userId]);
 
   // ============================================================
-  // DELETAR REGISTRO
+  // 🔥 EDITAR REGISTRO (NOVO)
+  // ============================================================
+  const editRecord = useCallback(async (id: string, data: Partial<Omit<StudyRecord, 'id' | 'user_id' | 'createdAt'>>) => {
+    try {
+      const db = await getDb();
+      const doc = await db.study_records.findOne({ selector: { id } }).exec();
+      if (!doc) {
+        console.warn('⚠️ [StudyContext] Registro não encontrado no RxDB:', id);
+        return;
+      }
+
+      const updatedData = {
+        ...data,
+        updated_at: new Date().toISOString()
+      };
+      await doc.incrementalPatch(updatedData);
+
+      setRecords(prev => prev.map(r =>
+        r.id === id ? { ...r, ...updatedData } : r
+      ));
+
+      console.log('✏️ [StudyContext] Registro atualizado localmente:', id);
+
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('study_records')
+          .update(updatedData)
+          .eq('id', id);
+        if (error) throw error;
+        console.log('✅ [StudyContext] Registro atualizado no Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [StudyContext] Falha ao sincronizar (offline?), adicionando à fila.');
+        await enqueueOperation('update', 'study_records', { id, ...updatedData });
+      }
+    } catch (error) {
+      console.error('❌ [StudyContext] Erro ao editar registro:', error);
+      throw error;
+    }
+  }, []);
+
+  // ============================================================
+  // EXCLUIR REGISTRO (COM FILA)
   // ============================================================
   const deleteRecord = useCallback(async (id: string) => {
     console.log('🔍 [StudyContext] Tentando excluir registro com id:', id);
@@ -154,15 +195,12 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      const recordData = doc.toJSON();
-      console.log('📄 [StudyContext] Registro encontrado:', recordData);
-
-      // 1. Remover localmente
+      // Remover localmente
       await doc.remove();
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ [StudyContext] Registro removido localmente.');
 
-      // 2. Tentar excluir no Supabase com token do Clerk
+      // Enfileirar exclusão (mesmo se online, para garantir)
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -218,13 +256,14 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const value = useMemo(() => ({
     records,
     addRecord,
+    editRecord,
     deleteRecord,
     getRecordsForDate,
     getMonthStats,
     loading,
     refresh,
     userId,
-  }), [records, addRecord, deleteRecord, getRecordsForDate, getMonthStats, loading, refresh, userId]);
+  }), [records, addRecord, editRecord, deleteRecord, getRecordsForDate, getMonthStats, loading, refresh, userId]);
 
   return (
     <StudyContext.Provider value={value}>

@@ -10,6 +10,7 @@ import { uid, gerenciarRevisao } from "@/utils/helpers";
 import { getDb, syncWithSupabase } from "@/lib/db";
 import { supabase } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
+import { enqueueOperation } from "@/services/queueService"; // 🔥 IMPORTADO
 
 
 // ============================================================
@@ -192,7 +193,6 @@ export default function ConteudoPage() {
       const disciplina = getDisciplinaById(topicData.discipline_id);
       const disciplinaNome = disciplina?.name || 'Disciplina';
 
-      // Simular progresso (opcional)
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
@@ -232,34 +232,245 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CRUD (disciplinas, tópicos, revisões)
+  // CRUD CORRIGIDO (COM FILA)
   // ============================================================
-  const syncRevisoes = useCallback(async (revisoesData: Revisao[]) => {
-    if (!userId) return;
-    try {
-      const mapped = revisoesData.map((r) => ({
-        id: r.id,
-        user_id: r.user_id,
-        topico_id: r.topico_id,
-        topicName: r.topicName,
-        discipline: r.discipline,
-        review_level: r.review_level,
-        nextReviewDate: r.nextReviewDate,
-        lastStudyDate: r.lastStudyDate,
-        completedAt: r.completedAt || null,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt
-      }));
-      const { error } = await supabase
-        .from('revisoes')
-        .upsert(mapped, { onConflict: 'id' });
-      if (error) console.error('❌ Erro ao sincronizar revisões:', error);
-      else console.log('✅ Revisões sincronizadas com Supabase');
-    } catch (error) {
-      console.error('❌ Erro ao sincronizar revisões:', error);
-    }
-  }, [userId]);
 
+  // ---------- CRIAR DISCIPLINA ----------
+  const handleCreateDiscipline = useCallback(async () => {
+    if (!discNome.trim()) {
+      setErrorMessage("Digite um nome para a disciplina");
+      return;
+    }
+    if (!userId) {
+      setErrorMessage("Usuário não autenticado");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const now = new Date().toISOString();
+      const id = uid();
+      const db = await getDb();
+      
+      const newDiscipline = {
+        id,
+        name: discNome.trim(),
+        user_id: userId,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+
+      // 1. Salva localmente
+      await db.disciplines.insert(newDiscipline);
+
+      // 2. Tenta sincronizar com Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('disciplines')
+          .insert(newDiscipline);
+        if (error) throw error;
+        console.log('✅ [ConteudoPage] Disciplina sincronizada com Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ConteudoPage] Falha ao sincronizar disciplina, enfileirando.');
+        await enqueueOperation('create', 'disciplines', newDiscipline);
+      }
+
+      setDiscNome("");
+      setDiscDesc("");
+      setIsModalOpen(false);
+      setErrorMessage("");
+      await loadData();
+    } catch (error: any) {
+      console.error("❌ Erro ao criar disciplina:", error);
+      setErrorMessage("Erro ao criar disciplina: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [discNome, discDesc, userId, loadData]);
+
+  // ---------- CRIAR TÓPICO ----------
+  const handleCreateTopic = useCallback(async () => {
+    if (!selectedDisciplineId) {
+      setErrorMessage("Selecione uma disciplina primeiro");
+      return;
+    }
+    if (!topicoNome.trim()) {
+      setErrorMessage("Digite um nome para o tópico");
+      return;
+    }
+    if (!userId) {
+      setErrorMessage("Usuário não autenticado");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const now = new Date().toISOString();
+      const id = uid();
+      const db = await getDb();
+      
+      const newTopic = {
+        id,
+        discipline_id: selectedDisciplineId,
+        name: topicoNome.trim(),
+        status: topicoStatus,
+        planned_date: null,
+        createdAt: now,
+        updatedAt: now,
+        user_id: userId,
+        deletedAt: null,
+      };
+
+      await db.topics.insert(newTopic);
+
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('topics')
+          .insert(newTopic);
+        if (error) throw error;
+        console.log('✅ [ConteudoPage] Tópico sincronizado com Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ConteudoPage] Falha ao sincronizar tópico, enfileirando.');
+        await enqueueOperation('create', 'topics', newTopic);
+      }
+
+      setTopicoNome("");
+      setTopicoDesc("");
+      setTopicoStatus("nao_estudado");
+      setIsAddTopicModalOpen(false);
+      setErrorMessage("");
+      await loadData();
+    } catch (error: any) {
+      console.error("❌ Erro ao criar tópico:", error);
+      setErrorMessage("Erro ao criar tópico: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData]);
+
+  // ---------- EXCLUIR DISCIPLINA (COM FILA) ----------
+  const handleDeleteDiscipline = useCallback(async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+
+      // 1. Soft delete local
+      const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
+      if (disciplineDoc) {
+        await disciplineDoc.incrementalPatch({ deletedAt: now });
+      }
+
+      const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
+      const topicIds = topics.map(t => t.id);
+      for (const t of topics) {
+        await t.incrementalPatch({ deletedAt: now });
+        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
+        for (const r of revisoesTopico) {
+          await r.remove();
+        }
+      }
+
+      // 2. Enfileira operações para sincronizar
+      await enqueueOperation('update', 'disciplines', { id, deletedAt: now });
+      for (const tid of topicIds) {
+        await enqueueOperation('update', 'topics', { id: tid, deletedAt: now });
+        // Para revisões, como são removidas, enfileira delete
+        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: tid } }).exec();
+        for (const r of revisoesTopico) {
+          await enqueueOperation('delete', 'revisoes', { id: r.id });
+        }
+      }
+
+      if (selectedDisciplineId === id) {
+        setSelectedDisciplineId(null);
+        setModo("disciplinas");
+      }
+
+      await loadData();
+      setErrorMessage("✅ Disciplina excluída com sucesso!");
+      setTimeout(() => setErrorMessage(""), 3000);
+
+    } catch (error: any) {
+      console.error("❌ Erro ao deletar disciplina:", error);
+      setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
+    }
+  }, [selectedDisciplineId, loadData]);
+
+  // ---------- EXCLUIR TÓPICO (COM FILA) ----------
+  const handleDeleteTopic = useCallback(async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+
+      const doc = await db.topics.findOne({ selector: { id } }).exec();
+      if (doc) {
+        await doc.incrementalPatch({ deletedAt: now });
+
+        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
+        for (const r of revisoesTopico) {
+          await r.remove();
+        }
+
+        // Enfileira operações
+        await enqueueOperation('update', 'topics', { id, deletedAt: now });
+        for (const r of revisoesTopico) {
+          await enqueueOperation('delete', 'revisoes', { id: r.id });
+        }
+
+        if (selectedTopicId === id) {
+          setSelectedTopicId(null);
+          setModo("disciplina-detalhe");
+        }
+        await loadData();
+        setErrorMessage("✅ Tópico excluído com sucesso!");
+        setTimeout(() => setErrorMessage(""), 3000);
+      }
+    } catch (error: any) {
+      console.error("❌ Erro ao deletar tópico:", error);
+      setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
+    }
+  }, [selectedTopicId, loadData]);
+
+  // ---------- ATUALIZAR STATUS DO TÓPICO (COM FILA) ----------
+  const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+      const doc = await db.topics.findOne({ selector: { id } }).exec();
+      if (doc) {
+        const topicoData = doc.toJSON();
+        const disciplina = getDisciplinaById(topicoData.discipline_id);
+
+        // 1. Atualiza localmente
+        await doc.incrementalPatch({
+          status: newStatus,
+          updatedAt: now
+        });
+
+        // 2. Enfileira atualização
+        await enqueueOperation('update', 'topics', { id, status: newStatus, updatedAt: now });
+
+        // 3. Gerencia revisões (também com fila)
+        await gerenciarRevisoesTopico(
+          id,
+          topicoData.name,
+          disciplina?.name || 'Disciplina',
+          newStatus
+        );
+
+        await loadData();
+        console.log('✅ Status do tópico atualizado com sucesso (local e fila)');
+      }
+    } catch (error: any) {
+      console.error("❌ Erro ao atualizar status do tópico:", error);
+      setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
+    }
+  }, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
+
+  // ---------- GERENCIAR REVISÕES (COM FILA) ----------
   const gerenciarRevisoesTopico = useCallback(async (
     topicoId: string,
     topicoNome: string,
@@ -287,10 +498,10 @@ export default function ConteudoPage() {
       for (const doc of existingDocs) {
         if (!novosIds.includes(doc.id)) {
           await doc.remove();
+          await enqueueOperation('delete', 'revisoes', { id: doc.id });
         }
       }
 
-      const revisoesParaSalvar: Revisao[] = [];
       for (const rev of novasRevisoes) {
         const topicoIdFinal = rev.topicoId || topicoId;
         const topicNameFinal = rev.topicoNome || topicoNome;
@@ -300,30 +511,7 @@ export default function ConteudoPage() {
         const lastStudyDateFinal = rev.lastStudyDate || new Date().toISOString();
 
         const existingDoc = existingDocs.find(d => d.id === rev.id);
-        if (existingDoc) {
-          await existingDoc.incrementalPatch({
-            review_level: reviewLevelFinal,
-            nextReviewDate: nextReviewDateFinal,
-            lastStudyDate: lastStudyDateFinal,
-            completedAt: rev.completedAt || null,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          await db.revisoes.insert({
-            id: rev.id,
-            user_id: userId,
-            topico_id: topicoIdFinal,
-            topicName: topicNameFinal,
-            discipline: disciplineFinal,
-            review_level: reviewLevelFinal,
-            nextReviewDate: nextReviewDateFinal,
-            lastStudyDate: lastStudyDateFinal,
-            completedAt: rev.completedAt || null,
-            createdAt: rev.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
-        }
-        revisoesParaSalvar.push({
+        const revisaoData = {
           id: rev.id,
           user_id: userId,
           topico_id: topicoIdFinal,
@@ -335,219 +523,37 @@ export default function ConteudoPage() {
           completedAt: rev.completedAt || null,
           createdAt: rev.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString()
-        });
+        };
+
+        if (existingDoc) {
+          await existingDoc.incrementalPatch({
+            review_level: reviewLevelFinal,
+            nextReviewDate: nextReviewDateFinal,
+            lastStudyDate: lastStudyDateFinal,
+            completedAt: rev.completedAt || null,
+            updatedAt: new Date().toISOString()
+          });
+          await enqueueOperation('update', 'revisoes', { 
+            id: rev.id, 
+            review_level: reviewLevelFinal,
+            nextReviewDate: nextReviewDateFinal,
+            lastStudyDate: lastStudyDateFinal,
+            completedAt: rev.completedAt || null,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          await db.revisoes.insert(revisaoData);
+          await enqueueOperation('create', 'revisoes', revisaoData);
+        }
       }
 
       await loadData();
-      await syncRevisoes(revisoesParaSalvar);
-      console.log('✅ Revisões atualizadas com sucesso');
+      console.log('✅ Revisões atualizadas com sucesso (local e fila)');
     } catch (error) {
       console.error('❌ Erro ao gerenciar revisões:', error);
       throw error;
     }
-  }, [userId, loadData, syncRevisoes]);
-
-  const handleCreateDiscipline = useCallback(async () => {
-    if (!discNome.trim()) {
-      setErrorMessage("Digite um nome para a disciplina");
-      return;
-    }
-    if (!userId) {
-      setErrorMessage("Usuário não autenticado");
-      return;
-    }
-    try {
-      setIsSaving(true);
-      const now = new Date().toISOString();
-      const id = uid();
-      const db = await getDb();
-      await db.disciplines.insert({
-        id,
-        name: discNome.trim(),
-        user_id: userId,
-        createdAt: now
-      });
-
-      await syncWithSupabase(userId);
-
-      setDiscNome("");
-      setDiscDesc("");
-      setIsModalOpen(false);
-      setErrorMessage("");
-      await loadData();
-    } catch (error: any) {
-      console.error("❌ Erro ao criar disciplina:", error);
-      setErrorMessage("Erro ao criar disciplina: " + (error.message || "Erro desconhecido"));
-    } finally {
-      setIsSaving(false);
-    }
-  }, [discNome, discDesc, userId, loadData]);
-
-  const handleCreateTopic = useCallback(async () => {
-    if (!selectedDisciplineId) {
-      setErrorMessage("Selecione uma disciplina primeiro");
-      return;
-    }
-    if (!topicoNome.trim()) {
-      setErrorMessage("Digite um nome para o tópico");
-      return;
-    }
-    if (!userId) {
-      setErrorMessage("Usuário não autenticado");
-      return;
-    }
-    try {
-      setIsSaving(true);
-      const now = new Date().toISOString();
-      const id = uid();
-      const db = await getDb();
-      await db.topics.insert({
-        id,
-        discipline_id: selectedDisciplineId,
-        name: topicoNome.trim(),
-        status: topicoStatus,
-        planned_date: null,
-        createdAt: now,
-        user_id: userId
-      });
-
-      await syncWithSupabase(userId);
-      
-      setTopicoNome("");
-      setTopicoDesc("");
-      setTopicoStatus("nao_estudado");
-      setIsAddTopicModalOpen(false);
-      setErrorMessage("");
-      await loadData();
-    } catch (error: any) {
-      console.error("❌ Erro ao criar tópico:", error);
-      setErrorMessage("Erro ao criar tópico: " + (error.message || "Erro desconhecido"));
-    } finally {
-      setIsSaving(false);
-    }
-  }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData]);
-
-  const handleDeleteDiscipline = useCallback(async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-
-      const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
-      if (disciplineDoc) {
-        await disciplineDoc.incrementalPatch({ deletedAt: now });
-      }
-
-      const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
-      const topicIds = topics.map(t => t.id);
-
-      for (const t of topics) {
-        await t.incrementalPatch({ deletedAt: now });
-        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
-        const revisoesIds = revisoesTopico.map(r => r.id);
-        for (const r of revisoesTopico) {
-          await r.remove();
-        }
-        if (revisoesIds.length > 0) {
-          await supabase.from('revisoes').delete().in('id', revisoesIds);
-        }
-      }
-
-      await supabase.from('disciplines').update({ deletedAt: now }).eq('id', id);
-      if (topicIds.length > 0) {
-        await supabase.from('topics').update({ deletedAt: now }).in('id', topicIds);
-      }
-
-      if (selectedDisciplineId === id) {
-        setSelectedDisciplineId(null);
-        setModo("disciplinas");
-      }
-
-      await loadData();
-      setErrorMessage("✅ Disciplina excluída com sucesso!");
-      setTimeout(() => setErrorMessage(""), 3000);
-
-    } catch (error: any) {
-      console.error("❌ Erro ao deletar disciplina:", error);
-      setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
-    }
-  }, [selectedDisciplineId, loadData]);
-
-  const handleDeleteTopic = useCallback(async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-
-      const doc = await db.topics.findOne({ selector: { id } }).exec();
-      if (doc) {
-        await doc.incrementalPatch({ deletedAt: now });
-
-        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
-        const revisoesIds = revisoesTopico.map(r => r.id);
-        for (const r of revisoesTopico) {
-          await r.remove();
-        }
-        if (revisoesIds.length > 0) {
-          await supabase.from('revisoes').delete().in('id', revisoesIds);
-        }
-
-        await supabase.from('topics').update({ deletedAt: now }).eq('id', id);
-
-        if (selectedTopicId === id) {
-          setSelectedTopicId(null);
-          setModo("disciplina-detalhe");
-        }
-        await loadData();
-        setErrorMessage("✅ Tópico excluído com sucesso!");
-        setTimeout(() => setErrorMessage(""), 3000);
-      }
-    } catch (error: any) {
-      console.error("❌ Erro ao deletar tópico:", error);
-      setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
-    }
-  }, [selectedTopicId, loadData]);
-
-  const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-      const doc = await db.topics.findOne({ selector: { id } }).exec();
-      if (doc) {
-        const topicoData = doc.toJSON();
-        const disciplina = getDisciplinaById(topicoData.discipline_id);
-
-        await doc.incrementalPatch({
-          status: newStatus,
-          updatedAt: now
-        });
-
-        const { error } = await supabase
-          .from('topics')
-          .update({ status: newStatus, updatedAt: now })
-          .eq('id', id);
-
-        if (error) {
-          console.error('❌ Erro ao enviar atualização para Supabase:', error);
-          await doc.incrementalPatch({ status: doc.get('status') });
-          throw error;
-        }
-
-        await gerenciarRevisoesTopico(
-          id,
-          topicoData.name,
-          disciplina?.name || 'Disciplina',
-          newStatus
-        );
-
-        await loadData();
-        console.log('✅ Status do tópico atualizado com sucesso (local e Supabase)');
-      }
-    } catch (error: any) {
-      console.error("❌ Erro ao atualizar status do tópico:", error);
-      setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
-    }
-  }, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
+  }, [userId, loadData]);
 
   // ============================================================
   // NAVEGAÇÃO
@@ -561,7 +567,6 @@ export default function ConteudoPage() {
   const abrirTopico = useCallback((id: string) => {
     setSelectedTopicId(id);
     setModo("topico-detalhe");
-    // Carregar arquivos do tópico
     if (userId) {
       loadFilesForTopic(id);
     }
@@ -578,7 +583,6 @@ export default function ConteudoPage() {
     setSelectedTopicId(null);
   }, []);
 
-  // Carregar arquivos quando o tópico for selecionado novamente
   useEffect(() => {
     if (selectedTopicId && userId && modo === "topico-detalhe") {
       loadFilesForTopic(selectedTopicId);
@@ -631,7 +635,7 @@ export default function ConteudoPage() {
   };
 
   // ============================================================
-  // RENDER: LISTA DE DISCIPLINAS
+  // RENDER: LISTA DE DISCIPLINAS (SEM MUDANÇAS)
   // ============================================================
   if (modo === "disciplinas") {
     return (
@@ -784,7 +788,7 @@ export default function ConteudoPage() {
   }
 
   // ============================================================
-  // RENDER: DETALHES DA DISCIPLINA
+  // RENDER: DETALHES DA DISCIPLINA (COM FUNÇÕES CORRIGIDAS)
   // ============================================================
   if (modo === "disciplina-detalhe" && selectedDisciplineId) {
     const disciplina = getDisciplinaById(selectedDisciplineId);
@@ -954,7 +958,7 @@ export default function ConteudoPage() {
   }
 
   // ============================================================
-  // RENDER: DETALHES DO TÓPICO (COM ANEXOS)
+  // RENDER: DETALHES DO TÓPICO (COM FUNÇÕES CORRIGIDAS)
   // ============================================================
   if (modo === "topico-detalhe" && selectedTopicId) {
     const topico = getTopicoById(selectedTopicId);
@@ -1105,7 +1109,6 @@ export default function ConteudoPage() {
                   currentFiles.map((a) => {
                     const Icon = getIconByType(a.tipo);
                     const cor = getIconCor(a.tipo);
-                    // Extrair caminho do arquivo da URL pública
                     let filePath = '';
                     try {
                       const url = new URL(a.url);

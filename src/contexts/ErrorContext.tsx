@@ -249,7 +249,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [userId]);
 
   // ============================================================
-  // GESTÃO DE ÁREAS
+  // GESTÃO DE ÁREAS (CORRIGIDO COM FILA)
   // ============================================================
   const addArea = useCallback(async (name: string, icon: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
@@ -257,16 +257,38 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       alert('Área já existe.');
       return;
     }
-    const db = await getDb();
-    if (db.areas) {
-      await db.areas.insert({
-        id: uid(),
-        user_id: userId,
-        name,
-        icon,
-      });
+    
+    const newArea = {
+      id: uid(),
+      user_id: userId,
+      name,
+      icon,
+    };
+
+    try {
+      const db = await getDb();
+      if (db.areas) {
+        await db.areas.insert(newArea);
+      }
+      setAreas(prev => [...prev, { name, icon }]);
+      console.log('📝 Área adicionada localmente:', name);
+
+      // Tenta sincronizar com Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('areas')
+          .insert(newArea);
+        if (error) throw error;
+        console.log('✅ [ErrorContext] Área sincronizada com Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ErrorContext] Falha ao sincronizar área (offline?), adicionando à fila.');
+        await enqueueOperation('create', 'areas', newArea);
+      }
+    } catch (error) {
+      console.error('❌ [ErrorContext] Erro ao adicionar área:', error);
+      throw error;
     }
-    setAreas(prev => [...prev, { name, icon }]);
   }, [userId, areas]);
 
   const removeArea = useCallback(async (name: string) => {
@@ -276,14 +298,52 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       alert(`Não é possível remover a área "${name}" pois há erros associados.`);
       return;
     }
-    const db = await getDb();
-    if (db.areas) {
-      const doc = await db.areas.findOne({ selector: { user_id: userId, name } }).exec();
-      if (doc) {
-        await doc.remove();
+
+    try {
+      const db = await getDb();
+      let areaId: string | null = null;
+      if (db.areas) {
+        const doc = await db.areas.findOne({ selector: { user_id: userId, name } }).exec();
+        if (doc) {
+          areaId = doc.toJSON().id;
+          await doc.remove();
+        }
       }
+      setAreas(prev => prev.filter(a => a.name !== name));
+      console.log('🗑️ Área removida localmente:', name);
+
+      // Tenta excluir no Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        if (areaId) {
+          const { error } = await supabaseClient
+            .from('areas')
+            .delete()
+            .eq('id', areaId);
+          if (error) throw error;
+        } else {
+          // Fallback: tentar deletar pelo nome (não recomendado, mas para garantir)
+          const { error } = await supabaseClient
+            .from('areas')
+            .delete()
+            .eq('user_id', userId)
+            .eq('name', name);
+          if (error) throw error;
+        }
+        console.log('✅ [ErrorContext] Área excluída do Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ErrorContext] Falha ao excluir área no Supabase (offline?), adicionando à fila.');
+        if (areaId) {
+          await enqueueOperation('delete', 'areas', { id: areaId });
+        } else {
+          // Se não temos o ID, não podemos enfileirar corretamente
+          console.warn('⚠️ Não foi possível enfileirar a exclusão da área sem ID.');
+        }
+      }
+    } catch (error) {
+      console.error('❌ [ErrorContext] Erro ao remover área:', error);
+      throw error;
     }
-    setAreas(prev => prev.filter(a => a.name !== name));
   }, [userId, records]);
 
   // ============================================================
