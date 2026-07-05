@@ -20,7 +20,6 @@ function LoadingScreen() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="text-center">
         <div className="relative mx-auto h-16 w-16">
-          {/* Efeito de pulso ao redor do raio */}
           <div className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
           <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             <Zap className="h-8 w-8 text-primary" />
@@ -75,29 +74,25 @@ export function AppShell({
   const navigate = useNavigate();
 
   // ============================================================
-  // CONTEXTOS PARA LOADING
+  // 🔥 TODOS OS HOOKS DEVEM VIR ANTES DE QUALQUER EARLY RETURN
   // ============================================================
-  const { isLoaded: userLoaded } = useAppUser();
-  const { loading: flashcardsLoading } = useFlashcardContext();
 
-  // ============================================================
-  // SE AINDA ESTIVER CARREGANDO, MOSTRA TELA DE LOADING
-  // ============================================================
-  if (!userLoaded || flashcardsLoading) {
-    return <LoadingScreen />;
-  }
-
-  // ============================================================
-  // USANDO NOSSO CONTEXTO (em vez de Clerk diretamente)
-  // ============================================================
+  // Contextos
   const { user, isSignedIn, isLoaded } = useAppUser();
+  const { loading: flashcardsLoading } = useFlashcardContext();
+  const studyContext = useStudy();
+  const { records: studyRecords } = studyContext;
 
-  // ============================================================
-  // NOME E AVATAR DO SUPABASE (fonte única)
-  // ============================================================
+  // Estados
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
+  const [streak, setStreak] = useState(0);
 
+  // ============================================================
+  // 🔥 EFFECTS (TAMBÉM DEVEM VIR ANTES DO EARLY RETURN)
+  // ============================================================
+
+  // Carrega perfil do Supabase
   useEffect(() => {
     const loadProfile = async () => {
       if (!user?.id) return;
@@ -121,13 +116,7 @@ export function AppShell({
     }
   }, [user, isLoaded]);
 
-  // ============================================================
-  // STREAK
-  // ============================================================
-  const [streak, setStreak] = useState(0);
-  const studyContext = useStudy();
-  const { records: studyRecords } = studyContext;
-
+  // Calcula streak
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
       setStreak(0);
@@ -157,6 +146,15 @@ export function AppShell({
 
     setStreak(streakCount);
   }, [studyRecords]);
+
+  // ============================================================
+  // 🔥 EARLY RETURN (AGORA DEPOIS DE TODOS OS HOOKS)
+  // ============================================================
+
+  // Se ainda está carregando, mostra tela de loading
+  if (!isLoaded || flashcardsLoading) {
+    return <LoadingScreen />;
+  }
 
   // ============================================================
   // HANDLE LOGOUT
