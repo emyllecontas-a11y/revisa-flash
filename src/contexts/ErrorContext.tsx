@@ -23,11 +23,11 @@ export interface ErrorRecord {
   status: 'ativo' | 'resolvido' | 'arquivado';
   flashcardId?: string;
   createdAt: string;
-  updatedAt?: string;
-  isDeleted?: boolean; // 🔥 Soft delete flag
+  updated_at?: string; // 🔥 ALTERADO: agora com underline
+  isDeleted?: boolean;
 }
 
-type AddErrorData = Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId' | 'isDeleted'>;
+type AddErrorData = Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId' | 'isDeleted' | 'updated_at'>;
 
 interface ErrorContextType {
   records: ErrorRecord[];
@@ -40,7 +40,6 @@ interface ErrorContextType {
   userId: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  // Gestão de áreas
   areas: { name: string; icon: string }[];
   addArea: (name: string, icon: string) => Promise<void>;
   removeArea: (name: string) => Promise<void>;
@@ -48,7 +47,6 @@ interface ErrorContextType {
 
 const ErrorContext = createContext<ErrorContextType | undefined>(undefined);
 
-// Áreas padrão
 const DEFAULT_AREAS = [
   { name: 'Patologia Oral', icon: '🔬' },
   { name: 'Periodontia', icon: '🦷' },
@@ -109,7 +107,6 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         const loadedAreas = areasResult.map((doc: any) => doc.toJSON());
         setAreas(loadedAreas);
       } else {
-        // Se não houver áreas salvas, salvar as padrão com isDeleted: false
         const db = await getDb();
         if (db.areas) {
           for (const area of DEFAULT_AREAS) {
@@ -133,30 +130,28 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, []);
 
-useEffect(() => {
-  const loadAndSubscribe = async () => {
-    await loadData();
-    
-    // 🔥 Inscrever-se em mudanças na coleção errors
-    try {
-      const db = await getDb();
-      if (db.collections?.errors) {
-        const subscription = db.collections.errors.$.subscribe(() => {
-          console.log('🔄 Mudança detectada na coleção errors, recarregando...');
-          loadData();
-        });
-        return () => subscription.unsubscribe();
+  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE
+  useEffect(() => {
+    const loadAndSubscribe = async () => {
+      await loadData();
+      try {
+        const db = await getDb();
+        if (db.collections?.errors) {
+          const subscription = db.collections.errors.$.subscribe(() => {
+            console.log('🔄 Mudança detectada na coleção errors, recarregando...');
+            loadData();
+          });
+          return () => subscription.unsubscribe();
+        }
+      } catch (e) {
+        console.warn('Erro ao configurar listener de errors:', e);
       }
-    } catch (e) {
-      console.warn('Erro ao configurar listener de errors:', e);
-    }
-  };
-  
-  loadAndSubscribe();
-}, [loadData]);
+    };
+    loadAndSubscribe();
+  }, [loadData]);
 
   // ============================================================
-  // ADICIONAR ERRO (com isDeleted: false)
+  // ADICIONAR ERRO (com isDeleted: false e updated_at)
   // ============================================================
   const addError = useCallback(async (data: AddErrorData): Promise<ErrorRecord> => {
     if (!userId) throw new Error('Usuário não autenticado');
@@ -170,8 +165,8 @@ useEffect(() => {
       status: 'ativo',
       flashcardId: undefined,
       createdAt: now,
-      updatedAt: now,
-      isDeleted: false, // 🔥
+      updated_at: now, // 🔥 ALTERADO: campo correto
+      isDeleted: false,
     };
 
     try {
@@ -213,7 +208,7 @@ useEffect(() => {
 
       const updatedData = {
         ...data,
-        updatedAt: new Date().toISOString()
+        updated_at: new Date().toISOString() // 🔥 ALTERADO: campo correto
       };
       await doc.incrementalPatch(updatedData);
 
@@ -240,7 +235,7 @@ useEffect(() => {
   }, []);
 
   // ============================================================
-  // EXCLUIR ERRO (SOFT DELETE com isDeleted: true)
+  // EXCLUIR ERRO (SOFT DELETE com isDeleted: true e updated_at)
   // ============================================================
   const deleteError = useCallback(async (id: string) => {
     if (!userId) return;
@@ -254,27 +249,26 @@ useEffect(() => {
 
       const now = new Date().toISOString();
 
-      // 🔥 SOFT DELETE: marca isDeleted: true em vez de remover
+      // 🔥 SOFT DELETE com updated_at correto
       await doc.incrementalPatch({
         isDeleted: true,
-        updatedAt: now,
+        updated_at: now, // 🔥 ALTERADO
       });
       
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ Erro marcado como deletado localmente.');
 
-      // Enfileira atualização (não delete) para sincronizar com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
           .from('errors')
-          .update({ isDeleted: true, updatedAt: now })
+          .update({ isDeleted: true, updated_at: now }) // 🔥 ALTERADO
           .eq('id', id);
         if (error) throw error;
         console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
       } catch (supabaseError) {
         console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete (offline?), adicionando à fila.');
-        await enqueueOperation('update', 'errors', { id, isDeleted: true, updatedAt: now });
+        await enqueueOperation('update', 'errors', { id, isDeleted: true, updated_at: now });
       }
     } catch (error) {
       console.error('❌ [ErrorContext] Erro ao excluir erro:', error);
@@ -292,12 +286,15 @@ useEffect(() => {
       return;
     }
     
+    const now = new Date().toISOString();
     const newArea = {
       id: uid(),
       user_id: userId,
       name,
       icon,
-      isDeleted: false, // 🔥
+      isDeleted: false,
+      created_at: now,
+      updated_at: now,
     };
 
     try {
@@ -346,9 +343,9 @@ useEffect(() => {
         }).exec();
         if (doc) {
           areaId = doc.toJSON().id;
-          // 🔥 SOFT DELETE
           await doc.incrementalPatch({
             isDeleted: true,
+            updated_at: new Date().toISOString(),
           });
         }
       }
@@ -360,13 +357,13 @@ useEffect(() => {
           const supabaseClient = await getSupabaseWithToken();
           const { error } = await supabaseClient
             .from('areas')
-            .update({ isDeleted: true })
+            .update({ isDeleted: true, updated_at: new Date().toISOString() })
             .eq('id', areaId);
           if (error) throw error;
           console.log('✅ [ErrorContext] Área marcada como deletada no Supabase.');
         } catch (supabaseError) {
           console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete de área, enfileirando.');
-          await enqueueOperation('update', 'areas', { id: areaId, isDeleted: true });
+          await enqueueOperation('update', 'areas', { id: areaId, isDeleted: true, updated_at: new Date().toISOString() });
         }
       }
     } catch (error) {
