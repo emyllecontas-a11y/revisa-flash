@@ -1,10 +1,11 @@
+// src/lib/db.ts
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
 import { processPendingOperations } from '@/services/queueService';
 
 // ============================================================
-// SCHEMAS
+// SCHEMAS (com isDeleted booleano, version: 0)
 // ============================================================
 
 const deckSchema = {
@@ -20,7 +21,7 @@ const deckSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     color: { type: 'string' },
-    deletedAt: { type: ['string', 'null'] },
+    isDeleted: { type: 'boolean', default: false }, // 🔥 NOME ALTERADO
     is_shared: { type: 'boolean' },
     owner_id: { type: 'string' },
     shared_with: { type: 'array', items: { type: 'string' } }
@@ -51,7 +52,8 @@ const flashcardSchema = {
     scheduled_days: { type: 'number' },
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
-    shared_card_id: { type: ['string', 'null'] }
+    shared_card_id: { type: ['string', 'null'] },
+    isDeleted: { type: 'boolean', default: false } // 🔥
   },
   required: ['id', 'deck_id', 'user_id', 'front', 'back']
 };
@@ -67,7 +69,7 @@ const disciplineSchema = {
     user_id: { type: 'string' },
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
-    deletedAt: { type: ['string', 'null'] }
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'name', 'user_id']
 };
@@ -86,8 +88,7 @@ const topicSchema = {
     planned_date: { type: 'string' },
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
-    deletedAt: { type: ['string', 'null'] },
-    updatedAt: { type: ['string', 'null'] }
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'name', 'user_id']
 };
@@ -112,7 +113,8 @@ const errorSchema = {
     status: { type: 'string' },
     flashcardId: { type: 'string' },
     createdAt: { type: 'string' },
-    updated_at: { type: 'string' }
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'user_id', 'question', 'area', 'correctAnswer']
 };
@@ -133,7 +135,8 @@ const revisaoSchema = {
     lastStudyDate: { type: 'string' },
     completedAt: { type: 'string' },
     createdAt: { type: 'string' },
-    updated_at: { type: 'string' }
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'user_id', 'topico_id']
 };
@@ -158,7 +161,8 @@ const studyRecordSchema = {
     source: { type: 'string' },
     observations: { type: 'string' },
     createdAt: { type: 'string' },
-    updated_at: { type: 'string' }
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'user_id', 'date', 'type', 'discipline', 'topic', 'duration']
 };
@@ -192,13 +196,14 @@ const areaSchema = {
     user_id: { type: 'string' },
     name: { type: 'string' },
     icon: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'user_id', 'name']
 };
 
 const pendingOperationSchema = {
   title: 'pending operation schema',
-  version: 0,
+  version: 1, // 🔥 ALTERADO DE 0 PARA 1
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -214,9 +219,8 @@ const pendingOperationSchema = {
 };
 
 // ============================================================
-// GERENCIADOR DO BANCO
+// GERENCIADOR DO BANCO (getDb) – igual
 // ============================================================
-
 let dbInstance: RxDatabase | null = null;
 let isCreating = false;
 
@@ -243,6 +247,7 @@ export async function getDb(): Promise<RxDatabase> {
   try {
     const DB_NAME = 'revisaflash_db_v2';
 
+    // Limpeza opcional (pode remover se quiser manter dados)
     try {
       indexedDB.deleteDatabase('revisaflash-db');
     } catch (e) {}
@@ -267,14 +272,11 @@ export async function getDb(): Promise<RxDatabase> {
       pending_operations: { schema: pendingOperationSchema }
     });
 
-    console.log('✅ Banco local criado com sucesso (versão com updated_at).');
+    console.log('✅ Banco local criado com sucesso.');
     dbInstance = db;
     return db;
   } catch (error: any) {
     console.error('❌ Erro ao criar banco:', error);
-    if (error.code === 'DB6') {
-      console.error('❌ Erro de schema persistente. Por favor, limpe o cache do navegador e tente novamente.');
-    }
     throw error;
   } finally {
     isCreating = false;
@@ -282,14 +284,13 @@ export async function getDb(): Promise<RxDatabase> {
 }
 
 // ============================================================
-// SINCRONIZAÇÃO COM SUPABASE (VERSÃO 2 – INTELIGENTE)
+// SINCRONIZAÇÃO COM SUPABASE
 // ============================================================
-
 let isSyncing = false;
 
 export async function syncWithSupabase(userId: string) {
   if (isSyncing) {
-    console.log('⏳ Sincronização já em andamento. Aguarde.');
+    console.log('⏳ Sincronização já em andamento.');
     return;
   }
   isSyncing = true;
@@ -297,13 +298,10 @@ export async function syncWithSupabase(userId: string) {
   try {
     console.log('📦 Processando operações pendentes...');
     await processPendingOperations();
-    
+
     const database = await getDb();
     const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
-
     const supabaseClient = await getSupabaseWithToken();
-
-    console.log('🔍 Cliente Supabase com token:', supabaseClient);
 
     const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
 
@@ -314,20 +312,11 @@ export async function syncWithSupabase(userId: string) {
       // 1. PULL
       let query;
       if (name === 'decks') {
-        // 🔥 CORREÇÃO: busca decks próprios OU compartilhados com o usuário
         query = supabaseClient
           .from(name)
           .select('*')
           .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
-          .gte('updated_at', lastSync)
-          .is('deletedAt', null);
-      } else if (['disciplines', 'topics'].includes(name)) {
-        query = supabaseClient
-          .from(name)
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync)
-          .is('deletedAt', null);
+          .gte('updated_at', lastSync);
       } else {
         query = supabaseClient
           .from(name)
@@ -380,26 +369,24 @@ export async function syncWithSupabase(userId: string) {
         } else {
           console.log(`✅ Push ${name}: ${docsToPush.length} registros enviados`);
         }
-      } else {
-        console.log(`ℹ️ Push ${name}: Nenhum documento local modificado.`);
       }
     }
 
-    // study_sessions
+    // study_sessions – igual ao original
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
       const userDecks = await decksCollection.find({
         selector: { 
           user_id: userId,
-          deletedAt: { $eq: null }
+          isDeleted: { $ne: true }
         }
       }).exec();
       
       const deckIds = userDecks.map(doc => doc.get('id'));
 
       if (deckIds.length === 0) {
-        console.log('⚠️ study_sessions: Nenhum deck encontrado para este usuário');
+        console.log('⚠️ study_sessions: Nenhum deck encontrado');
       } else {
         const { data: sessionsData, error } = await supabaseClient
           .from('study_sessions')
@@ -456,7 +443,7 @@ export async function syncWithSupabase(userId: string) {
     }
 
     localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
-    console.log('✅ Sincronização concluída com sucesso.');
+    console.log('✅ Sincronização concluída.');
 
   } catch (err) {
     console.error('❌ Erro na sincronização:', err);

@@ -24,9 +24,10 @@ export interface ErrorRecord {
   flashcardId?: string;
   createdAt: string;
   updatedAt?: string;
+  isDeleted?: boolean; // 🔥 Soft delete flag
 }
 
-type AddErrorData = Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId'>;
+type AddErrorData = Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId' | 'isDeleted'>;
 
 interface ErrorContextType {
   records: ErrorRecord[];
@@ -66,14 +67,13 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [areas, setAreas] = useState<{ name: string; icon: string }[]>(DEFAULT_AREAS);
 
   // ============================================================
-  // CARREGAR USER ID DO CLERK
+  // CARREGAR DADOS (com filtro isDeleted: false)
   // ============================================================
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       let userIdFromAuth: string | null = null;
 
-      // Tenta pegar do localStorage (vem do Clerk)
       const cachedId = localStorage.getItem('revisaflash_user_id');
       if (cachedId) {
         userIdFromAuth = cachedId;
@@ -88,20 +88,28 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const db = await getDb();
 
-      // Carregar erros
+      // 🔥 Carregar erros não deletados
       const errorsResult = await db.errors.find({
-        selector: { user_id: userIdFromAuth }
+        selector: { 
+          user_id: userIdFromAuth,
+          isDeleted: { $ne: true }
+        }
       }).exec();
       const loadedRecords = errorsResult.map((doc: any) => doc.toJSON() as ErrorRecord);
       setRecords(loadedRecords);
 
-      // Carregar áreas personalizadas (se houver)
-      const areasResult = await db.areas?.find({ selector: { user_id: userIdFromAuth } }).exec();
+      // Carregar áreas não deletadas
+      const areasResult = await db.areas?.find({ 
+        selector: { 
+          user_id: userIdFromAuth,
+          isDeleted: { $ne: true }
+        }
+      }).exec();
       if (areasResult && areasResult.length > 0) {
         const loadedAreas = areasResult.map((doc: any) => doc.toJSON());
         setAreas(loadedAreas);
       } else {
-        // Se não houver áreas salvas, salvar as padrão
+        // Se não houver áreas salvas, salvar as padrão com isDeleted: false
         const db = await getDb();
         if (db.areas) {
           for (const area of DEFAULT_AREAS) {
@@ -110,6 +118,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               user_id: userIdFromAuth,
               name: area.name,
               icon: area.icon,
+              isDeleted: false,
             });
           }
         }
@@ -129,11 +138,12 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [loadData]);
 
   // ============================================================
-  // ADICIONAR ERRO
+  // ADICIONAR ERRO (com isDeleted: false)
   // ============================================================
   const addError = useCallback(async (data: AddErrorData): Promise<ErrorRecord> => {
     if (!userId) throw new Error('Usuário não autenticado');
 
+    const now = new Date().toISOString();
     const newError: ErrorRecord = {
       ...data,
       id: uid(),
@@ -141,8 +151,9 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       repetitions: 0,
       status: 'ativo',
       flashcardId: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false, // 🔥
     };
 
     try {
@@ -151,7 +162,6 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => [...prev, newError]);
       console.log('📝 Erro registrado e salvo no RxDB:', newError);
 
-      // Tenta sincronizar com Supabase usando token do Clerk
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -193,7 +203,6 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         r.id === id ? { ...r, ...updatedData } : r
       ));
 
-      // Tenta sincronizar com Supabase usando token do Clerk
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -213,34 +222,41 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   // ============================================================
-  // EXCLUIR ERRO (com fila)
+  // EXCLUIR ERRO (SOFT DELETE com isDeleted: true)
   // ============================================================
   const deleteError = useCallback(async (id: string) => {
     if (!userId) return;
     try {
       const db = await getDb();
       const doc = await db.errors.findOne({ selector: { id } }).exec();
-      if (doc) {
-        // Remover localmente
-        await doc.remove();
-        setRecords(prev => prev.filter(r => r.id !== id));
-        console.log('🗑️ Erro removido localmente.');
-
-        // Tentar excluir no Supabase usando token do Clerk
-        try {
-          const supabaseClient = await getSupabaseWithToken();
-          const { error } = await supabaseClient
-            .from('errors')
-            .delete()
-            .eq('id', id);
-          if (error) throw error;
-          console.log('✅ [ErrorContext] Erro excluído do Supabase.');
-        } catch (supabaseError) {
-          console.warn('⚠️ [ErrorContext] Falha ao excluir no Supabase (offline?), adicionando à fila.');
-          await enqueueOperation('delete', 'errors', { id });
-        }
-      } else {
+      if (!doc) {
         console.warn('⚠️ Erro não encontrado no RxDB:', id);
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      // 🔥 SOFT DELETE: marca isDeleted: true em vez de remover
+      await doc.incrementalPatch({
+        isDeleted: true,
+        updatedAt: now,
+      });
+      
+      setRecords(prev => prev.filter(r => r.id !== id));
+      console.log('🗑️ Erro marcado como deletado localmente.');
+
+      // Enfileira atualização (não delete) para sincronizar com Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        const { error } = await supabaseClient
+          .from('errors')
+          .update({ isDeleted: true, updatedAt: now })
+          .eq('id', id);
+        if (error) throw error;
+        console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete (offline?), adicionando à fila.');
+        await enqueueOperation('update', 'errors', { id, isDeleted: true, updatedAt: now });
       }
     } catch (error) {
       console.error('❌ [ErrorContext] Erro ao excluir erro:', error);
@@ -249,7 +265,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [userId]);
 
   // ============================================================
-  // GESTÃO DE ÁREAS (CORRIGIDO COM FILA)
+  // GESTÃO DE ÁREAS (COM SOFT DELETE)
   // ============================================================
   const addArea = useCallback(async (name: string, icon: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
@@ -263,6 +279,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       user_id: userId,
       name,
       icon,
+      isDeleted: false, // 🔥
     };
 
     try {
@@ -273,7 +290,6 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setAreas(prev => [...prev, { name, icon }]);
       console.log('📝 Área adicionada localmente:', name);
 
-      // Tenta sincronizar com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -291,9 +307,9 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [userId, areas]);
 
+  // 🔥 REMOVER ÁREA (SOFT DELETE)
   const removeArea = useCallback(async (name: string) => {
     if (!userId) return;
-    // Verifica se há erros com essa área
     if (records.some(r => r.area === name)) {
       alert(`Não é possível remover a área "${name}" pois há erros associados.`);
       return;
@@ -303,41 +319,36 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const db = await getDb();
       let areaId: string | null = null;
       if (db.areas) {
-        const doc = await db.areas.findOne({ selector: { user_id: userId, name } }).exec();
+        const doc = await db.areas.findOne({ 
+          selector: { 
+            user_id: userId, 
+            name,
+            isDeleted: { $ne: true }
+          }
+        }).exec();
         if (doc) {
           areaId = doc.toJSON().id;
-          await doc.remove();
+          // 🔥 SOFT DELETE
+          await doc.incrementalPatch({
+            isDeleted: true,
+          });
         }
       }
       setAreas(prev => prev.filter(a => a.name !== name));
-      console.log('🗑️ Área removida localmente:', name);
+      console.log('🗑️ Área marcada como deletada localmente:', name);
 
-      // Tenta excluir no Supabase
-      try {
-        const supabaseClient = await getSupabaseWithToken();
-        if (areaId) {
+      if (areaId) {
+        try {
+          const supabaseClient = await getSupabaseWithToken();
           const { error } = await supabaseClient
             .from('areas')
-            .delete()
+            .update({ isDeleted: true })
             .eq('id', areaId);
           if (error) throw error;
-        } else {
-          // Fallback: tentar deletar pelo nome (não recomendado, mas para garantir)
-          const { error } = await supabaseClient
-            .from('areas')
-            .delete()
-            .eq('user_id', userId)
-            .eq('name', name);
-          if (error) throw error;
-        }
-        console.log('✅ [ErrorContext] Área excluída do Supabase.');
-      } catch (supabaseError) {
-        console.warn('⚠️ [ErrorContext] Falha ao excluir área no Supabase (offline?), adicionando à fila.');
-        if (areaId) {
-          await enqueueOperation('delete', 'areas', { id: areaId });
-        } else {
-          // Se não temos o ID, não podemos enfileirar corretamente
-          console.warn('⚠️ Não foi possível enfileirar a exclusão da área sem ID.');
+          console.log('✅ [ErrorContext] Área marcada como deletada no Supabase.');
+        } catch (supabaseError) {
+          console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete de área, enfileirando.');
+          await enqueueOperation('update', 'areas', { id: areaId, isDeleted: true });
         }
       }
     } catch (error) {

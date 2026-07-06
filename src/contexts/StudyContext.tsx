@@ -25,9 +25,10 @@ export interface StudyRecord {
   observations?: string;
   createdAt: string;
   updated_at?: string;
+  isDeleted?: boolean; // 🔥 Soft delete flag
 }
 
-type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt' | 'updated_at'>;
+type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt' | 'updated_at' | 'isDeleted'>;
 
 interface StudyContextType {
   records: StudyRecord[];
@@ -56,7 +57,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [loading, setLoading] = useState(true);
 
   // ============================================================
-  // CARREGAR DADOS
+  // CARREGAR DADOS (com filtro isDeleted: false)
   // ============================================================
   const loadData = useCallback(async () => {
     try {
@@ -77,7 +78,10 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const db = await getDb();
       const result = await db.study_records.find({
-        selector: { user_id: userIdFromAuth }
+        selector: { 
+          user_id: userIdFromAuth,
+          isDeleted: { $ne: true } // 🔥 APENAS NÃO DELETADOS
+        }
       }).exec();
 
       const loadedRecords = result.map((doc: any) => doc.toJSON() as StudyRecord);
@@ -95,7 +99,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [loadData]);
 
   // ============================================================
-  // ADICIONAR REGISTRO
+  // ADICIONAR REGISTRO (com isDeleted: false)
   // ============================================================
   const addRecord = useCallback(async (data: AddStudyData) => {
     if (!userId) {
@@ -110,6 +114,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       user_id: userId,
       createdAt: now,
       updated_at: now,
+      isDeleted: false, // 🔥
     };
 
     try {
@@ -136,7 +141,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [userId]);
 
   // ============================================================
-  // 🔥 EDITAR REGISTRO (NOVO)
+  // EDITAR REGISTRO
   // ============================================================
   const editRecord = useCallback(async (id: string, data: Partial<Omit<StudyRecord, 'id' | 'user_id' | 'createdAt'>>) => {
     try {
@@ -178,7 +183,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   // ============================================================
-  // EXCLUIR REGISTRO (COM FILA)
+  // EXCLUIR REGISTRO (SOFT DELETE com isDeleted: true)
   // ============================================================
   const deleteRecord = useCallback(async (id: string) => {
     console.log('🔍 [StudyContext] Tentando excluir registro com id:', id);
@@ -195,26 +200,32 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      // Remover localmente
-      await doc.remove();
-      setRecords(prev => prev.filter(r => r.id !== id));
-      console.log('🗑️ [StudyContext] Registro removido localmente.');
+      const now = new Date().toISOString();
 
-      // Enfileirar exclusão (mesmo se online, para garantir)
+      // 🔥 SOFT DELETE: marca isDeleted: true em vez de remover
+      await doc.incrementalPatch({
+        isDeleted: true,
+        updated_at: now,
+      });
+      
+      setRecords(prev => prev.filter(r => r.id !== id));
+      console.log('🗑️ [StudyContext] Registro marcado como deletado localmente.');
+
+      // Enfileira atualização (não delete) para sincronizar com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
           .from('study_records')
-          .delete()
+          .update({ isDeleted: true, updated_at: now })
           .eq('id', id);
         if (error) throw error;
-        console.log('✅ [StudyContext] Registro excluído do Supabase.');
+        console.log('✅ [StudyContext] Registro marcado como deletado no Supabase.');
       } catch (supabaseError) {
-        console.warn('⚠️ [StudyContext] Falha ao excluir no Supabase (offline?), adicionando à fila.');
-        await enqueueOperation('delete', 'study_records', { id });
+        console.warn('⚠️ [StudyContext] Falha ao sincronizar soft delete (offline?), adicionando à fila.');
+        await enqueueOperation('update', 'study_records', { id, isDeleted: true, updated_at: now });
       }
 
-      console.log('✅ [StudyContext] Registro excluído com sucesso (localmente)');
+      console.log('✅ [StudyContext] Registro excluído com sucesso (soft delete)');
 
     } catch (error) {
       console.error('❌ [StudyContext] Erro ao excluir registro:', error);

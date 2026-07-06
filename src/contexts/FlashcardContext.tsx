@@ -10,7 +10,7 @@ import { enqueueOperation } from '@/services/queueService';
 import { findUserByEmail } from '@/services/clerkService';
 
 // ============================================================
-// TIPOS (ATUALIZADOS)
+// TIPOS
 // ============================================================
 
 interface Deck {
@@ -20,7 +20,7 @@ interface Deck {
   user_id: string;
   createdAt: string;
   color?: string;
-  deletedAt?: string | null;
+  isDeleted?: boolean;
   is_shared: boolean;
   owner_id: string;
   shared_with: string[];
@@ -45,6 +45,7 @@ interface Card {
   createdAt: string;
   updatedAt: string;
   shared_card_id?: string | null;
+  isDeleted?: boolean;
 }
 
 interface DeckMeta {
@@ -154,7 +155,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ============================================================
-  // CARREGAR DADOS LOCAIS
+  // CARREGAR DADOS LOCAIS (COM FILTRO isDeleted: false)
   // ============================================================
   const loadLocalData = useCallback(async (db: any, userId: string) => {
     try {
@@ -166,7 +167,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
             { user_id: userId },
             { shared_with: { $elemMatch: { $eq: userId } } }
           ],
-          deletedAt: { $eq: null }
+          isDeleted: { $ne: true }
         }
       }).exec();
 
@@ -177,7 +178,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log('📥 [loadLocalData] Buscando flashcards do usuário...');
       const cardsResult = await db.flashcards.find({
         selector: {
-          user_id: userId
+          user_id: userId,
+          isDeleted: { $ne: true }
         }
       }).exec();
       const cardsData = cardsResult.map((doc: any) => doc.toJSON());
@@ -210,7 +212,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       const result = await db.flashcards.find({
         selector: {
           deck_id: deckId,
-          user_id: userId
+          user_id: userId,
+          isDeleted: { $ne: true }
         }
       }).exec();
       return result.map((doc: any) => doc.toJSON());
@@ -221,7 +224,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [userId]);
 
   // ============================================================
-  // CARREGAR USUÁRIO
+  // CARREGAR USUÁRIO (agora com Clerk)
   // ============================================================
   useEffect(() => {
     let isMounted = true;
@@ -353,7 +356,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       description: description.trim() || '',
       createdAt: now,
       color: color || '#14B8A6',
-      deletedAt: null,
+      isDeleted: false,
       is_shared: isShared,
       shared_with: isShared ? sharedWith : []
     };
@@ -383,7 +386,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       selector: {
         user_id: userId,
         name: 'Erros',
-        is_shared: false
+        is_shared: false,
+        isDeleted: { $ne: true }
       }
     }).exec();
 
@@ -401,7 +405,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       description: 'Flashcards gerados a partir do banco de erros',
       createdAt: now,
       color: '#FB7185',
-      deletedAt: null,
+      isDeleted: false,
       is_shared: false,
       shared_with: []
     };
@@ -421,31 +425,21 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       await enqueueOperation('create', 'decks', newDeck);
     }
 
-    return {
-      id: deckId,
-      user_id: userId,
-      owner_id: userId,
-      name: 'Erros',
-      createdAt: now,
-      color: '#FB7185',
-      description: 'Flashcards gerados a partir do banco de erros',
-      is_shared: false,
-      shared_with: []
-    };
+    return newDeck;
   }, [userId, refreshFlashcards]);
 
-  // --- ADD CARD (COM VERIFICAÇÃO GLOBAL DE DUPLICATA) ---
+  // --- ADD CARD (COM VERIFICAÇÃO GLOBAL DE DUPLICATA E isDeleted: false) ---
   const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
     const db = await getDb();
 
-    // Verifica se já existe algum card com o mesmo conteúdo em QUALQUER usuário neste deck
     const existingGlobal = await db.flashcards.findOne({
       selector: {
         deck_id: deckId,
         front: front.trim(),
-        back: back.trim()
+        back: back.trim(),
+        isDeleted: { $ne: true }
       }
     }).exec();
 
@@ -453,7 +447,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       throw new Error('Este flashcard já existe neste baralho (adicionado por outro membro ou por você).');
     }
 
-    // Busca o deck para saber se é compartilhado
     const deckDoc = await db.decks.findOne({
       selector: { id: deckId }
     }).exec();
@@ -463,7 +456,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
     const deck = deckDoc.toJSON() as Deck;
 
-    // Determina para quais usuários criar cards
     let targetUserIds: string[] = [];
     if (deck.is_shared) {
       const members = new Set<string>();
@@ -499,7 +491,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         scheduled_days: fsrsCard.scheduled_days,
         createdAt: now,
         updatedAt: now,
-        shared_card_id: sharedCardId
+        shared_card_id: sharedCardId,
+        isDeleted: false
       };
 
       await db.flashcards.insert(newCard);
@@ -513,7 +506,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     refreshFlashcards();
     console.log(`📇 [FlashcardContext] Criados ${createdCardIds.length} cards (deck compartilhado: ${deck.is_shared})`);
 
-    // Sincroniza com Supabase
     try {
       const supabaseClient = await getSupabaseWithToken();
       const cardsToInsert = [];
@@ -541,11 +533,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const userCard = await db.flashcards.findOne({
       selector: { deck_id: deckId, user_id: userId, shared_card_id: sharedCardId }
     }).exec();
-    if (userCard) {
-      return userCard.toJSON().id;
-    } else {
-      return createdCardIds[0];
-    }
+    return userCard ? userCard.toJSON().id : createdCardIds[0];
   }, [userId, refreshFlashcards, setCardMeta, scheduler]);
 
   // --- REVIEW CARD ---
@@ -631,7 +619,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, scheduler]);
 
-  // --- DELETE DECK (CORRIGIDO: VERIFICA owner_id OU user_id) ---
+  // --- DELETE DECK (SOFT DELETE) ---
   const deleteDeck = useCallback(async (deckId: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
 
@@ -647,12 +635,11 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
 
       const deckData = deck.toJSON();
-      if (deckData.deletedAt) {
+      if (deckData.isDeleted) {
         console.log('ℹ️ Deck já está excluído (soft delete):', deckId);
         return;
       }
 
-      // 🔥 Verifica se o usuário é o dono (considerando owner_id vazio)
       const isOwner = deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId;
       if (!isOwner) {
         throw new Error('Apenas o dono do deck pode excluí-lo');
@@ -661,18 +648,16 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       const now = new Date().toISOString();
 
       // 1. Marca o deck como deletado
-      await deck.incrementalPatch({ deletedAt: now });
+      await deck.incrementalPatch({ isDeleted: true, updated_at: now });
 
       // 2. Busca TODOS os cards desse deck (independente do usuário)
       const allCards = await db.flashcards.find({
         selector: { deck_id: deckId }
       }).exec();
 
-      const cardIdsToDelete = allCards.map((doc: any) => doc.toJSON().id);
-
-      // 3. Remove cada card (localmente)
+      // 3. Marca cada card como deletado
       for (const doc of allCards) {
-        await doc.incrementalPatch({ deletedAt: now });
+        await doc.incrementalPatch({ isDeleted: true, updatedAt: now });
         // Limpa metadados
         setCardMetas(prev => {
           const newMetas = { ...prev };
@@ -682,23 +667,24 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
 
       refreshFlashcards();
-      console.log(`🗑️ Deck e ${cardIdsToDelete.length} cards deletados.`);
+      console.log(`🗑️ Deck e ${allCards.length} cards marcados como deletados.`);
 
-      // 4. Sincroniza com Supabase (deck + cards)
+      // 4. Enfileira atualizações
+      await enqueueOperation('update', 'decks', { id: deckId, isDeleted: true, updated_at: now });
+      for (const doc of allCards) {
+        await enqueueOperation('update', 'flashcards', { id: doc.toJSON().id, isDeleted: true, updatedAt: now });
+      }
+
+      // Tenta sincronizar imediatamente
       try {
         const supabaseClient = await getSupabaseWithToken();
-        // Atualiza deck
-        await supabaseClient.from('decks').update({ deletedAt: now }).eq('id', deckId);
-        // Deleta cards em lote
-        if (cardIdsToDelete.length > 0) {
-          await supabaseClient.from('flashcards').delete().in('id', cardIdsToDelete);
+        await supabaseClient.from('decks').update({ isDeleted: true, updated_at: now }).eq('id', deckId);
+        for (const doc of allCards) {
+          await supabaseClient.from('flashcards').update({ isDeleted: true, updatedAt: now }).eq('id', doc.toJSON().id);
         }
+        console.log('✅ [FlashcardContext] Deck e cards deletados no Supabase.');
       } catch (supabaseError) {
-        console.warn('⚠️ Falha ao sincronizar exclusão em cascata, enfileirando.');
-        await enqueueOperation('update', 'decks', { id: deckId, deletedAt: now });
-        for (const id of cardIdsToDelete) {
-          await enqueueOperation('delete', 'flashcards', { id });
-        }
+        console.warn('⚠️ [FlashcardContext] Falha ao sincronizar soft delete, enfileirado.');
       }
     } catch (error) {
       console.error('❌ Erro ao deletar deck:', error);
@@ -706,7 +692,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards, setCardMetas]);
 
-  // --- DELETE CARD ---
+  // --- DELETE CARD (SOFT DELETE) ---
   const deleteCard = useCallback(async (cardId: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -743,40 +729,44 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       cardIdsToDelete = [cardId];
     }
 
+    const now = new Date().toISOString();
+
     for (const id of cardIdsToDelete) {
       const doc = await db.flashcards.findOne({ selector: { id } }).exec();
       if (doc) {
-        await doc.remove();
+        await doc.incrementalPatch({
+          isDeleted: true,
+          updatedAt: now
+        });
+        // Limpa metadados
         setCardMetas(prev => {
           const newMetas = { ...prev };
           delete newMetas[id];
           return newMetas;
         });
-        console.log(`🗑️ [FlashcardContext] Card removido: ${id}`);
+        console.log(`🗑️ [FlashcardContext] Card marcado como deletado: ${id}`);
       }
     }
 
     refreshFlashcards();
 
+    // Enfileira atualizações
+    for (const id of cardIdsToDelete) {
+      await enqueueOperation('update', 'flashcards', { id, isDeleted: true, updatedAt: now });
+    }
+
     try {
       const supabaseClient = await getSupabaseWithToken();
       for (const id of cardIdsToDelete) {
-        const { error } = await supabaseClient
-          .from('flashcards')
-          .delete()
-          .eq('id', id);
-        if (error) throw error;
+        await supabaseClient.from('flashcards').update({ isDeleted: true, updatedAt: now }).eq('id', id);
       }
-      console.log(`✅ [FlashcardContext] ${cardIdsToDelete.length} cards deletados do Supabase.`);
+      console.log(`✅ [FlashcardContext] ${cardIdsToDelete.length} cards marcados como deletados no Supabase.`);
     } catch (supabaseError) {
-      console.warn('⚠️ [FlashcardContext] Falha ao deletar cards no Supabase, enfileirando.');
-      for (const id of cardIdsToDelete) {
-        await enqueueOperation('delete', 'flashcards', { id });
-      }
+      console.warn('⚠️ [FlashcardContext] Falha ao sincronizar soft delete, enfileirado.');
     }
   }, [userId, refreshFlashcards, setCardMetas]);
 
-  // --- RENAME DECK (CORRIGIDO) ---
+  // --- RENAME DECK (COM VERIFICAÇÃO isDeleted) ---
   const renameDeck = useCallback(async (deckId: string, name: string, description: string, color?: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -790,7 +780,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
 
     const deckData = deck.toJSON();
-    // 🔥 Verifica se o usuário é o dono
+    if (deckData.isDeleted) {
+      throw new Error('Não é possível renomear um deck deletado');
+    }
+
     const isOwner = deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId;
     if (!isOwner) {
       throw new Error('Apenas o dono pode renomear o deck');
@@ -811,11 +804,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     try {
       const supabaseClient = await getSupabaseWithToken();
-      const { error } = await supabaseClient
-        .from('decks')
-        .update(updatedData)
-        .eq('id', deckId);
-      if (error) throw error;
+      await supabaseClient.from('decks').update(updatedData).eq('id', deckId);
       console.log('✅ [FlashcardContext] Deck renomeado no Supabase.');
     } catch (supabaseError) {
       console.warn('⚠️ [FlashcardContext] Falha ao renomear deck no Supabase, enfileirando.');
@@ -823,7 +812,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards]);
 
-  // --- EDIT CARD (COM VERIFICAÇÃO GLOBAL DE DUPLICATA E PERMISSÃO CORRIGIDA) ---
+  // --- EDIT CARD (COM VERIFICAÇÃO GLOBAL DE DUPLICATA E isDeleted: false) ---
   const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -842,21 +831,24 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       selector: { id: cardData.deck_id }
     }).exec();
     const deckData = deck ? deck.toJSON() : null;
-    // 🔥 Verifica se o usuário é o dono do deck
     const isOwner = deckData && (deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId);
 
     if (!isOwner && cardData.user_id !== userId) {
       throw new Error('Você não tem permissão para editar este card');
     }
 
-    // Se o conteúdo mudou, verifica se já existe outro card com o mesmo conteúdo neste deck (global)
+    if (cardData.isDeleted) {
+      throw new Error('Não é possível editar um card deletado');
+    }
+
     if (front.trim() !== cardData.front || back.trim() !== cardData.back) {
       const existingGlobal = await db.flashcards.findOne({
         selector: {
           deck_id: cardData.deck_id,
           front: front.trim(),
           back: back.trim(),
-          id: { $ne: cardId }
+          id: { $ne: cardId },
+          isDeleted: { $ne: true }
         }
       }).exec();
 
@@ -900,11 +892,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     try {
       const supabaseClient = await getSupabaseWithToken();
       for (const id of cardIdsToUpdate) {
-        const { error } = await supabaseClient
-          .from('flashcards')
-          .update(updatedData)
-          .eq('id', id);
-        if (error) throw error;
+        await supabaseClient.from('flashcards').update(updatedData).eq('id', id);
       }
       console.log(`✅ [FlashcardContext] ${cardIdsToUpdate.length} cards editados no Supabase.`);
     } catch (supabaseError) {
@@ -926,75 +914,70 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ============================================================
-  // GERENCIAR MEMBROS (CORRIGIDO: VERIFICA owner_id OU user_id)
+  // GERENCIAR MEMBROS
   // ============================================================
 
-const addMemberToDeck = useCallback(async (
-  deckId: string,
-  newUserId: string,
-  onProgress?: (current: number, total: number) => void
-) => {
-  if (!userId) throw new Error('Usuário não autenticado');
-  if (newUserId === userId) throw new Error('Você não pode adicionar a si mesmo.');
-  
-  const db = await getDb();
+  const addMemberToDeck = useCallback(async (
+    deckId: string,
+    newUserId: string,
+    onProgress?: (current: number, total: number) => void
+  ) => {
+    if (!userId) throw new Error('Usuário não autenticado');
+    if (newUserId === userId) throw new Error('Você não pode adicionar a si mesmo.');
+    
+    const db = await getDb();
 
-  const deck = await db.decks.findOne({
-    selector: { id: deckId }
-  }).exec();
+    const deck = await db.decks.findOne({
+      selector: { id: deckId }
+    }).exec();
 
-  if (!deck) {
-    throw new Error('Deck não encontrado');
-  }
+    if (!deck) {
+      throw new Error('Deck não encontrado');
+    }
 
-  const deckData = deck.toJSON();
+    const deckData = deck.toJSON();
 
-  // 🔥 CORREÇÃO: define o dono como user_id se owner_id estiver vazio
-  const isOwner = deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId;
-  if (!isOwner) {
-    throw new Error('Apenas o dono do deck pode adicionar membros');
-  }
+    const isOwner = deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId;
+    if (!isOwner) {
+      throw new Error('Apenas o dono do deck pode adicionar membros');
+    }
 
-  let updatedSharedWith = [...deckData.shared_with];
-  let needsActivation = false;
+    let updatedSharedWith = [...deckData.shared_with];
+    let needsActivation = false;
 
-  if (!deckData.is_shared) {
-    console.log('🔓 Ativando compartilhamento do deck...');
-    needsActivation = true;
-  }
+    if (!deckData.is_shared) {
+      console.log('🔓 Ativando compartilhamento do deck...');
+      needsActivation = true;
+    }
 
-  // Verifica se o novo usuário já está na lista
-  if (updatedSharedWith.includes(newUserId)) {
-    console.log('ℹ️ Usuário já é membro do deck');
-    return;
-  }
+    if (updatedSharedWith.includes(newUserId)) {
+      console.log('ℹ️ Usuário já é membro do deck');
+      return;
+    }
 
-  // Adiciona o novo usuário à lista
-  updatedSharedWith.push(newUserId);
+    updatedSharedWith.push(newUserId);
 
-  // 🔥 PREPARA TODOS OS CAMPOS QUE SERÃO ATUALIZADOS EM UM ÚNICO OBJETO
-  const patchData: any = {
-    shared_with: updatedSharedWith
-  };
+    const patchData: any = {
+      shared_with: updatedSharedWith
+    };
 
-  if (needsActivation) {
-    patchData.is_shared = true;
-    patchData.owner_id = userId;
-  }
+    if (needsActivation) {
+      patchData.is_shared = true;
+      patchData.owner_id = userId;
+    }
 
-  // 🔥 FAZ UM ÚNICO PATCH
-  await deck.patch(patchData);
-  console.log(`✅ Deck atualizado: is_shared=${patchData.is_shared ?? deckData.is_shared}, shared_with=${updatedSharedWith.length} membros`);
+    await deck.patch(patchData);
+    console.log(`✅ Deck atualizado: is_shared=${patchData.is_shared ?? deckData.is_shared}, shared_with=${updatedSharedWith.length} membros`);
 
-    // 🔥 COPIA CARDS COM PROGRESSO
+    // 🔥 COPIA CARDS COM PROGRESSO (apenas não deletados)
     try {
       console.log(`📋 [addMemberToDeck] Verificando cards para ${newUserId}...`);
 
-      // 1. Busca cards do DONO (originais)
       const ownerCards = await db.flashcards.find({
         selector: {
           deck_id: deckId,
-          user_id: deckData.owner_id || userId
+          user_id: deckData.owner_id || userId,
+          isDeleted: { $ne: true }
         }
       }).exec();
       const ownerCardsData = ownerCards.map((doc: any) => doc.toJSON());
@@ -1003,11 +986,11 @@ const addMemberToDeck = useCallback(async (
         console.log('ℹ️ Nenhum card do dono para copiar.');
         if (onProgress) onProgress(0, 0);
       } else {
-        // 2. Busca cards que o NOVO MEMBRO já possui neste deck
         const existingUserCards = await db.flashcards.find({
           selector: {
             deck_id: deckId,
-            user_id: newUserId
+            user_id: newUserId,
+            isDeleted: { $ne: true }
           }
         }).exec();
         const existingSet = new Set();
@@ -1020,7 +1003,6 @@ const addMemberToDeck = useCallback(async (
           }
         }
 
-        // 3. Filtra apenas os cards que o novo membro NÃO tem (diff)
         const cardsToCopy = ownerCardsData.filter(ownerCard => {
           if (ownerCard.shared_card_id && existingSet.has(ownerCard.shared_card_id)) {
             return false;
@@ -1033,7 +1015,7 @@ const addMemberToDeck = useCallback(async (
         });
 
         if (cardsToCopy.length === 0) {
-          console.log('ℹ️ Nenhum card novo para copiar (já está atualizado).');
+          console.log('ℹ️ Nenhum card novo para copiar.');
           if (onProgress) onProgress(0, 0);
         } else {
           console.log(`📋 Copiando ${cardsToCopy.length} cards novos para ${newUserId}...`);
@@ -1064,33 +1046,30 @@ const addMemberToDeck = useCallback(async (
               scheduled_days: fsrsCard.scheduled_days,
               createdAt: now,
               updatedAt: now,
-              shared_card_id: cardData.shared_card_id || null
+              shared_card_id: cardData.shared_card_id || null,
+              isDeleted: false
             };
             cardsToInsert.push(newCard);
 
-            // Atualiza progresso a cada 10 cards
             if (i % 10 === 0 || i === cardsToCopy.length - 1) {
               if (onProgress) onProgress(i + 1, cardsToCopy.length);
             }
           }
 
-          // INSERE EM LOTE (BULK)
           if (cardsToInsert.length > 0) {
             await db.flashcards.bulkInsert(cardsToInsert);
             console.log(`✅ ${cardsToInsert.length} cards inseridos localmente em lote.`);
 
-            // Sincroniza com Supabase em lotes
             try {
               const supabaseClient = await getSupabaseWithToken();
               const batchSize = 50;
               for (let i = 0; i < cardsToInsert.length; i += batchSize) {
                 const batch = cardsToInsert.slice(i, i + batchSize);
-                const { error } = await supabaseClient.from('flashcards').insert(batch);
-                if (error) throw error;
+                await supabaseClient.from('flashcards').insert(batch);
               }
               console.log(`✅ ${cardsToInsert.length} cards sincronizados com Supabase em lote.`);
             } catch (supabaseError) {
-              console.warn('⚠️ Falha ao sincronizar em lote, enfileirando individualmente.');
+              console.warn('⚠️ Falha ao sincronizar em lote, enfileirando.');
               for (const card of cardsToInsert) {
                 await enqueueOperation('create', 'flashcards', card);
               }
@@ -1104,7 +1083,6 @@ const addMemberToDeck = useCallback(async (
 
     refreshFlashcards();
 
-    // Sincroniza a atualização do deck
     try {
       const supabaseClient = await getSupabaseWithToken();
       await supabaseClient.from('decks').update({
@@ -1122,7 +1100,7 @@ const addMemberToDeck = useCallback(async (
     }
   }, [userId, refreshFlashcards, scheduler]);
 
-  // --- REMOVE MEMBER (CORRIGIDO) ---
+  // --- REMOVE MEMBER ---
   const removeMemberFromDeck = useCallback(async (deckId: string, userIdToRemove: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -1136,7 +1114,6 @@ const addMemberToDeck = useCallback(async (
     }
 
     const deckData = deck.toJSON();
-    // 🔥 Verifica se o usuário é o dono
     const isOwner = deckData.owner_id ? deckData.owner_id === userId : deckData.user_id === userId;
     if (!isOwner) {
       throw new Error('Apenas o dono do deck pode remover membros');
@@ -1158,11 +1135,7 @@ const addMemberToDeck = useCallback(async (
 
     try {
       const supabaseClient = await getSupabaseWithToken();
-      const { error } = await supabaseClient
-        .from('decks')
-        .update({ shared_with: updatedSharedWith })
-        .eq('id', deckId);
-      if (error) throw error;
+      await supabaseClient.from('decks').update({ shared_with: updatedSharedWith }).eq('id', deckId);
       console.log(`✅ [FlashcardContext] Membro ${userIdToRemove} removido do deck ${deckId}`);
     } catch (supabaseError) {
       console.warn('⚠️ [FlashcardContext] Falha ao sincronizar remoção de membro, enfileirando.');
@@ -1170,7 +1143,7 @@ const addMemberToDeck = useCallback(async (
     }
   }, [userId, refreshFlashcards]);
 
-  // 🔥 ADICIONAR POR E-MAIL
+  // --- ADICIONAR POR E-MAIL ---
   const addMemberByEmail = useCallback(async (deckId: string, email: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
     

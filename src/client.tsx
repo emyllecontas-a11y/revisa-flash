@@ -16,6 +16,9 @@ import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
+import { addRxPlugin } from 'rxdb';
+import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
+addRxPlugin(RxDBMigrationPlugin);
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
