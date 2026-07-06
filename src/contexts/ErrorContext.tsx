@@ -133,9 +133,27 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+useEffect(() => {
+  const loadAndSubscribe = async () => {
+    await loadData();
+    
+    // 🔥 Inscrever-se em mudanças na coleção errors
+    try {
+      const db = await getDb();
+      if (db.collections?.errors) {
+        const subscription = db.collections.errors.$.subscribe(() => {
+          console.log('🔄 Mudança detectada na coleção errors, recarregando...');
+          loadData();
+        });
+        return () => subscription.unsubscribe();
+      }
+    } catch (e) {
+      console.warn('Erro ao configurar listener de errors:', e);
+    }
+  };
+  
+  loadAndSubscribe();
+}, [loadData]);
 
   // ============================================================
   // ADICIONAR ERRO (com isDeleted: false)
