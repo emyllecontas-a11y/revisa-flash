@@ -6,9 +6,10 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import { useStudy } from "@/contexts/StudyContext";
 import { getDb } from "@/lib/db";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { updateTopicStatusAndRevisions } from "@/services/topicService";
+import { enqueueOperation } from "@/services/queueService";
 
 // ============================================================
 // TIPOS
@@ -70,9 +71,9 @@ export default function CalendarioPage() {
   });
 
   const [formMaterial, setFormMaterial] = useState('');
-  const [formQuestions, setFormQuestions] = useState(40);
-  const [formCorrect, setFormCorrect] = useState(32);
-  const [formWrong, setFormWrong] = useState(6);
+  const [formQuestions, setFormQuestions] = useState<number | string>(40);
+  const [formCorrect, setFormCorrect] = useState<number | string>(32);
+  const [formWrong, setFormWrong] = useState<number | string>(6);
 
   // Contexto de estudos
   const studyContext = useStudy();
@@ -120,12 +121,12 @@ export default function CalendarioPage() {
     try {
       const db = await getDb();
       const disciplines = await db.disciplines.find({
-        selector: { user_id: userId, deletedAt: { $eq: null } }
+        selector: { user_id: userId, isDeleted: { $ne: true } }
       }).exec();
       setDisciplinas(disciplines.map(d => ({ id: d.id, name: d.name })));
 
       const topics = await db.topics.find({
-        selector: { user_id: userId, deletedAt: { $eq: null } }
+        selector: { user_id: userId, isDeleted: { $ne: true } }
       }).exec();
       setTopicos(topics.map(t => ({
         id: t.id,
@@ -145,129 +146,196 @@ export default function CalendarioPage() {
     }
   }, [userId, loadRevisoes, loadContentData]);
 
-  // ============================================================
-  // FUNÇÃO PARA CONCLUIR UMA REVISÃO (CORRIGIDA)
-  // ============================================================
-const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
-  if (concluindoRevisaoId === revisaoId) return;
-  if (!userId) return;
+  // 🔥 LISTENER PARA RECARREGAR REVISÕES AUTOMATICAMENTE
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isSubscribed = true;
 
-  setConcluindoRevisaoId(revisaoId);
+    const subscribeToRevisoes = async () => {
+      try {
+        const db = await getDb();
+        if (!db.collections?.revisoes) return;
 
-  try {
-    const db = await getDb();
-    const now = new Date().toISOString();
+        const subscription = db.collections.revisoes.$.subscribe(() => {
+          if (timeoutId) clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => {
+            if (isSubscribed) {
+              console.log('🔄 Mudança detectada em revisoes, recarregando...');
+              loadRevisoes();
+            }
+            timeoutId = null;
+          }, 500);
+        });
 
-    // 1. Buscar a revisão atual
-    const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
-    if (!doc) {
-      console.warn('⚠️ Revisão não encontrada');
-      return;
-    }
-
-    const revisao = doc.toJSON() as Revisao;
-    const nivelAtual = revisao.review_level || 1;
-    const topicoId = revisao.topico_id;
-
-    // 2. Marcar a revisão atual como concluída
-    await doc.patch({
-      completedAt: now,
-      updatedAt: now,
-    });
-
-    setRevisoes(prev =>
-      prev.map(r =>
-        r.id === revisaoId
-          ? { ...r, completedAt: now, updatedAt: now }
-          : r
-      )
-    );
-
-    // 🔥 ENFILEIRA A ATUALIZAÇÃO DA REVISÃO CONCLUÍDA
-    await enqueueOperation('update', 'revisoes', {
-      id: revisaoId,
-      completedAt: now,
-      updatedAt: now,
-    });
-
-    // 3. Se não for o nível 5, criar a próxima revisão
-    const niveis = [
-      { nivel: 1, dias: 1 },
-      { nivel: 2, dias: 7 },
-      { nivel: 3, dias: 15 },
-      { nivel: 4, dias: 30 },
-      { nivel: 5, dias: 60 },
-    ];
-
-    if (nivelAtual < 5) {
-      const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
-      if (proximoNivel) {
-        const nextDate = new Date();
-        nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
-
-        const newRevisao = {
-          id: uid(),
-          user_id: userId,
-          topico_id: topicoId,
-          topicName: revisao.topicName,
-          discipline: revisao.discipline,
-          review_level: proximoNivel.nivel,
-          nextReviewDate: nextDate.toISOString(),
-          lastStudyDate: now,
-          completedAt: null,
-          createdAt: now,
-          updatedAt: now,
+        return () => {
+          isSubscribed = false;
+          if (timeoutId) clearTimeout(timeoutId);
+          subscription.unsubscribe();
         };
-
-        await db.revisoes.insert(newRevisao);
-        setRevisoes(prev => [...prev, newRevisao]);
-
-        // 🔥 ENFILEIRA A CRIAÇÃO DA NOVA REVISÃO
-        await enqueueOperation('create', 'revisoes', newRevisao);
+      } catch (e) {
+        console.warn('Erro ao configurar listener de revisoes:', e);
       }
-    }
+    };
 
-    // 4. Atualizar status do tópico (enfileirando a operação)
-    const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
-    if (topicoDoc) {
-      const topicoData = topicoDoc.toJSON();
-      const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
-      const revisoesData = allRevisoes.map((d: any) => d.toJSON());
-      const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
-      const total = revisoesData.length;
+    subscribeToRevisoes();
+  }, [loadRevisoes]);
 
-      let novoStatus = topicoData.status;
-      if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
-        novoStatus = 'revisado';
+  // ============================================================
+  // FUNÇÃO PARA CONCLUIR UMA REVISÃO (CORRIGIDA - PUSH DIRETO)
+  // ============================================================
+  const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
+    if (concluindoRevisaoId === revisaoId) return;
+    if (!userId) return;
+
+    setConcluindoRevisaoId(revisaoId);
+
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+
+      // 1. Buscar a revisão atual
+      const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
+      if (!doc) {
+        console.warn('⚠️ Revisão não encontrada');
+        return;
       }
-      if (total === 5 && concluidas === 5) {
-        novoStatus = 'dominado';
+
+      const revisao = doc.toJSON() as Revisao;
+      const nivelAtual = revisao.review_level || 1;
+      const topicoId = revisao.topico_id;
+
+      // 2. Marcar a revisão atual como concluída (local)
+      await doc.patch({
+        completedAt: now,
+        updatedAt: now,
+      });
+
+      setRevisoes(prev =>
+        prev.map(r =>
+          r.id === revisaoId
+            ? { ...r, completedAt: now, updatedAt: now }
+            : r
+        )
+      );
+
+      // 3. Se não for o nível 5, preparar a próxima revisão
+      const niveis = [
+        { nivel: 1, dias: 1 },
+        { nivel: 2, dias: 7 },
+        { nivel: 3, dias: 15 },
+        { nivel: 4, dias: 30 },
+        { nivel: 5, dias: 60 },
+      ];
+
+      let novaRevisao = null;
+      if (nivelAtual < 5) {
+        const proximoNivel = niveis.find(n => n.nivel === nivelAtual + 1);
+        if (proximoNivel) {
+          const nextDate = new Date();
+          nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
+
+          novaRevisao = {
+            id: uid(),
+            user_id: userId,
+            topico_id: topicoId,
+            topicName: revisao.topicName,
+            discipline: revisao.discipline,
+            review_level: proximoNivel.nivel,
+            nextReviewDate: nextDate.toISOString(),
+            lastStudyDate: now,
+            completedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await db.revisoes.insert(novaRevisao);
+          setRevisoes(prev => [...prev, novaRevisao]);
+        }
       }
 
-      if (novoStatus !== topicoData.status) {
-        await topicoDoc.patch({
-          status: novoStatus,
+      // 4. Atualizar status do tópico (local)
+      let novoStatus = null;
+      const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
+      if (topicoDoc) {
+        const topicoData = topicoDoc.toJSON();
+        const allRevisoes = await db.revisoes.find({ selector: { topico_id: topicoId } }).exec();
+        const revisoesData = allRevisoes.map((d: any) => d.toJSON());
+        const concluidas = revisoesData.filter(r => r.completedAt !== null).length;
+        const total = revisoesData.length;
+
+        let novoStatusTemp = topicoData.status;
+        if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
+          novoStatusTemp = 'revisado';
+        }
+        if (total === 5 && concluidas === 5) {
+          novoStatusTemp = 'dominado';
+        }
+
+        if (novoStatusTemp !== topicoData.status) {
+          await topicoDoc.patch({
+            status: novoStatusTemp,
+            updatedAt: now,
+          });
+          novoStatus = novoStatusTemp;
+        }
+      }
+
+      // 🔥 5. Tenta enviar tudo diretamente para o Supabase (PUSH DIRETO)
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+
+        // Atualiza a revisão concluída
+        await supabaseClient
+          .from('revisoes')
+          .update({ completedAt: now, updatedAt: now })
+          .eq('id', revisaoId);
+
+        // Se houver nova revisão, insere
+        if (novaRevisao) {
+          await supabaseClient.from('revisoes').insert(novaRevisao);
+        }
+
+        // Se houver atualização de status do tópico, atualiza
+        if (novoStatus) {
+          await supabaseClient
+            .from('topics')
+            .update({ status: novoStatus, updatedAt: now })
+            .eq('id', topicoId);
+        }
+
+        console.log('✅ [Calendario] Revisão sincronizada diretamente com Supabase.');
+      } catch (supabaseError) {
+        // 🔥 Se falhar, enfileira (offline)
+        console.warn('⚠️ [Calendario] Falha ao sincronizar revisão, enfileirando.');
+        
+        await enqueueOperation('update', 'revisoes', {
+          id: revisaoId,
+          completedAt: now,
           updatedAt: now,
         });
 
-        // 🔥 ENFILEIRA A ATUALIZAÇÃO DO TÓPICO
-        await enqueueOperation('update', 'topics', {
-          id: topicoId,
-          status: novoStatus,
-          updatedAt: now,
-        });
+        if (novaRevisao) {
+          await enqueueOperation('create', 'revisoes', novaRevisao);
+        }
+
+        if (novoStatus) {
+          await enqueueOperation('update', 'topics', {
+            id: topicoId,
+            status: novoStatus,
+            updatedAt: now,
+          });
+        }
       }
+
+      await loadRevisoes();
+      console.log('✅ Revisão concluída com sucesso');
+
+    } catch (error) {
+      console.error('❌ Erro ao concluir revisão:', error);
+    } finally {
+      setConcluindoRevisaoId(null);
     }
-
-    await loadRevisoes();
-    console.log('✅ Revisão concluída com sucesso (enfileirada)');
-
-  } catch (error) {
-    console.error('❌ Erro ao concluir revisão:', error);
-  } finally {
-    setConcluindoRevisaoId(null);
-  }
-}, [userId, loadRevisoes, concluindoRevisaoId]);
+  }, [userId, loadRevisoes, concluindoRevisaoId]);
 
   // ============================================================
   // NAVEGAÇÃO
@@ -349,7 +417,6 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
   // FUNÇÃO PARA SALVAR ESTUDO (CORRIGIDA)
   // ============================================================
   const handleSalvar = async () => {
-    // 🔥 Impede múltiplos cliques
     if (isSaving) return;
 
     // Verifica se há um tópico selecionado
@@ -376,9 +443,9 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
       ...(tipo === 'teorico'
         ? { material: formMaterial }
         : {
-            questionsCount: formQuestions,
-            correctCount: formCorrect,
-            wrongCount: formWrong,
+            questionsCount: Number(formQuestions) || 0,
+            correctCount: Number(formCorrect) || 0,
+            wrongCount: Number(formWrong) || 0,
           }
       ),
     };
@@ -392,26 +459,28 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
       await addRecord(recordData);
       console.log('✅ Registro de estudo criado com sucesso.');
 
-      // 2. Atualizar status do tópico (se necessário)
-      const currentStatus = topic.status;
-      let newStatus = currentStatus;
+      // 2. 🔥 Atualizar status do tópico SOMENTE para registros TEÓRICOS
+      if (tipo === 'teorico' && userId) {
+        const currentStatus = topic.status;
+        let newStatus = currentStatus;
 
-      // Se o tópico estiver "nao_estudado", avançar para "estudando"
-      if (currentStatus === 'nao_estudado') {
-        newStatus = 'estudando';
-      }
-
-      // Dentro do handleSalvar, após criar o registro (onde está a chamada do serviço)
-      if (userId && newStatus !== currentStatus) {
-        try {
-          console.log(`🔄 Atualizando status do tópico para "${newStatus}"...`);
-          await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId);
-          await loadContentData();
-          console.log('✅ Status do tópico e revisões atualizados.');
-        } catch (error) {
-          // Se falhar, apenas loga o erro, mas não impede o salvamento do estudo
-          console.error('⚠️ Erro ao atualizar tópico, mas o registro de estudo foi salvo:', error);
+        if (currentStatus === 'nao_estudado') {
+          newStatus = 'estudando';
         }
+
+        if (newStatus !== currentStatus) {
+          try {
+            console.log(`🔄 Atualizando status do tópico para "${newStatus}" (apenas teoria)...`);
+            await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId);
+            await loadContentData();
+            console.log('✅ Status do tópico e revisões atualizados.');
+          } catch (error) {
+            console.error('⚠️ Erro ao atualizar tópico, mas o registro de estudo foi salvo:', error);
+          }
+        }
+      } else {
+        // 🔥 Para registros práticos, NÃO atualiza status nem cria revisões
+        console.log('ℹ️ Registro prático: sem alteração de status do tópico ou revisões.');
       }
 
       setSalvo(true);
@@ -636,7 +705,6 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
                                   {rev.discipline} · {label}
                                 </div>
                               </div>
-                              {/* 🔥 Botão Concluir com proteção contra múltiplos cliques */}
                               <button
                                 onClick={() => handleConcluirRevisao(rev.id)}
                                 disabled={concluindoRevisaoId === rev.id}
@@ -745,7 +813,7 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
                 setFormQuestions={setFormQuestions}
                 formCorrect={formCorrect}
                 setFormCorrect={setFormCorrect}
-                formWrong={setFormWrong}
+                formWrong={formWrong}
                 setFormWrong={setFormWrong}
                 disciplinas={disciplinas}
                 topicos={topicos}
@@ -792,7 +860,6 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
           >
             Cancelar
           </button>
-          {/* 🔥 Botão Salvar com proteção contra múltiplos cliques */}
           <button
             onClick={handleSalvar}
             disabled={isSaving}
@@ -973,12 +1040,12 @@ function PraticoForm({
 }: {
   formData: any;
   setFormData: (data: any) => void;
-  formQuestions: number;
-  setFormQuestions: (v: number) => void;
-  formCorrect: number;
-  setFormCorrect: (v: number) => void;
-  formWrong: number;
-  setFormWrong: (v: number) => void;
+  formQuestions: number | string;
+  setFormQuestions: (v: number | string) => void;
+  formCorrect: number | string;
+  setFormCorrect: (v: number | string) => void;
+  formWrong: number | string;
+  setFormWrong: (v: number | string) => void;
   disciplinas: { id: string; name: string }[];
   topicos: { id: string; name: string; discipline_id: string; status: string }[];
   selectedDisciplineId: string;
@@ -986,6 +1053,21 @@ function PraticoForm({
   selectedTopicId: string;
   setSelectedTopicId: (id: string) => void;
 }) {
+  // Função auxiliar para tratar mudanças em inputs numéricos
+  const handleNumberChange = (
+    value: string,
+    setter: (v: number | string) => void
+  ) => {
+    if (value === '') {
+      setter('');
+    } else {
+      const num = Number(value);
+      if (!isNaN(num) && num >= 0) {
+        setter(num);
+      }
+    }
+  };
+
   return (
     <div className="rf-card p-6">
       <h3 className="mb-4 text-xs font-medium uppercase tracking-widest text-foreground/40">Detalhes da prática</h3>
@@ -1042,25 +1124,31 @@ function PraticoForm({
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <Field label="Questões feitas">
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={formQuestions}
-            onChange={(e) => setFormQuestions(Number(e.target.value))}
+            onChange={(e) => handleNumberChange(e.target.value, setFormQuestions)}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
         </Field>
         <Field label="Acertos">
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={formCorrect}
-            onChange={(e) => setFormCorrect(Number(e.target.value))}
+            onChange={(e) => handleNumberChange(e.target.value, setFormCorrect)}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
         </Field>
         <Field label="Erros">
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={formWrong}
-            onChange={(e) => setFormWrong(Number(e.target.value))}
+            onChange={(e) => handleNumberChange(e.target.value, setFormWrong)}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
         </Field>

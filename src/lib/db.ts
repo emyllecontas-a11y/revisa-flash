@@ -203,7 +203,7 @@ const areaSchema = {
 
 const pendingOperationSchema = {
   title: 'pending operation schema',
-  version: 1, // 🔥 ALTERADO DE 0 PARA 1
+  version: 0, // 🔥 ALTERADO DE 0 PARA 1
   primaryKey: 'id',
   type: 'object',
   properties: {

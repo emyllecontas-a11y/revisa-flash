@@ -160,12 +160,12 @@ export default function DashboardPage() {
         try {
           const db = await getDb();
           const disciplinesResult = await db.disciplines.find({
-            selector: { user_id: clerkUserId, deletedAt: { $eq: null } }
+            selector: { user_id: clerkUserId, isDeleted: { $ne: true } }
           }).exec();
           const disciplinas = disciplinesResult.map((doc: any) => doc.toJSON());
 
           const topicsResult = await db.topics.find({
-            selector: { user_id: clerkUserId, deletedAt: { $eq: null } }
+            selector: { user_id: clerkUserId, isDeleted: { $ne: true } }
           }).exec();
           const topicos = topicsResult.map((doc: any) => doc.toJSON());
 
@@ -268,11 +268,13 @@ export default function DashboardPage() {
   }, [userId, isSyncing]);
 
   // ============================================================
-  // CHECKLIST
+  // CHECKLIST – INICIA SEMPRE VAZIO
   // ============================================================
   useEffect(() => {
     const saved = localStorage.getItem('dashboard_checklist');
-    if (saved) {
+    const initialized = localStorage.getItem('dashboard_checklist_initialized');
+
+    if (initialized && saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -283,20 +285,24 @@ export default function DashboardPage() {
         // ignore
       }
     }
-    // Define itens padrão apenas se não houver nada salvo
-    const defaultItems: ChecklistItem[] = [
-      { id: crypto.randomUUID(), titulo: 'Revisar flashcards devidos', feito: false },
-      { id: crypto.randomUUID(), titulo: 'Estudar 1 disciplina', feito: false },
-      { id: crypto.randomUUID(), titulo: 'Anotar erros do dia', feito: false },
-    ];
-    setChecklist(defaultItems);
-    localStorage.setItem('dashboard_checklist', JSON.stringify(defaultItems));
+
+    // 🔥 INICIA COM ARRAY VAZIO, SEM ITENS PADRÃO
+    if (!initialized) {
+      setChecklist([]);
+      localStorage.setItem('dashboard_checklist', JSON.stringify([]));
+      localStorage.setItem('dashboard_checklist_initialized', 'true');
+    } else {
+      setChecklist([]);
+      localStorage.setItem('dashboard_checklist', JSON.stringify([]));
+    }
   }, []);
 
+  // Salva checklist sempre que mudar
   useEffect(() => {
     localStorage.setItem('dashboard_checklist', JSON.stringify(checklist));
   }, [checklist]);
 
+  // Listener para mudanças de storage
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'dashboard_checklist' && e.newValue) {
@@ -333,7 +339,11 @@ export default function DashboardPage() {
   }, [newChecklistText]);
 
   const removeChecklistItem = useCallback((id: string) => {
-    setChecklist(prev => prev.filter(item => item.id !== id));
+    setChecklist(prev => {
+      const newList = prev.filter(item => item.id !== id);
+      localStorage.setItem('dashboard_checklist', JSON.stringify(newList));
+      return newList;
+    });
   }, []);
 
   // ============================================================

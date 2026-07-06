@@ -190,7 +190,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         ...data,
         updated_at: new Date().toISOString()
       };
-      await doc.incrementalPatch(updatedData);
+      await doc.patch(updatedData);
 
       setRecords(prev => prev.map(r =>
         r.id === id ? { ...r, ...updatedData } : r
@@ -236,7 +236,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const now = new Date().toISOString();
 
-      await doc.incrementalPatch({
+      await doc.patch({
         isDeleted: true,
         updated_at: now,
       });
