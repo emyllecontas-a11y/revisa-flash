@@ -170,7 +170,7 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
     const topicoId = revisao.topico_id;
 
     // 2. Marcar a revisão atual como concluída
-    await doc.incrementalPatch({
+    await doc.patch({
       completedAt: now,
       updatedAt: now,
     });
@@ -245,7 +245,7 @@ const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
       }
 
       if (novoStatus !== topicoData.status) {
-        await topicoDoc.incrementalPatch({
+        await topicoDoc.patch({
           status: novoStatus,
           updatedAt: now,
         });

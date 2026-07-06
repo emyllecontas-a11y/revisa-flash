@@ -25,7 +25,7 @@ export interface StudyRecord {
   observations?: string;
   createdAt: string;
   updated_at?: string;
-  isDeleted?: boolean; // 🔥 Soft delete flag
+  isDeleted?: boolean;
 }
 
 type AddStudyData = Omit<StudyRecord, 'id' | 'user_id' | 'createdAt' | 'updated_at' | 'isDeleted'>;
@@ -80,7 +80,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const result = await db.study_records.find({
         selector: { 
           user_id: userIdFromAuth,
-          isDeleted: { $ne: true } // 🔥 APENAS NÃO DELETADOS
+          isDeleted: { $ne: true }
         }
       }).exec();
 
@@ -94,8 +94,42 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, []);
 
+  // 🔥 CARREGAR INICIAL
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE QUANDO HOUVER MUDANÇAS NA COLEÇÃO study_records
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isSubscribed = true;
+
+    const subscribeToStudyRecords = async () => {
+      try {
+        const db = await getDb();
+        if (db.collections?.study_records) {
+          const subscription = db.collections.study_records.$.subscribe(() => {
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+              if (isSubscribed) {
+                console.log('🔄 Mudança detectada na coleção study_records, recarregando...');
+                loadData();
+              }
+              timeoutId = null;
+            }, 500);
+          });
+          return () => {
+            isSubscribed = false;
+            if (timeoutId) clearTimeout(timeoutId);
+            subscription.unsubscribe();
+          };
+        }
+      } catch (e) {
+        console.warn('Erro ao configurar listener de study_records:', e);
+      }
+    };
+
+    subscribeToStudyRecords();
   }, [loadData]);
 
   // ============================================================
@@ -114,7 +148,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       user_id: userId,
       createdAt: now,
       updated_at: now,
-      isDeleted: false, // 🔥
+      isDeleted: false,
     };
 
     try {
@@ -202,7 +236,6 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const now = new Date().toISOString();
 
-      // 🔥 SOFT DELETE: marca isDeleted: true em vez de remover
       await doc.incrementalPatch({
         isDeleted: true,
         updated_at: now,
@@ -211,7 +244,6 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ [StudyContext] Registro marcado como deletado localmente.');
 
-      // Enfileira atualização (não delete) para sincronizar com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient

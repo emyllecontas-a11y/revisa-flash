@@ -12,6 +12,7 @@ import type { ErrorType, ErrorRecord } from "@/contexts/ErrorContext";
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function ErrosPage() {
+  console.log('📄 Página de erros renderizada');
   const [modo, setModo] = useState<"areas" | "disciplina">("areas");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>("Todos");

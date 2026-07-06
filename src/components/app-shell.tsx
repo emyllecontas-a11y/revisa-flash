@@ -14,6 +14,7 @@ import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { syncWithSupabase } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
+import { useErrors } from '@/contexts/ErrorContext';
 
 // ============================================================
 // COMPONENTE DE LOADING (estilo raio)
@@ -80,8 +81,8 @@ export function AppShell({
   // Contextos
   const { user, isLoaded } = useAppUser();
   const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
-  const studyContext = useStudy();
-  const { records: studyRecords } = studyContext;
+  const { refresh: refreshErrors } = useErrors();
+  const { records: studyRecords, refresh: refreshStudy } = useStudy(); // 🔥 NOVO: refreshStudy
 
   // Estados
   const [profileName, setProfileName] = useState<string>("Usuário");
@@ -156,6 +157,7 @@ export function AppShell({
   // 🔥 FUNÇÃO DE SINCRONIZAÇÃO (estável, com ref)
   // ============================================================
   const performSync = useCallback(async (showFeedback: boolean = false) => {
+    console.log('🔁 [performSync] Chamado!');
     const userId = localStorage.getItem('revisaflash_user_id');
     if (!userId) {
       console.warn('⚠️ [AppShell] Nenhum userId encontrado para sincronizar.');
@@ -170,16 +172,14 @@ export function AppShell({
     setIsSyncing(true);
     try {
       console.log('🔄 [AppShell] Iniciando sincronização...');
-
-      // Processa a fila de operações pendentes
       console.log('📦 [AppShell] Processando fila de operações...');
       await processPendingOperations();
-
-      // Sincroniza com Supabase
       await syncWithSupabase(userId);
 
-      // Atualiza a interface
+      // 🔥 RECARREGA OS DADOS
       refreshFlashcards();
+      refreshErrors();
+      refreshStudy(); // 🔥 NOVO: recarrega StudyContext
 
       const now = new Date();
       setLastSyncTime(now.toLocaleTimeString());
@@ -197,7 +197,7 @@ export function AppShell({
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, refreshFlashcards]);
+  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy]); // 🔥 NOVO: refreshStudy nas dependências
 
   // ============================================================
   // 🔥 SINCRONIZAÇÃO AUTOMÁTICA (com debounce)

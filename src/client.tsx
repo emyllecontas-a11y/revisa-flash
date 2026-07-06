@@ -10,14 +10,16 @@ import { StudyProvider } from './contexts/StudyContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { UserProvider, useAppUser } from './contexts/UserContext'; // NOVO
+import { UserProvider, useAppUser } from './contexts/UserContext';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { setupQueueListener, processPendingOperations } from '@/services/queueService';
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
 import { addRxPlugin } from 'rxdb';
+console.log('addRxPlugin é:', addRxPlugin);
 import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
+console.log('Plugin Migration registrado, window.rxdbPlugins:', window.rxdbPlugins);
 import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
 
 addRxPlugin(RxDBMigrationPlugin);
@@ -33,7 +35,7 @@ if (!PUBLISHABLE_KEY) {
 // 📦 COMPONENTE ROOT – AGORA USA useAppUser()
 // ============================================================
 function Root() {
-  const { userId, isLoaded, isSignedIn, user } = useAppUser(); // <-- USA NOSSO HOOK
+  const { userId, isLoaded, isSignedIn, user } = useAppUser();
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(userId);
 
@@ -120,10 +122,13 @@ function Root() {
     };
   }, []);
 
-  // 🔥 REALTIME SUBSCRIPTION
+  // 🔥 REALTIME SUBSCRIPTION (com debounce)
   useEffect(() => {
     if (!userIdRef.current || !ready) return;
     const userId = userIdRef.current;
+
+    let syncTimeout: NodeJS.Timeout | null = null;
+
     const channel = supabase
       .channel('realtime-sync')
       .on(
@@ -134,12 +139,22 @@ function Root() {
         },
         async (payload) => {
           console.log('📡 Mudança detectada no Supabase:', payload);
-          try {
-            await syncWithSupabase(userId);
-            console.log('✅ Re-sincronização concluída após mudança em tempo real.');
-          } catch (syncError) {
-            console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
+          // Cancela a sincronização anterior se houver
+          if (syncTimeout) {
+            clearTimeout(syncTimeout);
+            syncTimeout = null;
           }
+          // Agenda a sincronização para daqui a 2 segundos
+          syncTimeout = setTimeout(async () => {
+            try {
+              await syncWithSupabase(userId);
+              console.log('✅ Re-sincronização concluída após mudança em tempo real.');
+            } catch (syncError) {
+              console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
+            } finally {
+              syncTimeout = null;
+            }
+          }, 2000);
         }
       )
       .subscribe((status) => {
@@ -149,8 +164,13 @@ function Root() {
           console.log(`🔄 Status da inscrição: ${status}`);
         }
       });
+
     return () => {
       console.log('🔌 Removendo inscrição em tempo real...');
+      if (syncTimeout) {
+        clearTimeout(syncTimeout);
+        syncTimeout = null;
+      }
       supabase.removeChannel(channel);
     };
   }, [ready]);
@@ -200,7 +220,7 @@ function AppWithAuth() {
         // ... (mantenha a mesma aparência que você tinha antes)
       }}
     >
-      <UserProvider> {/* <-- Envolvemos toda a aplicação com UserProvider */}
+      <UserProvider>
         <Root />
       </UserProvider>
     </ClerkProvider>

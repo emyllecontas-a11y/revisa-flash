@@ -10,17 +10,19 @@ import { uid, gerenciarRevisao } from "@/utils/helpers";
 import { getDb, syncWithSupabase } from "@/lib/db";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
-import { enqueueOperation } from "@/services/queueService"; // 🔥 IMPORTADO
+import { enqueueOperation } from "@/services/queueService";
 
 
 // ============================================================
-// TIPOS
+// TIPOS (CORRIGIDOS)
 // ============================================================
 interface Disciplina {
   id: string;
   name: string;
   user_id: string;
-  created_at: string;
+  createdAt: string;
+  updated_at: string;
+  isDeleted?: boolean;
 }
 
 interface Topico {
@@ -29,7 +31,10 @@ interface Topico {
   name: string;
   status: string;
   planned_date: string | null;
-  created_at: string;
+  createdAt: string;
+  updated_at: string;
+  user_id: string;
+  isDeleted?: boolean;
 }
 
 interface Revisao {
@@ -105,7 +110,7 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CARREGAR DADOS
+  // CARREGAR DADOS (COM isDeleted)
   // ============================================================
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -113,12 +118,18 @@ export default function ConteudoPage() {
       const db = await getDb();
       
       const disciplinesResult = await db.disciplines.find({
-        selector: { user_id: userId, deletedAt: { $eq: null } }
+        selector: { 
+          user_id: userId, 
+          isDeleted: { $ne: true }
+        }
       }).exec();
       setDisciplinas(disciplinesResult.map((doc: any) => doc.toJSON()));
 
       const topicsResult = await db.topics.find({
-        selector: { user_id: userId, deletedAt: { $eq: null } }
+        selector: { 
+          user_id: userId, 
+          isDeleted: { $ne: true }
+        }
       }).exec();
       setTopicos(topicsResult.map((doc: any) => doc.toJSON()));
 
@@ -137,6 +148,59 @@ export default function ConteudoPage() {
       loadData();
     }
   }, [userId, loadData]);
+
+  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE QUANDO HOUVER MUDANÇAS NO BANCO LOCAL
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isSubscribed = true;
+
+    const subscribeToCollections = async () => {
+      try {
+        const db = await getDb();
+        if (!db.collections) return;
+
+        const subscriptions: any[] = [];
+
+        if (db.collections.disciplines) {
+          const sub = db.collections.disciplines.$.subscribe(() => {
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+              if (isSubscribed) {
+                console.log('🔄 Mudança detectada em disciplines, recarregando...');
+                loadData();
+              }
+              timeoutId = null;
+            }, 500);
+          });
+          subscriptions.push(sub);
+        }
+
+        if (db.collections.topics) {
+          const sub = db.collections.topics.$.subscribe(() => {
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+              if (isSubscribed) {
+                console.log('🔄 Mudança detectada em topics, recarregando...');
+                loadData();
+              }
+              timeoutId = null;
+            }, 500);
+          });
+          subscriptions.push(sub);
+        }
+
+        return () => {
+          isSubscribed = false;
+          if (timeoutId) clearTimeout(timeoutId);
+          subscriptions.forEach(sub => sub.unsubscribe());
+        };
+      } catch (e) {
+        console.warn('Erro ao configurar listener de conteúdo:', e);
+      }
+    };
+
+    subscribeToCollections();
+  }, [loadData]);
 
   // ============================================================
   // FUNÇÕES AUXILIARES
@@ -197,7 +261,8 @@ export default function ConteudoPage() {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      const fileRecord = await uploadFile(file, topicId, disciplinaNome, userId);
+      const fileRecord = await uploadFile(file, topicId, disciplinaNome, userId) as FileRecord;
+
       clearInterval(progressInterval);
       setUploadProgress(100);
 
@@ -232,7 +297,7 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CRUD CORRIGIDO (COM FILA)
+  // CRUD CORRIGIDO (COM updated_at E isDeleted)
   // ============================================================
 
   // ---------- CRIAR DISCIPLINA ----------
@@ -256,8 +321,8 @@ export default function ConteudoPage() {
         name: discNome.trim(),
         user_id: userId,
         createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
+        updated_at: now,
+        isDeleted: false,
       };
 
       // 1. Salva localmente
@@ -316,9 +381,9 @@ export default function ConteudoPage() {
         status: topicoStatus,
         planned_date: null,
         createdAt: now,
-        updatedAt: now,
+        updated_at: now,
         user_id: userId,
-        deletedAt: null,
+        isDeleted: false,
       };
 
       await db.topics.insert(newTopic);
@@ -349,211 +414,230 @@ export default function ConteudoPage() {
     }
   }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData]);
 
-  // ---------- EXCLUIR DISCIPLINA (COM FILA) ----------
-  const handleDeleteDiscipline = useCallback(async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-
-      // 1. Soft delete local
-      const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
-      if (disciplineDoc) {
-        await disciplineDoc.incrementalPatch({ deletedAt: now });
-      }
-
-      const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
-      const topicIds = topics.map(t => t.id);
-      for (const t of topics) {
-        await t.incrementalPatch({ deletedAt: now });
-        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
-        for (const r of revisoesTopico) {
-          await r.remove();
-        }
-      }
-
-      // 2. Enfileira operações para sincronizar
-      await enqueueOperation('update', 'disciplines', { id, deletedAt: now });
-      for (const tid of topicIds) {
-        await enqueueOperation('update', 'topics', { id: tid, deletedAt: now });
-        // Para revisões, como são removidas, enfileira delete
-        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: tid } }).exec();
-        for (const r of revisoesTopico) {
-          await enqueueOperation('delete', 'revisoes', { id: r.id });
-        }
-      }
-
-      if (selectedDisciplineId === id) {
-        setSelectedDisciplineId(null);
-        setModo("disciplinas");
-      }
-
-      await loadData();
-      setErrorMessage("✅ Disciplina excluída com sucesso!");
-      setTimeout(() => setErrorMessage(""), 3000);
-
-    } catch (error: any) {
-      console.error("❌ Erro ao deletar disciplina:", error);
-      setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
-    }
-  }, [selectedDisciplineId, loadData]);
-
-  // ---------- EXCLUIR TÓPICO (COM FILA) ----------
-  const handleDeleteTopic = useCallback(async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
-    try {
-      const db = await getDb();
-      const now = new Date().toISOString();
-
-      const doc = await db.topics.findOne({ selector: { id } }).exec();
-      if (doc) {
-        await doc.incrementalPatch({ deletedAt: now });
-
-        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
-        for (const r of revisoesTopico) {
-          await r.remove();
-        }
-
-        // Enfileira operações
-        await enqueueOperation('update', 'topics', { id, deletedAt: now });
-        for (const r of revisoesTopico) {
-          await enqueueOperation('delete', 'revisoes', { id: r.id });
-        }
-
-        if (selectedTopicId === id) {
-          setSelectedTopicId(null);
-          setModo("disciplina-detalhe");
-        }
-        await loadData();
-        setErrorMessage("✅ Tópico excluído com sucesso!");
-        setTimeout(() => setErrorMessage(""), 3000);
-      }
-    } catch (error: any) {
-      console.error("❌ Erro ao deletar tópico:", error);
-      setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
-    }
-  }, [selectedTopicId, loadData]);
-
-// ---------- GERENCIAR REVISÕES (COM FILA) ----------
-const gerenciarRevisoesTopico = useCallback(async (
-  topicoId: string,
-  topicoNome: string,
-  disciplinaNome: string,
-  novoStatus: string
-) => {
-  if (!userId) return;
-  try {
-    const db = await getDb();
-    
-    const existingDocs = await db.revisoes.find({
-      selector: { user_id: userId, topico_id: topicoId }
-    }).exec();
-    const existingRevisoes = existingDocs.map((doc: any) => doc.toJSON());
-
-    const novasRevisoes = gerenciarRevisao(
-      topicoId,
-      topicoNome,
-      disciplinaNome,
-      novoStatus,
-      existingRevisoes
-    );
-
-    const novosIds = novasRevisoes.map(r => r.id);
-    for (const doc of existingDocs) {
-      if (!novosIds.includes(doc.id)) {
-        await doc.remove();
-        await enqueueOperation('delete', 'revisoes', { id: doc.id });
-      }
-    }
-
-    for (const rev of novasRevisoes) {
-      const topicoIdFinal = rev.topicoId || topicoId;
-      const topicNameFinal = rev.topicoNome || topicoNome;
-      const disciplineFinal = rev.disciplina || disciplinaNome;
-      const reviewLevelFinal = rev.reviewLevel || 1;
-      const nextReviewDateFinal = rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString();
-      const lastStudyDateFinal = rev.lastStudyDate || new Date().toISOString();
-
-      const existingDoc = existingDocs.find(d => d.id === rev.id);
-      const revisaoData = {
-        id: rev.id,
-        user_id: userId,
-        topico_id: topicoIdFinal,
-        topicName: topicNameFinal,
-        discipline: disciplineFinal,
-        review_level: reviewLevelFinal,
-        nextReviewDate: nextReviewDateFinal,
-        lastStudyDate: lastStudyDateFinal,
-        completedAt: rev.completedAt || null,
-        createdAt: rev.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      if (existingDoc) {
-        await existingDoc.incrementalPatch({
-          review_level: reviewLevelFinal,
-          nextReviewDate: nextReviewDateFinal,
-          lastStudyDate: lastStudyDateFinal,
-          completedAt: rev.completedAt || null,
-          updatedAt: new Date().toISOString()
-        });
-        await enqueueOperation('update', 'revisoes', { 
-          id: rev.id, 
-          review_level: reviewLevelFinal,
-          nextReviewDate: nextReviewDateFinal,
-          lastStudyDate: lastStudyDateFinal,
-          completedAt: rev.completedAt || null,
-          updatedAt: new Date().toISOString()
-        });
-      } else {
-        await db.revisoes.insert(revisaoData);
-        await enqueueOperation('create', 'revisoes', revisaoData);
-      }
-    }
-
-    await loadData();
-    console.log('✅ Revisões atualizadas com sucesso (local e fila)');
-  } catch (error) {
-    console.error('❌ Erro ao gerenciar revisões:', error);
-    throw error;
-  }
-}, [userId, loadData]);
-
-// ---------- ATUALIZAR STATUS DO TÓPICO (COM FILA) ----------
-const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
+  // ---------- EXCLUIR DISCIPLINA (SOFT DELETE) ----------
+const handleDeleteDiscipline = useCallback(async (id: string) => {
+  if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
   try {
     const db = await getDb();
     const now = new Date().toISOString();
+
+    // 🔥 1. Soft delete local (sempre faz)
+    const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
+    if (disciplineDoc) {
+      await disciplineDoc.patch({ isDeleted: true, updated_at: now });
+    }
+
+    const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
+    const topicIds = topics.map(t => t.id);
+    for (const t of topics) {
+      await t.patch({ isDeleted: true, updated_at: now });
+      const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
+      for (const r of revisoesTopico) {
+        await r.remove();
+      }
+    }
+
+    // 🔥 2. Tenta enviar direto para o Supabase (igual flashcards)
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+      await supabaseClient.from('disciplines').update({ isDeleted: true, updated_at: now }).eq('id', id);
+      for (const tid of topicIds) {
+        await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', tid);
+        // Revisões são deletadas de verdade, enfileira se falhar
+      }
+      console.log('✅ [ConteudoPage] Disciplina excluída no Supabase.');
+    } catch (supabaseError) {
+      // 🔥 3. Só enfileira se o Supabase falhar (offline)
+      console.warn('⚠️ [ConteudoPage] Falha ao excluir no Supabase, enfileirando.');
+      await enqueueOperation('update', 'disciplines', { id, isDeleted: true, updated_at: now });
+      for (const tid of topicIds) {
+        await enqueueOperation('update', 'topics', { id: tid, isDeleted: true, updated_at: now });
+      }
+    }
+
+    if (selectedDisciplineId === id) {
+      setSelectedDisciplineId(null);
+      setModo("disciplinas");
+    }
+
+    await loadData();
+    setErrorMessage("✅ Disciplina excluída com sucesso!");
+    setTimeout(() => setErrorMessage(""), 3000);
+
+  } catch (error: any) {
+    console.error("❌ Erro ao deletar disciplina:", error);
+    setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
+  }
+}, [selectedDisciplineId, loadData]);
+
+  // ---------- EXCLUIR TÓPICO (SOFT DELETE) ----------
+  const handleDeleteTopic = useCallback(async (id: string) => {
+  if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
+  try {
+    const db = await getDb();
+    const now = new Date().toISOString();
+
     const doc = await db.topics.findOne({ selector: { id } }).exec();
     if (doc) {
-      const topicoData = doc.toJSON();
-      const disciplina = getDisciplinaById(topicoData.discipline_id);
+      // 🔥 Soft delete local
+      await doc.patch({ isDeleted: true, updated_at: now });
 
-      // 1. Atualiza localmente
-      await doc.incrementalPatch({
-        status: newStatus,
-        updatedAt: now
-      });
+      const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
+      for (const r of revisoesTopico) {
+        await r.remove();
+      }
 
-      // 2. Enfileira atualização
-      await enqueueOperation('update', 'topics', { id, status: newStatus, updatedAt: now });
+      // 🔥 Tenta enviar direto para o Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', id);
+        for (const r of revisoesTopico) {
+          await supabaseClient.from('revisoes').delete().eq('id', r.id);
+        }
+        console.log('✅ [ConteudoPage] Tópico excluído no Supabase.');
+      } catch (supabaseError) {
+        // 🔥 Só enfileira se falhar
+        console.warn('⚠️ [ConteudoPage] Falha ao excluir tópico no Supabase, enfileirando.');
+        await enqueueOperation('update', 'topics', { id, isDeleted: true, updated_at: now });
+        for (const r of revisoesTopico) {
+          await enqueueOperation('delete', 'revisoes', { id: r.id });
+        }
+      }
 
-      // 3. Gerencia revisões (também com fila)
-      await gerenciarRevisoesTopico(
-        id,
-        topicoData.name,
-        disciplina?.name || 'Disciplina',
-        newStatus
-      );
-
+      if (selectedTopicId === id) {
+        setSelectedTopicId(null);
+        setModo("disciplina-detalhe");
+      }
       await loadData();
-      console.log('✅ Status do tópico atualizado com sucesso (local e fila)');
+      setErrorMessage("✅ Tópico excluído com sucesso!");
+      setTimeout(() => setErrorMessage(""), 3000);
     }
   } catch (error: any) {
-    console.error("❌ Erro ao atualizar status do tópico:", error);
-    setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
+    console.error("❌ Erro ao deletar tópico:", error);
+    setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
   }
-}, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
+}, [selectedTopicId, loadData]);
+
+  // ---------- GERENCIAR REVISÕES ----------
+  const gerenciarRevisoesTopico = useCallback(async (
+    topicoId: string,
+    topicoNome: string,
+    disciplinaNome: string,
+    novoStatus: string
+  ) => {
+    if (!userId) return;
+    try {
+      const db = await getDb();
+      
+      const existingDocs = await db.revisoes.find({
+        selector: { user_id: userId, topico_id: topicoId }
+      }).exec();
+      const existingRevisoes = existingDocs.map((doc: any) => doc.toJSON());
+
+      const novasRevisoes = gerenciarRevisao(
+        topicoId,
+        topicoNome,
+        disciplinaNome,
+        novoStatus,
+        existingRevisoes
+      );
+
+      const novosIds = novasRevisoes.map(r => r.id);
+      for (const doc of existingDocs) {
+        if (!novosIds.includes(doc.id)) {
+          await doc.remove();
+          await enqueueOperation('delete', 'revisoes', { id: doc.id });
+        }
+      }
+
+      for (const rev of novasRevisoes) {
+        const topicoIdFinal = rev.topicoId || topicoId;
+        const topicNameFinal = rev.topicoNome || topicoNome;
+        const disciplineFinal = rev.disciplina || disciplinaNome;
+        const reviewLevelFinal = rev.reviewLevel || 1;
+        const nextReviewDateFinal = rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString();
+        const lastStudyDateFinal = rev.lastStudyDate || new Date().toISOString();
+
+        const existingDoc = existingDocs.find(d => d.id === rev.id);
+        const revisaoData = {
+          id: rev.id,
+          user_id: userId,
+          topico_id: topicoIdFinal,
+          topicName: topicNameFinal,
+          discipline: disciplineFinal,
+          review_level: reviewLevelFinal,
+          nextReviewDate: nextReviewDateFinal,
+          lastStudyDate: lastStudyDateFinal,
+          completedAt: rev.completedAt || null,
+          createdAt: rev.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        if (existingDoc) {
+          await existingDoc.patch({
+            review_level: reviewLevelFinal,
+            nextReviewDate: nextReviewDateFinal,
+            lastStudyDate: lastStudyDateFinal,
+            completedAt: rev.completedAt || null,
+            updatedAt: new Date().toISOString()
+          });
+          await enqueueOperation('update', 'revisoes', { 
+            id: rev.id, 
+            review_level: reviewLevelFinal,
+            nextReviewDate: nextReviewDateFinal,
+            lastStudyDate: lastStudyDateFinal,
+            completedAt: rev.completedAt || null,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          await db.revisoes.insert(revisaoData);
+          await enqueueOperation('create', 'revisoes', revisaoData);
+        }
+      }
+
+      await loadData();
+      console.log('✅ Revisões atualizadas com sucesso (local e fila)');
+    } catch (error) {
+      console.error('❌ Erro ao gerenciar revisões:', error);
+      throw error;
+    }
+  }, [userId, loadData]);
+
+  // ---------- ATUALIZAR STATUS DO TÓPICO ----------
+  const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string) => {
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+      const doc = await db.topics.findOne({ selector: { id } }).exec();
+      if (doc) {
+        const topicoData = doc.toJSON();
+        const disciplina = getDisciplinaById(topicoData.discipline_id);
+
+        // 1. Atualiza localmente
+        await doc.patch({
+          status: newStatus,
+          updated_at: now
+        });
+
+        // 2. Enfileira atualização
+        await enqueueOperation('update', 'topics', { id, status: newStatus, updated_at: now });
+
+        // 3. Gerencia revisões
+        await gerenciarRevisoesTopico(
+          id,
+          topicoData.name,
+          disciplina?.name || 'Disciplina',
+          newStatus
+        );
+
+        await loadData();
+        console.log('✅ Status do tópico atualizado com sucesso (local e fila)');
+      }
+    } catch (error: any) {
+      console.error("❌ Erro ao atualizar status do tópico:", error);
+      setErrorMessage("Erro ao atualizar status: " + (error.message || "Erro desconhecido"));
+    }
+  }, [getDisciplinaById, gerenciarRevisoesTopico, loadData]);
 
   // ============================================================
   // NAVEGAÇÃO
@@ -635,7 +719,7 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
   };
 
   // ============================================================
-  // RENDER: LISTA DE DISCIPLINAS (SEM MUDANÇAS)
+  // RENDER: LISTA DE DISCIPLINAS
   // ============================================================
   if (modo === "disciplinas") {
     return (
@@ -788,7 +872,7 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
   }
 
   // ============================================================
-  // RENDER: DETALHES DA DISCIPLINA (COM FUNÇÕES CORRIGIDAS)
+  // RENDER: DETALHES DA DISCIPLINA
   // ============================================================
   if (modo === "disciplina-detalhe" && selectedDisciplineId) {
     const disciplina = getDisciplinaById(selectedDisciplineId);
@@ -958,7 +1042,7 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
   }
 
   // ============================================================
-  // RENDER: DETALHES DO TÓPICO (COM FUNÇÕES CORRIGIDAS)
+  // RENDER: DETALHES DO TÓPICO
   // ============================================================
   if (modo === "topico-detalhe" && selectedTopicId) {
     const topico = getTopicoById(selectedTopicId);
@@ -1046,7 +1130,7 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
 
         <div className="grid gap-6 lg:grid-cols-3">
           <section className="space-y-6 lg:col-span-2">
-            {/* MATERIAIS COM UPLOAD REAL */}
+            {/* MATERIAIS */}
             <div className="rf-card p-6">
               <header className="mb-4 flex items-center justify-between">
                 <div>
@@ -1174,7 +1258,7 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
             </div>
           </section>
 
-          {/* Sidebar - com revisões */}
+          {/* Sidebar */}
           <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
             <div className="rf-card p-5">
               <header className="mb-3 text-xs font-medium uppercase tracking-widest text-foreground/40">Progresso</header>
@@ -1196,7 +1280,6 @@ const handleUpdateTopicStatus = useCallback(async (id: string, newStatus: string
               </ul>
             </div>
 
-            {/* Revisões agendadas */}
             {revisoesTopico.length > 0 && (
               <div className="rf-card p-5">
                 <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">

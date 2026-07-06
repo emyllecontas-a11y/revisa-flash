@@ -117,7 +117,7 @@ export async function processPendingOperations(): Promise<void> {
           console.warn(`⚠️ Operação ${op.id} falhou 5 vezes, removendo da fila.`);
           await doc.remove();
         } else {
-          await doc.incrementalPatch({ retries, updated_at: new Date().toISOString() });
+          await doc.patch({ retries, updated_at: new Date().toISOString() });
           failed.push(op.id);
         }
       }
