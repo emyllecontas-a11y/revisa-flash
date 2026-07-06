@@ -23,7 +23,7 @@ export interface ErrorRecord {
   status: 'ativo' | 'resolvido' | 'arquivado';
   flashcardId?: string;
   createdAt: string;
-  updated_at?: string; // 🔥 ALTERADO: agora com underline
+  updated_at?: string;
   isDeleted?: boolean;
 }
 
@@ -96,30 +96,66 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const loadedRecords = errorsResult.map((doc: any) => doc.toJSON() as ErrorRecord);
       setRecords(loadedRecords);
 
-      // Carregar áreas não deletadas
+      // ----------------------------------------------------------
+      // 🔥 CARREGAR ÁREAS – CORRIGIDO
+      // ----------------------------------------------------------
       const areasResult = await db.areas?.find({ 
         selector: { 
           user_id: userIdFromAuth,
           isDeleted: { $ne: true }
         }
       }).exec();
+
       if (areasResult && areasResult.length > 0) {
+        // Se há áreas no banco local, use-as
         const loadedAreas = areasResult.map((doc: any) => doc.toJSON());
         setAreas(loadedAreas);
+        console.log(`✅ [ErrorContext] ${loadedAreas.length} áreas carregadas do banco local.`);
       } else {
-        const db = await getDb();
-        if (db.areas) {
-          for (const area of DEFAULT_AREAS) {
-            await db.areas.insert({
-              id: uid(),
-              user_id: userIdFromAuth,
-              name: area.name,
-              icon: area.icon,
-              isDeleted: false,
-            });
+        // Se não há áreas no banco local, verifica no Supabase
+        let supabaseAreas: any[] = [];
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { data, error } = await supabaseClient
+            .from('areas')
+            .select('*')
+            .eq('user_id', userIdFromAuth)
+            .eq('isDeleted', false);
+          
+          if (error) throw error;
+          if (data && data.length > 0) {
+            supabaseAreas = data;
           }
+        } catch (error) {
+          console.warn('⚠️ Erro ao buscar áreas do Supabase:', error);
         }
-        setAreas(DEFAULT_AREAS);
+
+        if (supabaseAreas.length > 0) {
+          // 🔥 Se há áreas no Supabase, insere no banco local e usa elas
+          for (const area of supabaseAreas) {
+            await db.areas.insert(area);
+          }
+          setAreas(supabaseAreas);
+          console.log(`✅ [ErrorContext] ${supabaseAreas.length} áreas carregadas do Supabase.`);
+        } else {
+          // 🔥 Se não há áreas em lugar nenhum, insere as padrão (apenas uma vez)
+          const now = new Date().toISOString();
+          const areasToInsert = DEFAULT_AREAS.map(area => ({
+            id: uid(),
+            user_id: userIdFromAuth,
+            name: area.name,
+            icon: area.icon,
+            isDeleted: false,
+            created_at: now,
+            updated_at: now,
+          }));
+
+          for (const area of areasToInsert) {
+            await db.areas.insert(area);
+          }
+          setAreas(DEFAULT_AREAS);
+          console.log(`✅ [ErrorContext] ${DEFAULT_AREAS.length} áreas padrão inseridas no banco local.`);
+        }
       }
 
       console.log(`✅ [ErrorContext] ${loadedRecords.length} erros carregados.`);
@@ -130,23 +166,39 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, []);
 
-  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE
+  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE (COM DEBOUNCE)
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isSubscribed = true;
+
     const loadAndSubscribe = async () => {
+      if (!isSubscribed) return;
       await loadData();
+
       try {
         const db = await getDb();
         if (db.collections?.errors) {
           const subscription = db.collections.errors.$.subscribe(() => {
-            console.log('🔄 Mudança detectada na coleção errors, recarregando...');
-            loadData();
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+              if (isSubscribed) {
+                console.log('🔄 Mudança detectada na coleção errors, recarregando...');
+                loadData();
+              }
+              timeoutId = null;
+            }, 500);
           });
-          return () => subscription.unsubscribe();
+          return () => {
+            isSubscribed = false;
+            if (timeoutId) clearTimeout(timeoutId);
+            subscription.unsubscribe();
+          };
         }
       } catch (e) {
         console.warn('Erro ao configurar listener de errors:', e);
       }
     };
+
     loadAndSubscribe();
   }, [loadData]);
 
@@ -165,7 +217,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       status: 'ativo',
       flashcardId: undefined,
       createdAt: now,
-      updated_at: now, // 🔥 ALTERADO: campo correto
+      updated_at: now,
       isDeleted: false,
     };
 
@@ -208,7 +260,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const updatedData = {
         ...data,
-        updated_at: new Date().toISOString() // 🔥 ALTERADO: campo correto
+        updated_at: new Date().toISOString()
       };
       await doc.incrementalPatch(updatedData);
 
@@ -252,7 +304,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // 🔥 SOFT DELETE com updated_at correto
       await doc.incrementalPatch({
         isDeleted: true,
-        updated_at: now, // 🔥 ALTERADO
+        updated_at: now,
       });
       
       setRecords(prev => prev.filter(r => r.id !== id));
@@ -262,7 +314,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
           .from('errors')
-          .update({ isDeleted: true, updated_at: now }) // 🔥 ALTERADO
+          .update({ isDeleted: true, updated_at: now })
           .eq('id', id);
         if (error) throw error;
         console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
