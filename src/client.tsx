@@ -18,7 +18,10 @@ import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
 import { addRxPlugin } from 'rxdb';
 import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
+import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
+
 addRxPlugin(RxDBMigrationPlugin);
+addRxPlugin(RxDBUpdatePlugin);
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
