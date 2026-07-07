@@ -110,7 +110,7 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CARREGAR DADOS (COM isDeleted + ordenação por order)
+  // CARREGAR DADOS (COM isDeleted + ordenação por order + reindexação automática)
   // ============================================================
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -132,9 +132,52 @@ export default function ConteudoPage() {
         }
       }).exec();
       const topicsData = topicsResult.map((doc: any) => doc.toJSON());
-      // 🔥 Ordena por order (ascendente)
+
+      // 🔥 Verifica se algum tópico tem order indefinido
+      let hasUndefinedOrder = false;
+      for (const t of topicsData) {
+        if (t.order === undefined || t.order === null) {
+          t.order = 0;
+          hasUndefinedOrder = true;
+        }
+      }
+
+      // 🔥 Se houver tópicos com order indefinido, reindexa TODOS por disciplina
+      if (hasUndefinedOrder) {
+        console.log('🔄 Reindexando tópicos com order indefinido...');
+        const disciplines = [...new Set(topicsData.map(t => t.discipline_id))];
+        for (const discId of disciplines) {
+          const topicsOfDisc = topicsData.filter(t => t.discipline_id === discId);
+          // Ordena por ordem atual ou data de criação
+          topicsOfDisc.sort((a, b) => (a.order || 0) - (b.order || 0) || new Date(a.createdAt) - new Date(b.createdAt));
+          for (let i = 0; i < topicsOfDisc.length; i++) {
+            topicsOfDisc[i].order = i;
+          }
+        }
+        // Salva as alterações no banco local e no Supabase
+        const now = new Date().toISOString();
+        for (const t of topicsData) {
+          const doc = await db.topics.findOne({ selector: { id: t.id } }).exec();
+          if (doc) await doc.patch({ order: t.order, updated_at: now });
+        }
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          for (const t of topicsData) {
+            await supabaseClient.from('topics').update({ order: t.order, updated_at: now }).eq('id', t.id);
+          }
+          console.log('✅ Reindexação sincronizada com Supabase.');
+        } catch (e) {
+          console.warn('⚠️ Falha ao sincronizar reindexação, enfileirando.');
+          for (const t of topicsData) {
+            await enqueueOperation('update', 'topics', { id: t.id, order: t.order, updated_at: now });
+          }
+        }
+      }
+
+      // Ordena para exibição
       topicsData.sort((a, b) => (a.order || 0) - (b.order || 0));
       setTopicos(topicsData);
+      console.log('📊 [loadData] Tópicos carregados (nome:order):', topicsData.map(t => `${t.name}:${t.order}`).join(', '));
 
       const revisoesResult = await db.revisoes.find({
         selector: { user_id: userId }
@@ -428,57 +471,59 @@ export default function ConteudoPage() {
     }
   }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData, getNextOrder]);
 
-  // ---------- Mover tópico (subir/descer) ----------
+  // ---------- Mover tópico (subir/descer) – REINDEXA APENAS A DISCIPLINA AFETADA ----------
   const moveTopic = useCallback(async (id: string, direction: 'up' | 'down') => {
+    console.log('🔁 moveTopic chamado:', id, direction);
     const db = await getDb();
     const allTopics = [...topicos];
     const index = allTopics.findIndex(t => t.id === id);
     if (index === -1) return;
 
-    const newIndex = direction === 'up' ? index - 1 : index + 1;
-    if (newIndex < 0 || newIndex >= allTopics.length) return;
-
-    // Troca a ordem
-    const current = allTopics[index];
-    const target = allTopics[newIndex];
-    const currentOrder = current.order || 0;
-    const targetOrder = target.order || 0;
-
-    // Atualiza localmente
-    const updatedTopics = [...allTopics];
-    updatedTopics[index] = { ...current, order: targetOrder };
-    updatedTopics[newIndex] = { ...target, order: currentOrder };
+    // Encontra a disciplina do tópico
+    const disciplineId = allTopics[index].discipline_id;
+    const topicsOfDiscipline = allTopics.filter(t => t.discipline_id === disciplineId);
+    const indexInDiscipline = topicsOfDiscipline.findIndex(t => t.id === id);
     
-    // Ordena novamente
-    updatedTopics.sort((a, b) => (a.order || 0) - (b.order || 0));
-    setTopicos(updatedTopics);
+    const newIndexInDiscipline = direction === 'up' ? indexInDiscipline - 1 : indexInDiscipline + 1;
+    if (newIndexInDiscipline < 0 || newIndexInDiscipline >= topicsOfDiscipline.length) return;
 
-    // Salva no banco local e no Supabase
+    // Troca a posição no array da disciplina
+    const [removed] = topicsOfDiscipline.splice(indexInDiscipline, 1);
+    topicsOfDiscipline.splice(newIndexInDiscipline, 0, removed);
+
+    // Reindexa a disciplina inteira
     const now = new Date().toISOString();
-
-    try {
-      // Atualiza o tópico atual
-      const docCurrent = await db.topics.findOne({ selector: { id: current.id } }).exec();
-      if (docCurrent) await docCurrent.patch({ order: targetOrder, updated_at: now });
-      
-      // Atualiza o tópico alvo
-      const docTarget = await db.topics.findOne({ selector: { id: target.id } }).exec();
-      if (docTarget) await docTarget.patch({ order: currentOrder, updated_at: now });
-    } catch (e) {
-      console.error('Erro ao salvar ordem localmente:', e);
+    for (let i = 0; i < topicsOfDiscipline.length; i++) {
+      const t = topicsOfDiscipline[i];
+      t.order = i;
+      t.updated_at = now;
+      // Atualiza no banco local
+      const doc = await db.topics.findOne({ selector: { id: t.id } }).exec();
+      if (doc) await doc.patch({ order: i, updated_at: now });
     }
 
-    // Tenta sincronizar com Supabase (push direto)
+    // Atualiza o estado global (substitui os tópicos da disciplina no array principal)
+    const updatedAllTopics = allTopics.filter(t => t.discipline_id !== disciplineId).concat(topicsOfDiscipline);
+    updatedAllTopics.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    setTopicos(updatedAllTopics);
+    console.log('📊 [moveTopic] Tópicos reindexados da disciplina:', topicsOfDiscipline.map(t => `${t.name}:${t.order}`).join(', '));
+
+    // Sincroniza com Supabase
     try {
       const supabaseClient = await getSupabaseWithToken();
-      await supabaseClient.from('topics').update({ order: targetOrder, updated_at: now }).eq('id', current.id);
-      await supabaseClient.from('topics').update({ order: currentOrder, updated_at: now }).eq('id', target.id);
-      console.log('✅ [ConteudoPage] Ordem dos tópicos sincronizada com Supabase.');
+      for (const t of topicsOfDiscipline) {
+        await supabaseClient.from('topics').update({ order: t.order, updated_at: now }).eq('id', t.id);
+      }
+      console.log('✅ [ConteudoPage] Ordens reindexadas no Supabase.');
     } catch (error) {
       console.warn('⚠️ [ConteudoPage] Falha ao sincronizar ordem, enfileirando.');
-      await enqueueOperation('update', 'topics', { id: current.id, order: targetOrder, updated_at: now });
-      await enqueueOperation('update', 'topics', { id: target.id, order: currentOrder, updated_at: now });
+      for (const t of topicsOfDiscipline) {
+        await enqueueOperation('update', 'topics', { id: t.id, order: t.order, updated_at: now });
+      }
     }
+
+    // Recarrega para garantir consistência (opcional, mas já atualizamos o estado)
+    // await loadData();
   }, [topicos]);
 
   // ---------- EXCLUIR DISCIPLINA (SOFT DELETE) ----------
