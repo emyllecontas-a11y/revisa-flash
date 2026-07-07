@@ -3,7 +3,7 @@ import {
   Plus, Search, ChevronRight, ChevronLeft, FileText, Upload, 
   Layers, Pencil, Trash2, X, BookOpen, Sparkles, ImageIcon,
   FileSpreadsheet, Music, Calendar, Clock, CheckCircle2, Circle,
-  Loader2
+  Loader2, ChevronUp, ChevronDown
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { uid, gerenciarRevisao } from "@/utils/helpers";
@@ -12,9 +12,8 @@ import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uploadFile, listFilesByTopic, deleteFile, FileRecord } from "@/services/fileService";
 import { enqueueOperation } from "@/services/queueService";
 
-
 // ============================================================
-// TIPOS (CORRIGIDOS)
+// TIPOS (CORRIGIDOS + order)
 // ============================================================
 interface Disciplina {
   id: string;
@@ -35,6 +34,7 @@ interface Topico {
   updated_at: string;
   user_id: string;
   isDeleted?: boolean;
+  order?: number; // 🔥 NOVO
 }
 
 interface Revisao {
@@ -110,7 +110,7 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CARREGAR DADOS (COM isDeleted)
+  // CARREGAR DADOS (COM isDeleted + ordenação por order)
   // ============================================================
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -131,7 +131,10 @@ export default function ConteudoPage() {
           isDeleted: { $ne: true }
         }
       }).exec();
-      setTopicos(topicsResult.map((doc: any) => doc.toJSON()));
+      const topicsData = topicsResult.map((doc: any) => doc.toJSON());
+      // 🔥 Ordena por order (ascendente)
+      topicsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setTopicos(topicsData);
 
       const revisoesResult = await db.revisoes.find({
         selector: { user_id: userId }
@@ -240,6 +243,14 @@ export default function ConteudoPage() {
     }
   }, [userId]);
 
+  // 🔥 Função para obter a próxima ordem
+  const getNextOrder = useCallback((disciplineId: string) => {
+    const topicsOfDiscipline = topicos.filter(t => t.discipline_id === disciplineId);
+    if (topicsOfDiscipline.length === 0) return 0;
+    const maxOrder = Math.max(...topicsOfDiscipline.map(t => t.order || 0));
+    return maxOrder + 1;
+  }, [topicos]);
+
   // ============================================================
   // UPLOAD E REMOÇÃO DE ARQUIVOS
   // ============================================================
@@ -297,7 +308,7 @@ export default function ConteudoPage() {
   }, []);
 
   // ============================================================
-  // CRUD CORRIGIDO (COM updated_at E isDeleted)
+  // CRUD CORRIGIDO (COM updated_at E isDeleted + order)
   // ============================================================
 
   // ---------- CRIAR DISCIPLINA ----------
@@ -354,7 +365,7 @@ export default function ConteudoPage() {
     }
   }, [discNome, discDesc, userId, loadData]);
 
-  // ---------- CRIAR TÓPICO ----------
+  // ---------- CRIAR TÓPICO (COM order) ----------
   const handleCreateTopic = useCallback(async () => {
     if (!selectedDisciplineId) {
       setErrorMessage("Selecione uma disciplina primeiro");
@@ -373,6 +384,8 @@ export default function ConteudoPage() {
       const now = new Date().toISOString();
       const id = uid();
       const db = await getDb();
+
+      const nextOrder = getNextOrder(selectedDisciplineId); // 🔥
       
       const newTopic = {
         id,
@@ -384,6 +397,7 @@ export default function ConteudoPage() {
         updated_at: now,
         user_id: userId,
         isDeleted: false,
+        order: nextOrder, // 🔥
       };
 
       await db.topics.insert(newTopic);
@@ -412,111 +426,161 @@ export default function ConteudoPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData]);
+  }, [selectedDisciplineId, topicoNome, topicoDesc, topicoStatus, userId, loadData, getNextOrder]);
 
-  // ---------- EXCLUIR DISCIPLINA (SOFT DELETE) ----------
-const handleDeleteDiscipline = useCallback(async (id: string) => {
-  if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
-  try {
+  // ---------- Mover tópico (subir/descer) ----------
+  const moveTopic = useCallback(async (id: string, direction: 'up' | 'down') => {
     const db = await getDb();
+    const allTopics = [...topicos];
+    const index = allTopics.findIndex(t => t.id === id);
+    if (index === -1) return;
+
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= allTopics.length) return;
+
+    // Troca a ordem
+    const current = allTopics[index];
+    const target = allTopics[newIndex];
+    const currentOrder = current.order || 0;
+    const targetOrder = target.order || 0;
+
+    // Atualiza localmente
+    const updatedTopics = [...allTopics];
+    updatedTopics[index] = { ...current, order: targetOrder };
+    updatedTopics[newIndex] = { ...target, order: currentOrder };
+    
+    // Ordena novamente
+    updatedTopics.sort((a, b) => (a.order || 0) - (b.order || 0));
+    setTopicos(updatedTopics);
+
+    // Salva no banco local e no Supabase
     const now = new Date().toISOString();
 
-    // 🔥 1. Soft delete local (sempre faz)
-    const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
-    if (disciplineDoc) {
-      await disciplineDoc.patch({ isDeleted: true, updated_at: now });
+    try {
+      // Atualiza o tópico atual
+      const docCurrent = await db.topics.findOne({ selector: { id: current.id } }).exec();
+      if (docCurrent) await docCurrent.patch({ order: targetOrder, updated_at: now });
+      
+      // Atualiza o tópico alvo
+      const docTarget = await db.topics.findOne({ selector: { id: target.id } }).exec();
+      if (docTarget) await docTarget.patch({ order: currentOrder, updated_at: now });
+    } catch (e) {
+      console.error('Erro ao salvar ordem localmente:', e);
     }
 
-    const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
-    const topicIds = topics.map(t => t.id);
-    for (const t of topics) {
-      await t.patch({ isDeleted: true, updated_at: now });
-      const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
-      for (const r of revisoesTopico) {
-        await r.remove();
-      }
-    }
-
-    // 🔥 2. Tenta enviar direto para o Supabase (igual flashcards)
+    // Tenta sincronizar com Supabase (push direto)
     try {
       const supabaseClient = await getSupabaseWithToken();
-      await supabaseClient.from('disciplines').update({ isDeleted: true, updated_at: now }).eq('id', id);
-      for (const tid of topicIds) {
-        await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', tid);
-        // Revisões são deletadas de verdade, enfileira se falhar
-      }
-      console.log('✅ [ConteudoPage] Disciplina excluída no Supabase.');
-    } catch (supabaseError) {
-      // 🔥 3. Só enfileira se o Supabase falhar (offline)
-      console.warn('⚠️ [ConteudoPage] Falha ao excluir no Supabase, enfileirando.');
-      await enqueueOperation('update', 'disciplines', { id, isDeleted: true, updated_at: now });
-      for (const tid of topicIds) {
-        await enqueueOperation('update', 'topics', { id: tid, isDeleted: true, updated_at: now });
-      }
+      await supabaseClient.from('topics').update({ order: targetOrder, updated_at: now }).eq('id', current.id);
+      await supabaseClient.from('topics').update({ order: currentOrder, updated_at: now }).eq('id', target.id);
+      console.log('✅ [ConteudoPage] Ordem dos tópicos sincronizada com Supabase.');
+    } catch (error) {
+      console.warn('⚠️ [ConteudoPage] Falha ao sincronizar ordem, enfileirando.');
+      await enqueueOperation('update', 'topics', { id: current.id, order: targetOrder, updated_at: now });
+      await enqueueOperation('update', 'topics', { id: target.id, order: currentOrder, updated_at: now });
     }
+  }, [topicos]);
 
-    if (selectedDisciplineId === id) {
-      setSelectedDisciplineId(null);
-      setModo("disciplinas");
+  // ---------- EXCLUIR DISCIPLINA (SOFT DELETE) ----------
+  const handleDeleteDiscipline = useCallback(async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+
+      // 🔥 1. Soft delete local (sempre faz)
+      const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
+      if (disciplineDoc) {
+        await disciplineDoc.patch({ isDeleted: true, updated_at: now });
+      }
+
+      const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
+      const topicIds = topics.map(t => t.id);
+      for (const t of topics) {
+        await t.patch({ isDeleted: true, updated_at: now });
+        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: t.id } }).exec();
+        for (const r of revisoesTopico) {
+          await r.remove();
+        }
+      }
+
+      // 🔥 2. Tenta enviar direto para o Supabase
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        await supabaseClient.from('disciplines').update({ isDeleted: true, updated_at: now }).eq('id', id);
+        for (const tid of topicIds) {
+          await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', tid);
+        }
+        console.log('✅ [ConteudoPage] Disciplina excluída no Supabase.');
+      } catch (supabaseError) {
+        console.warn('⚠️ [ConteudoPage] Falha ao excluir no Supabase, enfileirando.');
+        await enqueueOperation('update', 'disciplines', { id, isDeleted: true, updated_at: now });
+        for (const tid of topicIds) {
+          await enqueueOperation('update', 'topics', { id: tid, isDeleted: true, updated_at: now });
+        }
+      }
+
+      if (selectedDisciplineId === id) {
+        setSelectedDisciplineId(null);
+        setModo("disciplinas");
+      }
+
+      await loadData();
+      setErrorMessage("✅ Disciplina excluída com sucesso!");
+      setTimeout(() => setErrorMessage(""), 3000);
+
+    } catch (error: any) {
+      console.error("❌ Erro ao deletar disciplina:", error);
+      setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
     }
-
-    await loadData();
-    setErrorMessage("✅ Disciplina excluída com sucesso!");
-    setTimeout(() => setErrorMessage(""), 3000);
-
-  } catch (error: any) {
-    console.error("❌ Erro ao deletar disciplina:", error);
-    setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
-  }
-}, [selectedDisciplineId, loadData]);
+  }, [selectedDisciplineId, loadData]);
 
   // ---------- EXCLUIR TÓPICO (SOFT DELETE) ----------
   const handleDeleteTopic = useCallback(async (id: string) => {
-  if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
-  try {
-    const db = await getDb();
-    const now = new Date().toISOString();
+    if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
 
-    const doc = await db.topics.findOne({ selector: { id } }).exec();
-    if (doc) {
-      // 🔥 Soft delete local
-      await doc.patch({ isDeleted: true, updated_at: now });
+      const doc = await db.topics.findOne({ selector: { id } }).exec();
+      if (doc) {
+        // 🔥 Soft delete local
+        await doc.patch({ isDeleted: true, updated_at: now });
 
-      const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
-      for (const r of revisoesTopico) {
-        await r.remove();
-      }
-
-      // 🔥 Tenta enviar direto para o Supabase
-      try {
-        const supabaseClient = await getSupabaseWithToken();
-        await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', id);
+        const revisoesTopico = await db.revisoes.find({ selector: { topico_id: id } }).exec();
         for (const r of revisoesTopico) {
-          await supabaseClient.from('revisoes').delete().eq('id', r.id);
+          await r.remove();
         }
-        console.log('✅ [ConteudoPage] Tópico excluído no Supabase.');
-      } catch (supabaseError) {
-        // 🔥 Só enfileira se falhar
-        console.warn('⚠️ [ConteudoPage] Falha ao excluir tópico no Supabase, enfileirando.');
-        await enqueueOperation('update', 'topics', { id, isDeleted: true, updated_at: now });
-        for (const r of revisoesTopico) {
-          await enqueueOperation('delete', 'revisoes', { id: r.id });
-        }
-      }
 
-      if (selectedTopicId === id) {
-        setSelectedTopicId(null);
-        setModo("disciplina-detalhe");
+        // 🔥 Tenta enviar direto para o Supabase
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', id);
+          for (const r of revisoesTopico) {
+            await supabaseClient.from('revisoes').delete().eq('id', r.id);
+          }
+          console.log('✅ [ConteudoPage] Tópico excluído no Supabase.');
+        } catch (supabaseError) {
+          console.warn('⚠️ [ConteudoPage] Falha ao excluir tópico no Supabase, enfileirando.');
+          await enqueueOperation('update', 'topics', { id, isDeleted: true, updated_at: now });
+          for (const r of revisoesTopico) {
+            await enqueueOperation('delete', 'revisoes', { id: r.id });
+          }
+        }
+
+        if (selectedTopicId === id) {
+          setSelectedTopicId(null);
+          setModo("disciplina-detalhe");
+        }
+        await loadData();
+        setErrorMessage("✅ Tópico excluído com sucesso!");
+        setTimeout(() => setErrorMessage(""), 3000);
       }
-      await loadData();
-      setErrorMessage("✅ Tópico excluído com sucesso!");
-      setTimeout(() => setErrorMessage(""), 3000);
+    } catch (error: any) {
+      console.error("❌ Erro ao deletar tópico:", error);
+      setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
     }
-  } catch (error: any) {
-    console.error("❌ Erro ao deletar tópico:", error);
-    setErrorMessage("Erro ao deletar tópico: " + (error.message || "Erro desconhecido"));
-  }
-}, [selectedTopicId, loadData]);
+  }, [selectedTopicId, loadData]);
 
   // ---------- GERENCIAR REVISÕES ----------
   const gerenciarRevisoesTopico = useCallback(async (
@@ -872,7 +936,7 @@ const handleDeleteDiscipline = useCallback(async (id: string) => {
   }
 
   // ============================================================
-  // RENDER: DETALHES DA DISCIPLINA
+  // RENDER: DETALHES DA DISCIPLINA (COM BOTÕES DE ORDENAÇÃO)
   // ============================================================
   if (modo === "disciplina-detalhe" && selectedDisciplineId) {
     const disciplina = getDisciplinaById(selectedDisciplineId);
@@ -930,7 +994,7 @@ const handleDeleteDiscipline = useCallback(async (id: string) => {
           <h2 className="mb-3 font-display text-base font-semibold">Tópicos</h2>
           <div className="grid gap-3">
             {topicosDaDisciplina.length > 0 ? (
-              topicosDaDisciplina.map((t) => {
+              topicosDaDisciplina.map((t, index) => {
                 const statusMap: Record<string, { label: string; className: string }> = {
                   "nao_estudado": { label: "Não iniciado", className: "bg-accent/10 text-accent" },
                   "estudando": { label: "Estudando", className: "bg-primary/10 text-primary" },
@@ -938,28 +1002,49 @@ const handleDeleteDiscipline = useCallback(async (id: string) => {
                   "dominado": { label: "Dominado", className: "bg-green-500/10 text-green-400" },
                 };
                 const status = statusMap[t.status] || statusMap["nao_estudado"];
+                const isFirst = index === 0;
+                const isLast = index === topicosDaDisciplina.length - 1;
                 return (
-                  <button
-                    key={t.id}
-                    onClick={() => abrirTopico(t.id)}
-                    className="rf-card rf-card-hover group flex items-center gap-4 p-5 w-full text-left"
-                  >
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/60 font-display text-sm font-semibold text-foreground/70 tabular-nums">
-                      {topicosDaDisciplina.indexOf(t) + 1}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="truncate text-sm font-semibold sm:text-base">{t.name}</h3>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>
-                          {status.label}
-                        </span>
+                  <div key={t.id} className="rf-card rf-card-hover group flex items-center gap-4 p-5 w-full">
+                    <button
+                      onClick={() => abrirTopico(t.id)}
+                      className="flex items-center gap-4 flex-1 text-left"
+                    >
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/60 font-display text-sm font-semibold text-foreground/70 tabular-nums">
+                        {index + 1}
                       </div>
-                      <div className="mt-1 text-xs text-foreground/45">
-                        {t.status === "dominado" ? "✅ Concluído" : "📚 Em estudo"}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-sm font-semibold sm:text-base">{t.name}</h3>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>
+                            {status.label}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-foreground/45">
+                          {t.status === "dominado" ? "✅ Concluído" : "📚 Em estudo"}
+                        </div>
                       </div>
+                    </button>
+                    {/* 🔥 BOTÕES DE ORDENAÇÃO */}
+                    <div className="flex flex-col gap-0.5">
+                      <button
+                        onClick={() => moveTopic(t.id, 'up')}
+                        disabled={isFirst}
+                        className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Mover para cima"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => moveTopic(t.id, 'down')}
+                        disabled={isLast}
+                        className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Mover para baixo"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-foreground/30 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-                  </button>
+                  </div>
                 );
               })
             ) : (
@@ -1042,7 +1127,7 @@ const handleDeleteDiscipline = useCallback(async (id: string) => {
   }
 
   // ============================================================
-  // RENDER: DETALHES DO TÓPICO
+  // RENDER: DETALHES DO TÓPICO (SEM MUDANÇAS)
   // ============================================================
   if (modo === "topico-detalhe" && selectedTopicId) {
     const topico = getTopicoById(selectedTopicId);

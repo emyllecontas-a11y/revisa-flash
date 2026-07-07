@@ -88,7 +88,8 @@ const topicSchema = {
     planned_date: { type: 'string' },
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
-    isDeleted: { type: 'boolean', default: false }
+    isDeleted: { type: 'boolean', default: false },
+    order: { type: 'number', default: 0 }
   },
   required: ['id', 'name', 'user_id']
 };
