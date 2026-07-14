@@ -17,13 +17,17 @@ import { setupQueueListener, processPendingOperations } from '@/services/queueSe
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
 import { addRxPlugin } from 'rxdb';
-console.log('addRxPlugin é:', addRxPlugin);
 import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
-console.log('Plugin Migration registrado, window.rxdbPlugins:', window.rxdbPlugins);
 import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
 
 addRxPlugin(RxDBMigrationPlugin);
 addRxPlugin(RxDBUpdatePlugin);
+
+// 🔥 VARIÁVEL INJETADA PELO VITE (timestamp do build)
+declare const __BUILD_TIMESTAMP__: string;
+
+// 🔥 VERSÃO DO SCHEMA – INCREMENTE SEMPRE QUE MUDAR A ESTRUTURA DO BANCO
+const SCHEMA_VERSION = '3'; // Ex: '2' quando adicionar campos, '3' para nova coleção, etc.
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -32,14 +36,14 @@ if (!PUBLISHABLE_KEY) {
 }
 
 // ============================================================
-// 📦 COMPONENTE ROOT – AGORA USA useAppUser()
+// 📦 COMPONENTE ROOT
 // ============================================================
 function Root() {
   const { userId, isLoaded, isSignedIn, user } = useAppUser();
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(userId);
 
-  // 🔥 Sincroniza perfil com Supabase (apenas online e com userId)
+  // 🔥 Sincroniza perfil com Supabase
   useEffect(() => {
     if (!userId || !isLoaded || !isSignedIn) return;
     const syncProfile = async () => {
@@ -72,7 +76,7 @@ function Root() {
     syncProfile();
   }, [userId, user, isLoaded, isSignedIn]);
 
-  // 🔥 INICIALIZAÇÃO DO RXDB
+  // 🔥 INICIALIZAÇÃO DO RXDB COM VERIFICAÇÃO DE VERSÃO
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn || !userId) {
@@ -86,7 +90,30 @@ function Root() {
         console.log('🔄 Inicializando RxDB para usuário:', userId);
         userIdRef.current = userId;
         localStorage.setItem('revisaflash_user_id', userId);
-        await getDb();
+
+        // 🔥 VERIFICA VERSÃO DO SCHEMA
+        const storedVersion = localStorage.getItem('revisaflash_schema_version');
+        if (storedVersion !== SCHEMA_VERSION) {
+          console.log(`🔄 Versão do schema mudou (${storedVersion} → ${SCHEMA_VERSION}). Resetando banco local...`);
+          try {
+            const db = await getDb();
+            await db.destroy();
+            console.log('✅ Banco local destruído.');
+          } catch (destroyError) {
+            console.warn('⚠️ Erro ao destruir banco (pode já estar fechado):', destroyError);
+          }
+          // Remove a versão antiga do localStorage
+          localStorage.removeItem('revisaflash_schema_version');
+          // Recria o banco (getDb cria novamente)
+          await getDb();
+          // Armazena a nova versão
+          localStorage.setItem('revisaflash_schema_version', SCHEMA_VERSION);
+          console.log('✅ Banco recriado com nova versão do schema.');
+        } else {
+          // Se a versão for a mesma, apenas obtém o banco existente
+          await getDb();
+        }
+
         console.log('✅ Banco local inicializado.');
         setReady(true);
 
@@ -139,12 +166,10 @@ function Root() {
         },
         async (payload) => {
           console.log('📡 Mudança detectada no Supabase:', payload);
-          // Cancela a sincronização anterior se houver
           if (syncTimeout) {
             clearTimeout(syncTimeout);
             syncTimeout = null;
           }
-          // Agenda a sincronização para daqui a 2 segundos
           syncTimeout = setTimeout(async () => {
             try {
               await syncWithSupabase(userId);
@@ -172,6 +197,26 @@ function Root() {
         syncTimeout = null;
       }
       supabase.removeChannel(channel);
+    };
+  }, [ready]);
+
+  // 🔥 LISTENER DE VISIBILIDADE DA ABA (sincroniza quando a aba ganha foco)
+  useEffect(() => {
+    if (!userIdRef.current || !ready) return;
+    const userId = userIdRef.current;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('👁️ Aba focada, sincronizando dados...');
+        syncWithSupabase(userId)
+          .then(() => console.log('✅ Sincronização por foco concluída'))
+          .catch(err => console.warn('⚠️ Falha ao sincronizar por foco:', err));
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [ready]);
 
@@ -217,7 +262,7 @@ function AppWithAuth() {
       fallbackRedirectUrl="/"
       __experimental_billing={{ enabled: true }}
       appearance={{
-        // ... (mantenha a mesma aparência que você tinha antes)
+        // Mantenha a aparência que você já tinha
       }}
     >
       <UserProvider>
@@ -228,12 +273,13 @@ function AppWithAuth() {
 }
 
 // ============================================================
-// 🔥 REGISTRO DO SERVICE WORKER
+// 🔥 REGISTRO DO SERVICE WORKER (CORRIGIDO)
 // ============================================================
 if ('serviceWorker' in navigator) {
   const registerSW = async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      const swUrl = `/sw.js?v=${__BUILD_TIMESTAMP__}`;
+      const registration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
       console.log('✅ Service Worker registrado com sucesso:', registration);
       if (registration.active) {
         registration.active.postMessage({ type: 'CLAIM' });
@@ -246,17 +292,28 @@ if ('serviceWorker' in navigator) {
     }
   };
   registerSW();
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.getRegistration('/').then((reg) => {
-      if (!reg) {
-        console.log('🔄 Nenhum SW registrado, tentando novamente no load...');
-        navigator.serviceWorker.register('/sw.js', { scope: '/' });
-      }
-    });
-  });
 } else {
   console.warn('⚠️ Service Worker não é suportado neste navegador.');
 }
+
+// ============================================================
+// 🔧 EXPORTA FUNÇÃO DE SINCRONIZAÇÃO MANUAL (opcional)
+// ============================================================
+export const manualSync = async () => {
+  const userId = localStorage.getItem('revisaflash_user_id');
+  if (!userId) {
+    console.warn('Usuário não logado');
+    return;
+  }
+  try {
+    await syncWithSupabase(userId);
+    console.log('✅ Sincronização manual concluída!');
+    return true;
+  } catch (err) {
+    console.error('❌ Erro na sincronização manual:', err);
+    throw err;
+  }
+};
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<AppWithAuth />);

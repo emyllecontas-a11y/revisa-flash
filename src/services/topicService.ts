@@ -1,13 +1,14 @@
 // src/services/topicService.ts
 
 import { getDb } from '@/lib/db';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { uid, gerenciarRevisao } from '@/utils/helpers';
 import { enqueueOperation } from './queueService';
 
 /**
  * Atualiza o status de um tópico e gerencia as revisões (DSM-30)
- * Todas as operações são enfileiradas para garantir sincronização offline.
+ * Agora tenta sincronizar diretamente com Supabase primeiro (push direto),
+ * e só enfileira se falhar (offline).
  */
 export async function updateTopicStatusAndRevisions(
   topicId: string,
@@ -37,30 +38,18 @@ export async function updateTopicStatusAndRevisions(
     const now = new Date().toISOString();
 
     // 2. ATUALIZAR STATUS NO RxDB (SEMPRE)
-    await doc.incrementalPatch({
+    await doc.patch({
       status: newStatus,
-      updatedAt: now,
+      updated_at: now,
     });
     console.log(`✅ [topicService] Status atualizado localmente para "${newStatus}"`);
 
-    // 🔥 ENFILEIRA ATUALIZAÇÃO DO TÓPICO
-    try {
-      await enqueueOperation('update', 'topics', {
-        id: topicId,
-        status: newStatus,
-        updatedAt: now,
-      });
-      console.log('📦 [topicService] Atualização do tópico enfileirada.');
-    } catch (queueError) {
-      console.warn('⚠️ [topicService] Erro ao enfileirar atualização do tópico:', queueError);
-    }
-
-    // 4. GERENCIAR REVISÕES (SEMPRE LOCAL)
+    // 3. Buscar nome da disciplina
     const disciplinaName = topicoData.discipline_id
       ? await getDisciplineNameById(topicoData.discipline_id, userId)
       : 'Disciplina';
 
-    // Buscar revisões existentes
+    // 4. GERENCIAR REVISÕES (SEMPRE LOCAL)
     let existingRevisoes: any[] = [];
     try {
       const existingDocs = await db.revisoes.find({
@@ -81,7 +70,7 @@ export async function updateTopicStatusAndRevisions(
       existingRevisoes
     );
 
-    // Remover revisões antigas que não estão mais na lista
+    // Remover revisões antigas que não estão mais na lista (local)
     const novosIds = novasRevisoes.map((r: any) => r.id);
     const existingDocs = await db.revisoes.find({
       selector: { user_id: userId, topico_id: topicId },
@@ -89,17 +78,11 @@ export async function updateTopicStatusAndRevisions(
     for (const doc of existingDocs) {
       if (!novosIds.includes(doc.id)) {
         await doc.remove();
-        // 🔥 ENFILEIRA REMOÇÃO DA REVISÃO
-        try {
-          await enqueueOperation('delete', 'revisoes', { id: doc.id });
-          console.log(`📦 [topicService] Remoção da revisão ${doc.id} enfileirada.`);
-        } catch (queueError) {
-          console.warn('⚠️ [topicService] Erro ao enfileirar remoção de revisão:', queueError);
-        }
+        console.log(`🗑️ [topicService] Revisão ${doc.id} removida localmente.`);
       }
     }
 
-    // Salvar revisões no RxDB (sempre) e enfileirar cada uma
+    // Salvar revisões no RxDB (sempre)
     const revisoesParaSalvar: any[] = [];
     for (const rev of novasRevisoes) {
       const topicoIdFinal = rev.topicoId || topicId;
@@ -111,27 +94,14 @@ export async function updateTopicStatusAndRevisions(
 
       const existingDoc = existingDocs.find((d: any) => d.id === rev.id);
       if (existingDoc) {
-        await existingDoc.incrementalPatch({
+        await existingDoc.patch({
           review_level: reviewLevelFinal,
           nextReviewDate: nextReviewDateFinal,
           lastStudyDate: lastStudyDateFinal,
           completedAt: rev.completedAt || null,
-          updatedAt: now,
+          updated_at: now,
         });
-        // 🔥 ENFILEIRA ATUALIZAÇÃO DA REVISÃO
-        try {
-          await enqueueOperation('update', 'revisoes', {
-            id: rev.id,
-            review_level: reviewLevelFinal,
-            nextReviewDate: nextReviewDateFinal,
-            lastStudyDate: lastStudyDateFinal,
-            completedAt: rev.completedAt || null,
-            updatedAt: now,
-          });
-          console.log(`📦 [topicService] Atualização da revisão ${rev.id} enfileirada.`);
-        } catch (queueError) {
-          console.warn('⚠️ [topicService] Erro ao enfileirar atualização de revisão:', queueError);
-        }
+        console.log(`✏️ [topicService] Revisão ${rev.id} atualizada localmente.`);
       } else {
         const newRevisao = {
           id: rev.id,
@@ -144,39 +114,127 @@ export async function updateTopicStatusAndRevisions(
           lastStudyDate: lastStudyDateFinal,
           completedAt: rev.completedAt || null,
           createdAt: rev.createdAt || now,
-          updatedAt: now,
+          updated_at: now,
         };
         await db.revisoes.insert(newRevisao);
-        // 🔥 ENFILEIRA CRIAÇÃO DA REVISÃO
-        try {
-          await enqueueOperation('create', 'revisoes', newRevisao);
-          console.log(`📦 [topicService] Criação da revisão ${rev.id} enfileirada.`);
-        } catch (queueError) {
-          console.warn('⚠️ [topicService] Erro ao enfileirar criação de revisão:', queueError);
-        }
+        console.log(`➕ [topicService] Revisão ${rev.id} criada localmente.`);
+        revisoesParaSalvar.push(newRevisao);
       }
-      revisoesParaSalvar.push({
-        id: rev.id,
-        user_id: userId,
-        topico_id: topicoIdFinal,
-        topicName: topicNameFinal,
-        discipline: disciplineFinal,
-        review_level: reviewLevelFinal,
-        nextReviewDate: nextReviewDateFinal,
-        lastStudyDate: lastStudyDateFinal,
-        completedAt: rev.completedAt || null,
-        createdAt: rev.createdAt || now,
-        updatedAt: now,
-      });
     }
 
-    console.log(`✅ [topicService] ${revisoesParaSalvar.length} revisões salvas localmente e enfileiradas.`);
+    console.log(`✅ [topicService] ${revisoesParaSalvar.length} revisões salvas localmente.`);
 
-    console.log('✅ [topicService] Tópico e revisões atualizados com sucesso (localmente e fila)');
+    // ============================================================
+    // 🔥 PUSH DIRETO PARA SUPABASE (tenta primeiro)
+    // ============================================================
+    let supabaseSuccess = false;
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+
+      // Atualiza status do tópico
+      await supabaseClient
+        .from('topics')
+        .update({ status: newStatus, updated_at: now })
+        .eq('id', topicId);
+
+      // Para cada revisão, insere ou atualiza
+      for (const rev of novasRevisoes) {
+        const reviewData = {
+          id: rev.id,
+          user_id: userId,
+          topico_id: rev.topicoId || topicId,
+          topicName: rev.topicoNome || topicoData.name,
+          discipline: rev.disciplina || disciplinaName,
+          review_level: rev.reviewLevel || 1,
+          nextReviewDate: rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString(),
+          lastStudyDate: rev.lastStudyDate || now,
+          completedAt: rev.completedAt || null,
+          createdAt: rev.createdAt || now,
+          updated_at: now,
+        };
+
+        // Verifica se já existe no Supabase
+        const { data: existing } = await supabaseClient
+          .from('revisoes')
+          .select('id')
+          .eq('id', rev.id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabaseClient
+            .from('revisoes')
+            .update(reviewData)
+            .eq('id', rev.id);
+        } else {
+          await supabaseClient
+            .from('revisoes')
+            .insert(reviewData);
+        }
+      }
+
+      // Remover revisões que foram deletadas (que não estão em novosIds)
+      for (const doc of existingDocs) {
+        if (!novosIds.includes(doc.id)) {
+          await supabaseClient
+            .from('revisoes')
+            .delete()
+            .eq('id', doc.id);
+        }
+      }
+
+      console.log('✅ [topicService] Tópico e revisões sincronizados diretamente com Supabase.');
+      supabaseSuccess = true;
+
+    } catch (supabaseError) {
+      console.warn('⚠️ [topicService] Falha ao sincronizar diretamente, enfileirando operações.');
+      // 🔥 Se falhar, enfileira tudo (offline)
+      try {
+        await enqueueOperation('update', 'topics', {
+          id: topicId,
+          status: newStatus,
+          updated_at: now,
+        });
+
+        for (const rev of novasRevisoes) {
+          const reviewData = {
+            id: rev.id,
+            user_id: userId,
+            topico_id: rev.topicoId || topicId,
+            topicName: rev.topicoNome || topicoData.name,
+            discipline: rev.disciplina || disciplinaName,
+            review_level: rev.reviewLevel || 1,
+            nextReviewDate: rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString(),
+            lastStudyDate: rev.lastStudyDate || now,
+            completedAt: rev.completedAt || null,
+            createdAt: rev.createdAt || now,
+            updated_at: now,
+          };
+          const existingDoc = existingDocs.find((d: any) => d.id === rev.id);
+          if (existingDoc) {
+            await enqueueOperation('update', 'revisoes', {
+              id: rev.id,
+              ...reviewData,
+            });
+          } else {
+            await enqueueOperation('create', 'revisoes', reviewData);
+          }
+        }
+
+        for (const doc of existingDocs) {
+          if (!novosIds.includes(doc.id)) {
+            await enqueueOperation('delete', 'revisoes', { id: doc.id });
+          }
+        }
+        console.log('📦 [topicService] Todas as operações enfileiradas (modo offline).');
+      } catch (queueError) {
+        console.error('❌ [topicService] Erro ao enfileirar operações:', queueError);
+      }
+    }
+
+    console.log('✅ [topicService] Tópico e revisões atualizados com sucesso!');
 
   } catch (error) {
     console.error('❌ [topicService] Erro geral:', error);
-    // Não relançar o erro para não interromper o fluxo principal
   }
 }
 

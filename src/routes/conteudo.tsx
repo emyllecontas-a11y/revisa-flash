@@ -1323,13 +1323,23 @@ export default function ConteudoPage() {
                   currentFiles.map((a) => {
                     const Icon = getIconByType(a.tipo);
                     const cor = getIconCor(a.tipo);
-                    let filePath = '';
-                    try {
-                      const url = new URL(a.url);
-                      filePath = url.pathname.replace(`/storage/v1/object/public/topic-files/`, '');
-                    } catch (e) {
-                      filePath = `${a.user_id}/${a.topico_id}/...`;
-                    }
+let filePath = '';
+console.log('🔍 URL do arquivo:', a.url);
+try {
+  const match = a.url.match(/\/topic-files\/([^?]+)/);
+  if (match) {
+    filePath = decodeURIComponent(match[1]);
+    console.log('✅ filePath extraído por regex:', filePath);
+  } else {
+    console.warn('⚠️ Regex não encontrou, usando fallback');
+    filePath = `${a.user_id}/${a.topico_id}/${a.nome}`;
+    console.log('🔧 filePath fallback:', filePath);
+  }
+} catch (e) {
+  console.error('❌ Erro ao extrair filePath:', e);
+  filePath = `${a.user_id}/${a.topico_id}/${a.nome}`;
+}
+console.log('📁 filePath final:', filePath);
                     return (
                       <li key={a.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/40 p-3">
                         <div className={`grid h-9 w-9 place-items-center rounded-md ${cor}`}>

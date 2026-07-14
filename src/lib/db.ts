@@ -21,7 +21,7 @@ const deckSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     color: { type: 'string' },
-    isDeleted: { type: 'boolean', default: false }, // 🔥 NOME ALTERADO
+    isDeleted: { type: 'boolean', default: false },
     is_shared: { type: 'boolean' },
     owner_id: { type: 'string' },
     shared_with: { type: 'array', items: { type: 'string' } }
@@ -53,7 +53,7 @@ const flashcardSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     shared_card_id: { type: ['string', 'null'] },
-    isDeleted: { type: 'boolean', default: false } // 🔥
+    isDeleted: { type: 'boolean', default: false }
   },
   required: ['id', 'deck_id', 'user_id', 'front', 'back']
 };
@@ -204,7 +204,7 @@ const areaSchema = {
 
 const pendingOperationSchema = {
   title: 'pending operation schema',
-  version: 0, // 🔥 ALTERADO DE 0 PARA 1
+  version: 0,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -220,7 +220,7 @@ const pendingOperationSchema = {
 };
 
 // ============================================================
-// GERENCIADOR DO BANCO (getDb) – igual
+// GERENCIADOR DO BANCO (getDb)
 // ============================================================
 let dbInstance: RxDatabase | null = null;
 let isCreating = false;
@@ -248,7 +248,6 @@ export async function getDb(): Promise<RxDatabase> {
   try {
     const DB_NAME = 'revisaflash_db_v2';
 
-    // Limpeza opcional (pode remover se quiser manter dados)
     try {
       indexedDB.deleteDatabase('revisaflash-db');
     } catch (e) {}
@@ -285,7 +284,7 @@ export async function getDb(): Promise<RxDatabase> {
 }
 
 // ============================================================
-// SINCRONIZAÇÃO COM SUPABASE
+// SINCRONIZAÇÃO COM SUPABASE (CORRIGIDA)
 // ============================================================
 let isSyncing = false;
 
@@ -301,7 +300,28 @@ export async function syncWithSupabase(userId: string) {
     await processPendingOperations();
 
     const database = await getDb();
-    const lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
+
+    // 🔥 VERIFICA SE O BANCO LOCAL ESTÁ VAZIO
+    let hasData = false;
+    const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
+    for (const name of collectionsToCheck) {
+      const collection = database.collections[name];
+      if (collection) {
+        const count = await collection.find({ selector: {} }).exec();
+        if (count.length > 0) {
+          hasData = true;
+          break;
+        }
+      }
+    }
+
+    // Se o banco estiver vazio, força pull completo
+    let lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
+    if (!hasData) {
+      console.log('📭 Banco local vazio – forçando pull completo.');
+      lastSync = '1970-01-01T00:00:00Z';
+    }
+
     const supabaseClient = await getSupabaseWithToken();
 
     const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
@@ -373,7 +393,7 @@ export async function syncWithSupabase(userId: string) {
       }
     }
 
-    // study_sessions – igual ao original
+    // study_sessions
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;

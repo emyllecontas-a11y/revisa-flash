@@ -28,7 +28,6 @@ export default defineConfig({
       '/pdf': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        // NÃO use rewrite aqui! Mantenha o caminho original.
       }
     }
   },
@@ -44,5 +43,9 @@ export default defineConfig({
         assetFileNames: 'assets/[name]-[hash].[ext]',
       },
     },
+  },
+  // 🔥 NOVO: injeta um timestamp único no build
+  define: {
+    __BUILD_TIMESTAMP__: JSON.stringify(Date.now()),
   },
 });

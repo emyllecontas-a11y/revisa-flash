@@ -11,6 +11,31 @@ import type { Rating } from "@/lib/fsrs/types";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { findUserByEmail, findUsersByIds } from "@/services/clerkService";
 
+// ============================================================
+// 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO
+// ============================================================
+function renderFormattedText(text: string): string {
+  if (!text) return '';
+  // Escapa HTML básico para segurança
+  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // **texto** → <strong>texto</strong>
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // *texto* → <em>texto</em> (não confundir com listas)
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Listas: - item → <li>item</li> (simples)
+  html = html.replace(/^-\s(.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  return html;
+}
+
+function FormattedText({ text, className }: { text: string; className?: string }) {
+  const html = renderFormattedText(text);
+  return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 export default function FlashcardsPage() {
   const flashcardContext = useFlashcardContext();
   const { 
@@ -745,13 +770,17 @@ export default function FlashcardsPage() {
               {!virado ? (
                 <div className="space-y-5">
                   <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Pergunta</div>
-                  <p className="font-display text-balance text-xl font-medium leading-snug sm:text-2xl">{currentCard.front}</p>
+                  <p className="font-display text-balance text-xl font-medium leading-snug sm:text-2xl">
+                    <FormattedText text={currentCard.front} />
+                  </p>
                   <p className="text-xs text-foreground/40">Clique para revelar a resposta</p>
                 </div>
               ) : (
                 <div className="space-y-5">
                   <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Resposta</div>
-                  <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">{currentCard.back}</p>
+                  <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">
+                    <FormattedText text={currentCard.back} />
+                  </p>
                 </div>
               )}
             </button>
@@ -1034,8 +1063,12 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
                         {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
                       </div>
-                      <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">{card.front}</p>
-                      <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">{card.back}</p>
+                      <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">
+                        <FormattedText text={card.front} />
+                      </p>
+                      <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">
+                        <FormattedText text={card.back} />
+                      </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
