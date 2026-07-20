@@ -94,14 +94,19 @@ export const syncWithRetry = async (fn: () => Promise<any>, retries = 3, delay =
 // 🔄 GERENCIAMENTO DE REVISÕES DE TÓPICOS
 // ============================================================
 
+/**
+ * Gerencia as revisões de um tópico.
+ * Agora aceita uma data base (dataBase) para usar como referência para os cálculos de datas futuras.
+ */
 export const gerenciarRevisao = (
   topicoId: string,
   topicoNome: string,
   disciplinaNome: string,
   novoStatus: string,
-  revisoesExistentes: any[]
+  revisoesExistentes: any[],
+  dataBase?: Date // 🔥 NOVO: data base para cálculos (se não fornecida, usa hoje)
 ): any[] => {
-  console.log('🔄 Gerenciando revisão:', { topicoId, topicoNome, novoStatus });
+  console.log('🔄 Gerenciando revisão:', { topicoId, topicoNome, novoStatus, dataBase });
 
   const niveis = [
     { nivel: 1, dias: 1, label: '1 dia' },
@@ -111,14 +116,18 @@ export const gerenciarRevisao = (
     { nivel: 5, dias: 60, label: '60 dias' }
   ];
 
+  // Define a data de referência: usa a fornecida ou hoje
+  const dataReferencia = dataBase || new Date();
+  const now = dataReferencia.toISOString();
+
   // Se for "dominado", marcar todas como concluídas
   if (novoStatus === 'dominado') {
     return revisoesExistentes.map((r: any) => ({
       ...r,
       reviewLevel: r.reviewLevel || 5,
       nextReviewDate: null,
-      completedAt: new Date().toISOString(),
-      lastStudyDate: new Date().toISOString()
+      completedAt: now,
+      lastStudyDate: now
     }));
   }
 
@@ -126,7 +135,7 @@ export const gerenciarRevisao = (
   if (novoStatus === 'estudando') {
     const existeNivel1 = revisoesExistentes.some((r: any) => r.reviewLevel === 1);
     if (!existeNivel1) {
-      const nextDate = new Date();
+      const nextDate = new Date(dataReferencia);
       nextDate.setDate(nextDate.getDate() + 1);
       const novaRevisao = {
         id: uid(),
@@ -135,8 +144,8 @@ export const gerenciarRevisao = (
         disciplina: disciplinaNome,
         reviewLevel: 1,
         nextReviewDate: nextDate.toISOString(),
-        createdAt: new Date().toISOString(),
-        lastStudyDate: new Date().toISOString(),
+        createdAt: now,
+        lastStudyDate: now,
         completedAt: null
       };
       console.log('✅ Revisão CRIADA para 1 dia (estudando):', topicoNome);
@@ -148,9 +157,8 @@ export const gerenciarRevisao = (
 
   // 🔥 Se for "revisado": criar TODAS as 5 revisões (substituindo as existentes)
   if (novoStatus === 'revisado') {
-    const now = new Date();
     const novasRevisoes = niveis.map((nivel) => {
-      const nextDate = new Date(now);
+      const nextDate = new Date(dataReferencia);
       nextDate.setDate(nextDate.getDate() + nivel.dias);
       return {
         id: uid(),
@@ -159,12 +167,12 @@ export const gerenciarRevisao = (
         disciplina: disciplinaNome,
         reviewLevel: nivel.nivel,
         nextReviewDate: nextDate.toISOString(),
-        createdAt: new Date().toISOString(),
-        lastStudyDate: new Date().toISOString(),
+        createdAt: now,
+        lastStudyDate: now,
         completedAt: null
       };
     });
-    console.log(`✅ ${novasRevisoes.length} revisões criadas para "${topicoNome}" (níveis 1 a 5)`);
+    console.log(`✅ ${novasRevisoes.length} revisões criadas para "${topicoNome}" (níveis 1 a 5) a partir de ${dataReferencia.toISOString()}`);
     return novasRevisoes; // 🔥 Substitui todas as existentes
   }
 

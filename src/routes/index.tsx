@@ -46,6 +46,8 @@ export default function DashboardPage() {
   const [diasAteProva, setDiasAteProva] = useState(0);
   const [loading, setLoading] = useState(true);
   const [proximasRevisoes, setProximasRevisoes] = useState<ProximaRevisao[]>([]);
+  // 🔥 NOVO ESTADO PARA REVISÕES ATRASADAS
+  const [revisoesAtrasadas, setRevisoesAtrasadas] = useState<ProximaRevisao[]>([]);
 
   const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
   const [provaData, setProvaData] = useState<Date | null>(null);
@@ -185,6 +187,9 @@ export default function DashboardPage() {
 
         setTotalErros(getTotalErrors());
 
+        // ============================================================
+        // 🔥 CARREGAR REVISÕES – COM SEPARAÇÃO DE ATRASADAS E FUTURAS
+        // ============================================================
         try {
           const db = await getDb();
           const hojeStr = new Date().toISOString().split('T')[0];
@@ -193,29 +198,51 @@ export default function DashboardPage() {
           }).exec();
           const revisoes = revisoesResult.map((doc: any) => doc.toJSON());
 
-          const proximas = revisoes
-            .filter(r => {
-              if (!r.nextReviewDate || r.completedAt) return false;
-              const date = new Date(r.nextReviewDate);
-              const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-              return dateStr > hojeStr;
-            })
-            .sort((a, b) => new Date(a.nextReviewDate).getTime() - new Date(b.nextReviewDate).getTime())
-            .slice(0, 5)
-            .map(r => {
-              const date = new Date(r.nextReviewDate);
-              const diffDias = Math.ceil((date.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-              const quando = diffDias === 1 ? 'Amanhã' : `Em ${diffDias} dias`;
-              return {
-                id: r.id,
-                area: r.discipline || r.disciplina || 'Disciplina',
-                topico: r.topicName || r.topico_nome || 'Tópico',
-                quando,
-                cards: 1,
-                date: date
-              };
-            });
-          setProximasRevisoes(proximas);
+          const atrasadas: ProximaRevisao[] = [];
+          const futuras: ProximaRevisao[] = [];
+
+          revisoes.forEach(r => {
+            if (!r.nextReviewDate || r.completedAt) return;
+            const date = new Date(r.nextReviewDate);
+            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            
+            const diffDias = Math.ceil((date.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+            let quando: string;
+            if (diffDias < 0) {
+              quando = `${Math.abs(diffDias)} dia${Math.abs(diffDias) > 1 ? 's' : ''} atrasado`;
+            } else if (diffDias === 0) {
+              quando = 'Hoje';
+            } else if (diffDias === 1) {
+              quando = 'Amanhã';
+            } else {
+              quando = `Em ${diffDias} dias`;
+            }
+
+            const item: ProximaRevisao = {
+              id: r.id,
+              area: r.discipline || r.disciplina || 'Disciplina',
+              topico: r.topicName || r.topico_nome || 'Tópico',
+              quando,
+              cards: 1,
+              date: date
+            };
+
+            if (dateStr < hojeStr) {
+              atrasadas.push(item);
+            } else if (dateStr > hojeStr) {
+              futuras.push(item);
+            }
+            // Revisões com dateStr === hojeStr não entram em nenhuma lista (já são hoje)
+          });
+
+          // Ordena atrasadas: da mais antiga para a mais recente
+          atrasadas.sort((a, b) => a.date.getTime() - b.date.getTime());
+          // Ordena futuras: da mais próxima para a mais distante
+          futuras.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+          setRevisoesAtrasadas(atrasadas);
+          setProximasRevisoes(futuras.slice(0, 5)); // limita a 5
+
         } catch (error) {
           console.error('Erro ao carregar próximas revisões:', error);
         }
@@ -367,6 +394,22 @@ export default function DashboardPage() {
         Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
         e <span className="font-medium text-accent">{diasAteProva} dias</span> até a <span className="font-medium text-foreground">{provaNome}</span>.
       </p>
+
+      {/* 🔥 ALERTA DE REVISÕES ATRASADAS */}
+      {revisoesAtrasadas.length > 0 && (
+        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold text-red-400">
+              Você tem {revisoesAtrasadas.length} revisão{revisoesAtrasadas.length > 1 ? 'ões' : ''} atrasada{revisoesAtrasadas.length > 1 ? 's' : ''}!
+            </p>
+            <p className="text-sm text-red-300/80">
+              A mais antiga está atrasada há {Math.ceil((new Date().getTime() - revisoesAtrasadas[0].date.getTime()) / (1000 * 60 * 60 * 24))} dias.
+              Acesse o <Link to="/calendario" className="font-medium text-red-400 underline hover:text-red-300">calendário</Link> para concluí-las.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 🔥 BOTÃO DE SINCORNIZAÇÃO */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -570,6 +613,29 @@ export default function DashboardPage() {
             <p className="text-sm text-foreground/40 text-center py-4">Nenhuma revisão futura agendada.</p>
           )}
         </section>
+
+        {/* 🔥 SEÇÃO DE REVISÕES ATRASADAS (OPCIONAL) */}
+        {revisoesAtrasadas.length > 0 && (
+          <section className="col-span-12 rf-card p-5 border-red-500/20 bg-red-500/5">
+            <h3 className="font-display text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Revisões atrasadas ({revisoesAtrasadas.length})
+            </h3>
+            <ul className="space-y-2">
+              {revisoesAtrasadas.slice(0, 5).map((r) => (
+                <li key={r.id} className="flex items-center justify-between text-sm border-b border-red-500/10 pb-2 last:border-0 last:pb-0">
+                  <span className="text-foreground/80">{r.area} – {r.topico}</span>
+                  <span className="text-red-400/80 text-xs font-medium">{r.quando}</span>
+                </li>
+              ))}
+              {revisoesAtrasadas.length > 5 && (
+                <li className="text-xs text-red-400/60 text-center pt-1">
+                  + {revisoesAtrasadas.length - 5} outras revisões atrasadas
+                </li>
+              )}
+            </ul>
+          </section>
+        )}
       </div>
     </AppShell>
   );

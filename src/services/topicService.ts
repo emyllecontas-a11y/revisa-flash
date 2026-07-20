@@ -7,15 +7,15 @@ import { enqueueOperation } from './queueService';
 
 /**
  * Atualiza o status de um tópico e gerencia as revisões (DSM-30)
- * Agora tenta sincronizar diretamente com Supabase primeiro (push direto),
- * e só enfileira se falhar (offline).
+ * Agora aceita studyDate para calcular as revisões a partir da data informada.
  */
 export async function updateTopicStatusAndRevisions(
   topicId: string,
   newStatus: string,
-  userId: string
+  userId: string,
+  studyDate?: string // 🔥 NOVO: data do estudo (formato YYYY-MM-DD ou ISO)
 ) {
-  console.log('🔍 [topicService] Iniciando com:', { topicId, newStatus, userId });
+  console.log('🔍 [topicService] Iniciando com:', { topicId, newStatus, userId, studyDate });
 
   if (!topicId || !userId) {
     console.error('❌ [topicService] Parâmetros inválidos');
@@ -35,7 +35,10 @@ export async function updateTopicStatusAndRevisions(
     const topicoData = doc.toJSON();
     console.log('📄 [topicService] Tópico encontrado:', topicoData);
 
-    const now = new Date().toISOString();
+    // 🔥 Define a data base: se studyDate for fornecido, usa ela; senão, usa hoje
+    const baseDate = studyDate ? new Date(studyDate) : new Date();
+    const now = baseDate.toISOString();
+    console.log(`📅 [topicService] Data base para revisões: ${now}`);
 
     // 2. ATUALIZAR STATUS NO RxDB (SEMPRE)
     await doc.patch({
@@ -61,13 +64,14 @@ export async function updateTopicStatusAndRevisions(
       existingRevisoes = [];
     }
 
-    // Aplicar lógica DSM-30 (sempre local)
+    // 🔥 Passa a data base para o gerenciador
     const novasRevisoes = gerenciarRevisao(
       topicId,
       topicoData.name,
       disciplinaName,
       newStatus,
-      existingRevisoes
+      existingRevisoes,
+      baseDate // <-- data base para cálculos
     );
 
     // Remover revisões antigas que não estão mais na lista (local)
@@ -89,7 +93,7 @@ export async function updateTopicStatusAndRevisions(
       const topicNameFinal = rev.topicoNome || topicoData.name;
       const disciplineFinal = rev.disciplina || disciplinaName;
       const reviewLevelFinal = rev.reviewLevel || 1;
-      const nextReviewDateFinal = rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString();
+      const nextReviewDateFinal = rev.nextReviewDate || new Date(baseDate.getTime() + 86400000).toISOString();
       const lastStudyDateFinal = rev.lastStudyDate || now;
 
       const existingDoc = existingDocs.find((d: any) => d.id === rev.id);
@@ -146,7 +150,7 @@ export async function updateTopicStatusAndRevisions(
           topicName: rev.topicoNome || topicoData.name,
           discipline: rev.disciplina || disciplinaName,
           review_level: rev.reviewLevel || 1,
-          nextReviewDate: rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString(),
+          nextReviewDate: rev.nextReviewDate || new Date(baseDate.getTime() + 86400000).toISOString(),
           lastStudyDate: rev.lastStudyDate || now,
           completedAt: rev.completedAt || null,
           createdAt: rev.createdAt || now,
@@ -203,7 +207,7 @@ export async function updateTopicStatusAndRevisions(
             topicName: rev.topicoNome || topicoData.name,
             discipline: rev.disciplina || disciplinaName,
             review_level: rev.reviewLevel || 1,
-            nextReviewDate: rev.nextReviewDate || new Date(Date.now() + 86400000).toISOString(),
+            nextReviewDate: rev.nextReviewDate || new Date(baseDate.getTime() + 86400000).toISOString(),
             lastStudyDate: rev.lastStudyDate || now,
             completedAt: rev.completedAt || null,
             createdAt: rev.createdAt || now,

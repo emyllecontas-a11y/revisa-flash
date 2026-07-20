@@ -471,7 +471,7 @@ export default function CalendarioPage() {
         if (newStatus !== currentStatus) {
           try {
             console.log(`🔄 Atualizando status do tópico para "${newStatus}" (apenas teoria)...`);
-            await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId);
+            await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId, formData.date);
             await loadContentData();
             console.log('✅ Status do tópico e revisões atualizados.');
           } catch (error) {
