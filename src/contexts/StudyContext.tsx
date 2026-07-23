@@ -6,6 +6,7 @@ import { getDb } from '@/lib/db';
 import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { CAMPOS, TIPOS_ESTUDO } from '@/constants';
 import { enqueueOperation } from '@/services/queueService';
+import { updateTopicStatusAndRevisions } from '@/services/topicService'; // 🔥 IMPORTADO
 
 export type StudyType = 'teorico' | 'pratico';
 
@@ -217,7 +218,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   // ============================================================
-  // EXCLUIR REGISTRO (SOFT DELETE com isDeleted: true)
+  // EXCLUIR REGISTRO (SOFT DELETE + RECALCULAR REVISÕES)
   // ============================================================
   const deleteRecord = useCallback(async (id: string) => {
     console.log('🔍 [StudyContext] Tentando excluir registro com id:', id);
@@ -228,22 +229,29 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     try {
       const db = await getDb();
+
+      // 🔥 1. Buscar o registro ANTES de deletar (para saber o tópico e tipo)
       const doc = await db.study_records.findOne({ selector: { id } }).exec();
       if (!doc) {
         console.warn('⚠️ [StudyContext] Registro não encontrado no RxDB:', id);
         return;
       }
 
-      const now = new Date().toISOString();
+      const record = doc.toJSON() as StudyRecord;
+      const { topic, type, date } = record;
 
+      // 🔥 2. Marcar o registro como deletado
+      const now = new Date().toISOString();
       await doc.patch({
         isDeleted: true,
         updated_at: now,
       });
       
+      // Atualiza o estado local (remove da lista)
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ [StudyContext] Registro marcado como deletado localmente.');
 
+      // Tenta sincronizar soft delete com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
@@ -257,7 +265,61 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         await enqueueOperation('update', 'study_records', { id, isDeleted: true, updated_at: now });
       }
 
-      console.log('✅ [StudyContext] Registro excluído com sucesso (soft delete)');
+      // 🔥 3. SE FOR REGISTRO TEÓRICO, recalcular revisões
+      if (type === 'teorico') {
+        console.log(`🔄 [StudyContext] Recalculando revisões para o tópico "${topic}" (registro teórico excluído).`);
+
+        // Buscar todos os registros restantes (não deletados) para este tópico
+        const remainingDocs = await db.study_records.find({
+          selector: {
+            user_id: userId,
+            topic: topic,
+            isDeleted: { $ne: true }
+          }
+        }).exec();
+        const remainingRecords = remainingDocs.map((d: any) => d.toJSON() as StudyRecord);
+
+        console.log(`📊 [StudyContext] ${remainingRecords.length} registros restantes para o tópico "${topic}".`);
+
+        // Determinar o novo status do tópico
+        let newStatus: string;
+        let studyDate: string | undefined;
+
+        if (remainingRecords.length === 0) {
+          // Nenhum registro restante -> status "nao_estudado"
+          newStatus = 'nao_estudado';
+          studyDate = undefined; // não há data para usar
+          console.log(`ℹ️ [StudyContext] Nenhum registro restante. Status será "nao_estudado".`);
+        } else {
+          // Há pelo menos um registro -> status "estudando" (pois há estudo)
+          newStatus = 'estudando';
+          // Usa a data do registro mais recente como data base (opcional)
+          const sorted = remainingRecords.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          studyDate = sorted[0]?.date; // pega a data do mais recente
+          console.log(`ℹ️ [StudyContext] ${remainingRecords.length} registros restantes. Status será "estudando". Data base: ${studyDate || 'hoje'}`);
+        }
+
+        // 🔥 4. Buscar o ID do tópico (precisamos do `topico_id` para chamar updateTopicStatusAndRevisions)
+        // O tópico é identificado pelo nome. Precisamos encontrar o ID correspondente.
+        const topicDoc = await db.topics.findOne({
+          selector: { user_id: userId, name: topic, isDeleted: { $ne: true } }
+        }).exec();
+
+        if (!topicDoc) {
+          console.warn(`⚠️ [StudyContext] Tópico "${topic}" não encontrado. Não foi possível recalcular revisões.`);
+        } else {
+          const topicData = topicDoc.toJSON();
+          const topicId = topicData.id;
+
+          // 🔥 5. Chamar a função que atualiza status e revisões, passando a data base (se houver)
+          await updateTopicStatusAndRevisions(topicId, newStatus, userId, studyDate);
+          console.log(`✅ [StudyContext] Revisões recalculadas para o tópico "${topic}" com status "${newStatus}".`);
+        }
+      } else {
+        console.log(`ℹ️ [StudyContext] Registro prático excluído. Nenhuma revisão foi afetada.`);
+      }
+
+      console.log('✅ [StudyContext] Exclusão concluída com sucesso.');
 
     } catch (error) {
       console.error('❌ [StudyContext] Erro ao excluir registro:', error);
