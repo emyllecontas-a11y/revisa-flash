@@ -219,7 +219,7 @@ const pendingOperationSchema = {
 };
 
 // ============================================================
-// 🔥 NOVO SCHEMA: user_settings
+// 🔥 SCHEMA: user_settings
 // ============================================================
 const userSettingsSchema = {
   title: 'user_settings schema',
@@ -287,7 +287,6 @@ export async function getDb(): Promise<RxDatabase> {
       ignoreDuplicate: true
     });
 
-    // 🔥 ADICIONANDO user_settings ÀS COLEÇÕES
     await db.addCollections({
       decks: { schema: deckSchema },
       flashcards: { schema: flashcardSchema },
@@ -299,7 +298,7 @@ export async function getDb(): Promise<RxDatabase> {
       study_sessions: { schema: studySessionSchema },
       areas: { schema: areaSchema },
       pending_operations: { schema: pendingOperationSchema },
-      user_settings: { schema: userSettingsSchema }  // <-- NOVA COLEÇÃO
+      user_settings: { schema: userSettingsSchema }
     });
 
     console.log('✅ Banco local criado com sucesso.');
@@ -354,7 +353,6 @@ export async function syncWithSupabase(userId: string) {
 
     const supabaseClient = await getSupabaseWithToken();
 
-    // 🔥 ADICIONANDO user_settings À LISTA DE COLEÇÕES A SINCRONIZAR
     const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
 
     for (const name of collections) {
@@ -370,7 +368,6 @@ export async function syncWithSupabase(userId: string) {
           .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
           .gte('updated_at', lastSync);
       } else if (name === 'user_settings') {
-        // user_settings é específica do usuário
         query = supabaseClient
           .from(name)
           .select('*')
@@ -501,8 +498,10 @@ export async function syncWithSupabase(userId: string) {
       console.error('❌ Erro na sincronização de study_sessions:', err);
     }
 
-    localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
-    console.log('✅ Sincronização concluída.');
+    // 🔥 ATUALIZAR TIMESTAMP DE ÚLTIMA SINCRONIZAÇÃO
+    const now = new Date().toISOString();
+    localStorage.setItem('lastSyncTimestamp', now);
+    console.log('✅ Sincronização concluída em:', now);
 
   } catch (err) {
     console.error('❌ Erro na sincronização:', err);
