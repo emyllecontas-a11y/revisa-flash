@@ -134,7 +134,7 @@ interface FlashcardContextType {
   getHardestCardsToday: (limit?: number) => Card[];
   calculatePriority: (card: Card) => number;
   getIsLeech: (card: Card) => boolean;
-  refreshUserSettings: () => Promise<void>; // <-- NOVO
+  refreshUserSettings: () => Promise<void>;
   dailyLimit: number;
   settings: UserSettings | null;
 }
@@ -359,6 +359,20 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [loadLocalData]);
 
   // ============================================================
+  // 🔥 RECARREGAR CONFIGURAÇÕES (DEFINIR ANTES DE refreshFlashcards)
+  // ============================================================
+  const refreshUserSettings = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const db = await getDb();
+      await loadUserSettings(db, userId);
+      console.log('✅ Configurações recarregadas');
+    } catch (error) {
+      console.error('❌ Erro ao recarregar configurações:', error);
+    }
+  }, [userId, loadUserSettings]);
+
+  // ============================================================
   // 🔥 REFRESH (recarrega dados E configurações)
   // ============================================================
   const refreshFlashcards = useCallback(() => {
@@ -372,20 +386,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
     reload();
   }, [userId, loadLocalData, refreshUserSettings]);
-
-  // ============================================================
-  // 🔥 RECARREGAR CONFIGURAÇÕES (expor para uso externo)
-  // ============================================================
-  const refreshUserSettings = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const db = await getDb();
-      await loadUserSettings(db, userId);
-      console.log('✅ Configurações recarregadas');
-    } catch (error) {
-      console.error('❌ Erro ao recarregar configurações:', error);
-    }
-  }, [userId, loadUserSettings]);
 
   // ============================================================
   // 🔥 OBSERVADOR RxDB PARA user_settings (detecta mudanças locais)
@@ -474,7 +474,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         const supabaseClient = await getSupabaseWithToken();
         await supabaseClient.from('user_settings').insert(newSettings);
       } catch (e) { /* offline */ }
-      // 🔥 Recarregar para garantir consistência
       await refreshUserSettings();
       return;
     }
@@ -495,7 +494,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       await enqueueOperation('update', 'user_settings', { id: doc.id, ...updatedData });
     }
 
-    // 🔥 Forçar recarga após salvar
     await refreshUserSettings();
   }, [userId, refreshUserSettings]);
 

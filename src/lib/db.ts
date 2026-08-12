@@ -2,7 +2,7 @@
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
-import { processPendingOperations } from '@/services/queueService';
+// ⚠️ REMOVIDO: import { processPendingOperations } from '@/services/queueService';
 
 const deckSchema = {
   title: 'deck schema',
@@ -313,6 +313,8 @@ export async function syncWithSupabase(userId: string) {
   isSyncing = true;
 
   try {
+    // 🔥 Importação dinâmica para evitar dependência circular
+    const { processPendingOperations } = await import('@/services/queueService');
     console.log('📦 Processando operações pendentes...');
     await processPendingOperations();
 
