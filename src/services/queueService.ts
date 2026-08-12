@@ -1,6 +1,7 @@
-import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
+// src/services/queueService.ts
+import { getDb } from '@/lib/db';
+import { getSupabaseWithToken } from '@/lib/supabaseClient';
 import { uid } from '@/utils/helpers';
-import type { RxDatabase } from 'rxdb';
 
 export type OperationType = 'create' | 'update' | 'delete';
 
@@ -15,17 +16,18 @@ export interface PendingOperation {
 }
 
 /**
- * Adiciona uma operação à fila de pendências (recebe a instância do db)
+ * Adiciona uma operação à fila de pendências
  */
 export async function addPendingOperation(
-  db: RxDatabase,
   type: OperationType,
   collection: string,
   data: any
 ): Promise<void> {
   try {
+    const db = await getDb();
+
     if (!db.collections || !db.collections.pending_operations) {
-      console.warn('⚠️ Coleção pending_operations não encontrada.');
+      console.warn('⚠️ Coleção pending_operations não encontrada. A fila offline não está disponível.');
       return;
     }
 
@@ -46,14 +48,17 @@ export async function addPendingOperation(
     console.log(`📦 Operação adicionada à fila: ${type} em ${collection}`);
   } catch (error) {
     console.error('❌ Erro ao adicionar operação à fila:', error);
+    // Não relança o erro para não quebrar o fluxo principal
   }
 }
 
 /**
- * Processa todas as operações pendentes (recebe a instância do db)
+ * Processa todas as operações pendentes (envia para o Supabase)
  */
-export async function processPendingOperations(db: RxDatabase): Promise<void> {
+export async function processPendingOperations(): Promise<void> {
   try {
+    const db = await getDb();
+
     if (!db.collections || !db.collections.pending_operations) {
       console.log('📭 Coleção pending_operations não encontrada.');
       return;
@@ -123,5 +128,43 @@ export async function processPendingOperations(db: RxDatabase): Promise<void> {
   }
 }
 
-// Exporta alias para compatibilidade
-export const enqueueOperation = addPendingOperation;
+/**
+ * Configura um listener para processar a fila quando houver alterações
+ */
+export function setupQueueListener(): void {
+  const handleOnline = () => {
+    console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
+    processPendingOperations().catch(console.error);
+  };
+
+  const setupChangeListener = async () => {
+    try {
+      const db = await getDb();
+      if (!db.collections || !db.collections.pending_operations) {
+        console.warn('⚠️ Coleção pending_operations não encontrada para listener.');
+        return;
+      }
+
+      db.pending_operations.$.subscribe(() => {
+        console.log('🔄 Mudança detectada na fila, processando...');
+        processPendingOperations().catch(console.error);
+      });
+    } catch (error) {
+      console.warn('⚠️ Erro ao configurar listener da fila:', error);
+    }
+  };
+
+  window.addEventListener('online', handleOnline);
+  setupChangeListener();
+
+  window.addEventListener('beforeunload', () => {
+    window.removeEventListener('online', handleOnline);
+  });
+
+  console.log('✅ Listener da fila configurado.');
+}
+
+// ============================================================
+// 🔥 EXPORTAÇÕES EXPLÍCITAS
+// ============================================================
+export { addPendingOperation as enqueueOperation };
