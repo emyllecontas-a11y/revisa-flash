@@ -18,14 +18,14 @@ export interface PendingOperation {
 /**
  * Adiciona uma operação à fila de pendências
  */
-export async function addPendingOperation(
+export async function enqueueOperation(
   type: OperationType,
   collection: string,
   data: any
 ): Promise<void> {
   try {
     const db = await getDb();
-
+    
     if (!db.collections || !db.collections.pending_operations) {
       console.warn('⚠️ Coleção pending_operations não encontrada. A fila offline não está disponível.');
       return;
@@ -48,7 +48,6 @@ export async function addPendingOperation(
     console.log(`📦 Operação adicionada à fila: ${type} em ${collection}`);
   } catch (error) {
     console.error('❌ Erro ao adicionar operação à fila:', error);
-    // Não relança o erro para não quebrar o fluxo principal
   }
 }
 
@@ -58,7 +57,7 @@ export async function addPendingOperation(
 export async function processPendingOperations(): Promise<void> {
   try {
     const db = await getDb();
-
+    
     if (!db.collections || !db.collections.pending_operations) {
       console.log('📭 Coleção pending_operations não encontrada.');
       return;
@@ -163,8 +162,3 @@ export function setupQueueListener(): void {
 
   console.log('✅ Listener da fila configurado.');
 }
-
-// ============================================================
-// 🔥 EXPORTAÇÕES EXPLÍCITAS
-// ============================================================
-export { addPendingOperation as enqueueOperation };

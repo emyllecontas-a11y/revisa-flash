@@ -13,7 +13,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider, useAppUser } from './contexts/UserContext';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
-import { setupQueueListener, processPendingOperations } from '@/services/queueService';
+import { processPendingOperations } from '@/services/queueService'; // mantido estático
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
 import { addRxPlugin } from 'rxdb';
@@ -27,7 +27,7 @@ addRxPlugin(RxDBUpdatePlugin);
 declare const __BUILD_TIMESTAMP__: string;
 
 // 🔥 VERSÃO DO SCHEMA – INCREMENTE SEMPRE QUE MUDAR A ESTRUTURA DO BANCO
-const SCHEMA_VERSION = '3'; // Ex: '2' quando adicionar campos, '3' para nova coleção, etc.
+const SCHEMA_VERSION = '3';
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -102,15 +102,11 @@ function Root() {
           } catch (destroyError) {
             console.warn('⚠️ Erro ao destruir banco (pode já estar fechado):', destroyError);
           }
-          // Remove a versão antiga do localStorage
           localStorage.removeItem('revisaflash_schema_version');
-          // Recria o banco (getDb cria novamente)
           await getDb();
-          // Armazena a nova versão
           localStorage.setItem('revisaflash_schema_version', SCHEMA_VERSION);
           console.log('✅ Banco recriado com nova versão do schema.');
         } else {
-          // Se a versão for a mesma, apenas obtém o banco existente
           await getDb();
         }
 
@@ -133,7 +129,7 @@ function Root() {
     initialize();
   }, [isLoaded, isSignedIn, userId]);
 
-  // 🔥 LISTENER ONLINE
+  // 🔥 LISTENER ONLINE E SETUP DO LISTENER DA FILA (COM IMPORT DINÂMICO)
   useEffect(() => {
     const handleOnline = () => {
       console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
@@ -143,7 +139,14 @@ function Root() {
       }
     };
     window.addEventListener('online', handleOnline);
-    setupQueueListener();
+
+    // 🔥 Importação dinâmica para evitar dependência circular
+    import('@/services/queueService').then(({ setupQueueListener }) => {
+      setupQueueListener();
+    }).catch(err => {
+      console.warn('⚠️ Falha ao carregar setupQueueListener:', err);
+    });
+
     return () => {
       window.removeEventListener('online', handleOnline);
     };

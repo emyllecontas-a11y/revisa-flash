@@ -1,11 +1,8 @@
+// src/lib/db.ts
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
-import { uid } from '@/utils/helpers';
-
-// ============================================================
-// SCHEMAS (com isDeleted booleano, version: 0)
-// ============================================================
+import { processPendingOperations } from '@/services/queueService';
 
 const deckSchema = {
   title: 'deck schema',
@@ -218,9 +215,6 @@ const pendingOperationSchema = {
   required: ['id', 'type', 'collection', 'data', 'timestamp']
 };
 
-// ============================================================
-// SCHEMA USER_SETTINGS
-// ============================================================
 const userSettingsSchema = {
   title: 'user_settings schema',
   version: 0,
@@ -247,9 +241,6 @@ const userSettingsSchema = {
   required: ['id', 'user_id']
 };
 
-// ============================================================
-// GERENCIADOR DO BANCO (getDb)
-// ============================================================
 let dbInstance: RxDatabase | null = null;
 let isCreating = false;
 
@@ -312,19 +303,9 @@ export async function getDb(): Promise<RxDatabase> {
   }
 }
 
-// ============================================================
-// FUNÇÃO DE SINCRONIZAÇÃO (sem dependência circular)
-// ============================================================
 let isSyncing = false;
 
-/**
- * Sincroniza com Supabase - a função `processPendingOperations`
- * é passada como callback para evitar dependência circular.
- */
-export async function syncWithSupabase(
-  userId: string,
-  processPendingOps?: () => Promise<void>
-) {
+export async function syncWithSupabase(userId: string) {
   if (isSyncing) {
     console.log('⏳ Sincronização já em andamento.');
     return;
@@ -332,17 +313,11 @@ export async function syncWithSupabase(
   isSyncing = true;
 
   try {
-    // 🔥 Processa operações pendentes primeiro (se a função foi fornecida)
-    if (processPendingOps) {
-      console.log('📦 Processando operações pendentes...');
-      await processPendingOps();
-    } else {
-      console.log('ℹ️ Nenhuma função de processamento de pendências fornecida. Pulando.');
-    }
+    console.log('📦 Processando operações pendentes...');
+    await processPendingOperations();
 
     const database = await getDb();
 
-    // Verifica se o banco está vazio
     let hasData = false;
     const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
     for (const name of collectionsToCheck) {
@@ -370,7 +345,6 @@ export async function syncWithSupabase(
       const collection = database.collections[name];
       if (!collection) continue;
 
-      // 1. PULL
       let query;
       if (name === 'decks') {
         query = supabaseClient
@@ -417,7 +391,6 @@ export async function syncWithSupabase(
         console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
-      // 2. PUSH
       const localDocs = await collection.find({
         selector: {
           user_id: userId,
@@ -439,7 +412,7 @@ export async function syncWithSupabase(
       }
     }
 
-    // study_sessions (mantido)
+    // study_sessions
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
