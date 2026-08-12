@@ -4,28 +4,40 @@ import {
   Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
   Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
   User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
-  Camera, HelpCircle, Save, Loader2
+  Camera, HelpCircle, Save, Loader2, Settings, Zap, TrendingUp, AlertTriangle
 } from "lucide-react";
 import { useAppUser } from "@/contexts/UserContext";
-import { useClerk } from "@clerk/clerk-react"; // <-- Importando Clerk
+import { useClerk } from "@clerk/clerk-react";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
 
+// 🔥 Importar o FlashcardContext
+import { useFlashcardContext } from "@/contexts/FlashcardContext";
+
 export default function ConfigPage() {
   // ============================================================
-  // ESTADOS DO TEMA (persistido no localStorage)
+  // ESTADOS DO TEMA
   // ============================================================
   const [tema, setTema] = useState<"escuro" | "claro" | "sistema">("escuro");
 
   // ============================================================
-  // USANDO NOSSO CONTEXTO (em vez de Clerk)
+  // CONTEXTO DO USUÁRIO
   // ============================================================
   const { user, isLoaded } = useAppUser();
-  const { signOut } = useClerk(); // <-- Obtendo a função signOut
+  const { signOut } = useClerk();
+
+  // 🔥 CONTEXTO DOS FLASHCARDS (para configurações)
+  const {
+    getUserSettings,
+    updateUserSettings,
+    settings: contextSettings,
+    dailyLimit,
+    loading: contextLoading
+  } = useFlashcardContext();
 
   // ============================================================
-  // ESTADOS FUNCIONAIS
+  // ESTADOS FUNCIONAIS (originais)
   // ============================================================
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("");
@@ -35,12 +47,12 @@ export default function ConfigPage() {
   const [mensagemTipo, setMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
   const [uploading, setUploading] = useState(false);
   
-  // 🔥 NOVOS ESTADOS PARA PLANO DE ESTUDOS
+  // Plano de estudos (originais)
   const [provaNome, setProvaNome] = useState<string>("ENARE Odontologia 2026");
   const [provaData, setProvaData] = useState<string>("2026-09-13");
   const [salvandoProva, setSalvandoProva] = useState(false);
   
-  // 🔥 ESTADO PARA EXCLUIR CONTA
+  // Excluir conta
   const [deletandoConta, setDeletandoConta] = useState(false);
 
   // Importar Anki
@@ -56,7 +68,25 @@ export default function ConfigPage() {
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   // ============================================================
-  // CARREGAR USUÁRIO E PERFIL DO SUPABASE (usando o contexto)
+  // 🔥 NOVOS ESTADOS PARA CONFIGURAÇÕES DE FLASHCARDS
+  // ============================================================
+  const [flashcardSettings, setFlashcardSettings] = useState({
+    daily_limit: 100,
+    new_cards_per_day: 20,
+    max_reviews_per_day: 200,
+    leech_threshold: 5,
+    show_new_first: false,
+    learning_steps: [1, 10],
+    graduating_interval: 1,
+    easy_interval: 4,
+    relearning_steps: [10],
+    day_start: 4,
+    show_next_review_time: false,
+  });
+  const [salvandoFlashcards, setSalvandoFlashcards] = useState(false);
+
+  // ============================================================
+  // CARREGAR USUÁRIO E PERFIL (ORIGINAL)
   // ============================================================
   useEffect(() => {
     const loadUser = async () => {
@@ -73,7 +103,6 @@ export default function ConfigPage() {
         setUserEmail(user?.emailAddresses?.[0]?.emailAddress || '');
         setUserName(user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário');
 
-        // Tenta carregar do Supabase, mas se falhar (offline), usa os dados do contexto
         try {
           const supabaseClient = await getSupabaseWithToken();
           const { data: profile, error } = await supabaseClient
@@ -99,7 +128,6 @@ export default function ConfigPage() {
             if (profile.prova_data) setProvaData(profile.prova_data);
           }
         } catch (offlineError) {
-          // Se falhar (offline), mantém os dados do contexto
           console.warn('Offline: usando dados do localStorage para perfil');
         }
       } catch (e) {
@@ -109,7 +137,36 @@ export default function ConfigPage() {
     loadUser();
   }, [user, isLoaded]);
 
-  // Aplicar tema ao carregar (do localStorage)
+  // 🔥 CARREGAR CONFIGURAÇÕES DE FLASHCARDS
+  useEffect(() => {
+    const loadFlashcardSettings = async () => {
+      try {
+        const settings = await getUserSettings();
+        setFlashcardSettings({
+          daily_limit: settings.daily_limit,
+          new_cards_per_day: settings.new_cards_per_day,
+          max_reviews_per_day: settings.max_reviews_per_day,
+          leech_threshold: settings.leech_threshold,
+          show_new_first: settings.show_new_first,
+          learning_steps: settings.learning_steps || [1, 10],
+          graduating_interval: settings.graduating_interval,
+          easy_interval: settings.easy_interval,
+          relearning_steps: settings.relearning_steps || [10],
+          day_start: settings.day_start,
+          show_next_review_time: settings.show_next_review_time,
+        });
+      } catch (error) {
+        console.warn('Erro ao carregar configurações de flashcards:', error);
+      }
+    };
+    if (userId) {
+      loadFlashcardSettings();
+    }
+  }, [userId, getUserSettings]);
+
+  // ============================================================
+  // TEMA (ORIGINAL)
+  // ============================================================
   useEffect(() => {
     const temaSalvo = localStorage.getItem('tema') as 'escuro' | 'claro' | 'sistema' | null;
     if (temaSalvo) {
@@ -127,9 +184,6 @@ export default function ConfigPage() {
     else if (tema === 'claro') body.classList.add('tema-claro');
   };
 
-  // ============================================================
-  // ATUALIZAR TEMA NO SUPABASE (com fallback offline)
-  // ============================================================
   const handleTemaChange = async (novoTema: 'escuro' | 'claro' | 'sistema') => {
     setTema(novoTema);
     localStorage.setItem('tema', novoTema);
@@ -138,11 +192,10 @@ export default function ConfigPage() {
     if (userId) {
       try {
         const supabaseClient = await getSupabaseWithToken();
-        const { error } = await supabaseClient
+        await supabaseClient
           .from('profiles')
           .upsert({ id: userId, theme: novoTema, updated_at: new Date().toISOString() })
           .select();
-        if (error) console.error('Erro ao salvar tema:', error);
       } catch (error) {
         console.warn('Offline: tema salvo apenas localmente');
       }
@@ -150,7 +203,7 @@ export default function ConfigPage() {
   };
 
   // ============================================================
-  // SALVAR PLANO DE ESTUDOS (com fallback offline)
+  // FUNÇÕES ORIGINAIS (PLANO DE ESTUDOS, AVATAR, NOME, ETC.)
   // ============================================================
   const handleSaveProva = useCallback(async () => {
     if (!userId) {
@@ -183,11 +236,9 @@ export default function ConfigPage() {
       setMensagemTipo('success');
       setTimeout(() => setMensagem(""), 4000);
     } catch (error: any) {
-      // Se falhar (offline), salva localmente e avisa
       console.warn('Offline: plano de estudos salvo apenas localmente');
       setMensagem("✅ Plano salvo localmente (será sincronizado quando online)");
       setMensagemTipo('info');
-      // Salva no localStorage para sincronizar depois
       localStorage.setItem('offline_prova_nome', provaNome);
       localStorage.setItem('offline_prova_data', provaData);
     } finally {
@@ -195,9 +246,6 @@ export default function ConfigPage() {
     }
   }, [userId, provaNome, provaData]);
 
-  // ============================================================
-  // UPLOAD DE FOTO DE PERFIL (ignora offline)
-  // ============================================================
   const handleUploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !userId) {
@@ -263,9 +311,6 @@ export default function ConfigPage() {
     }
   }, [userId]);
 
-  // ============================================================
-  // ATUALIZAR NOME (com fallback offline)
-  // ============================================================
   const handleUpdateName = useCallback(async (nome: string) => {
     if (!userId || !nome.trim()) return;
     try {
@@ -289,7 +334,7 @@ export default function ConfigPage() {
   }, [userId]);
 
   // ============================================================
-  // 📥 IMPORTAR FLASHCARDS DO ANKI (funciona offline)
+  // FUNÇÕES DE IMPORTAÇÃO ANKI E BACKUP (ORIGINAIS)
   // ============================================================
   const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -419,9 +464,6 @@ export default function ConfigPage() {
     }
   }, [userId]);
 
-  // ============================================================
-  // 💾 BACKUP (funciona offline)
-  // ============================================================
   const exportarBackup = useCallback(() => {
     try {
       const backup = {
@@ -487,26 +529,22 @@ export default function ConfigPage() {
   }, []);
 
   // ============================================================
-  // FUNÇÃO DE LOGOUT (CORRIGIDA)
+  // FUNÇÕES DE CONTA (ORIGINAIS)
   // ============================================================
   const handleLogout = useCallback(async () => {
     if (confirm("Deseja realmente sair?")) {
       try {
-        await signOut(); // Encerra a sessão do Clerk
+        await signOut();
         localStorage.removeItem('revisaflash_user_id');
         window.location.href = '/login';
       } catch (error) {
         console.error("Erro ao fazer logout:", error);
-        // Fallback: remove manualmente e redireciona
         localStorage.removeItem('revisaflash_user_id');
         window.location.href = '/login';
       }
     }
   }, [signOut]);
 
-  // ============================================================
-  // 🔥 REABRIR TOUR DE ONBOARDING
-  // ============================================================
   const reabrirTour = useCallback(() => {
     if (!user?.id) {
       setMensagem("⚠️ Usuário não identificado.");
@@ -520,9 +558,6 @@ export default function ConfigPage() {
     }
   }, [user]);
 
-  // ============================================================
-  // 🔥 EXCLUIR CONTA (CORRIGIDA)
-  // ============================================================
   const handleDeleteAccount = useCallback(async () => {
     if (!userId) {
       setMensagem("❌ Usuário não autenticado.");
@@ -544,10 +579,9 @@ export default function ConfigPage() {
     setMensagem("");
 
     try {
-      // Tenta marcar no Supabase, se falhar (offline), apenas limpa local
       try {
         const supabaseClient = await getSupabaseWithToken();
-        const { error: updateError } = await supabaseClient
+        await supabaseClient
           .from('profiles')
           .upsert({ 
             id: userId, 
@@ -555,12 +589,10 @@ export default function ConfigPage() {
             updated_at: new Date().toISOString()
           })
           .select();
-        if (updateError) throw updateError;
       } catch (offlineError) {
         console.warn('Offline: não foi possível marcar exclusão no Supabase');
       }
 
-      // Remove todos os dados locais
       const keysToRemove = [
         'revisaflash_user_id',
         'revisaflash_user_name',
@@ -578,16 +610,12 @@ export default function ConfigPage() {
       ];
       keysToRemove.forEach(key => localStorage.removeItem(key));
 
-      // Redireciona para o Clerk Dashboard para exclusão manual
       window.open('https://dashboard.clerk.com/users', '_blank');
-      
-      // Faz logout
       await signOut();
 
       setMensagem("📋 Redirecionado para o Clerk. Exclua seu usuário manualmente.");
       setMensagemTipo('info');
       
-      // Redireciona para login após alguns segundos
       setTimeout(() => {
         window.location.href = '/login';
       }, 3000);
@@ -600,6 +628,68 @@ export default function ConfigPage() {
       setDeletandoConta(false);
     }
   }, [userId, signOut]);
+
+  // ============================================================
+  // 🔥 FUNÇÃO PARA SALVAR CONFIGURAÇÕES DE FLASHCARDS
+  // ============================================================
+  const handleSaveFlashcardSettings = useCallback(async () => {
+    // Validações
+    if (flashcardSettings.daily_limit < 1) {
+      setMensagem("⚠️ O limite diário deve ser pelo menos 1.");
+      setMensagemTipo('warning');
+      return;
+    }
+    if (flashcardSettings.new_cards_per_day < 0) {
+      setMensagem("⚠️ O número de novos cards não pode ser negativo.");
+      setMensagemTipo('warning');
+      return;
+    }
+    if (flashcardSettings.max_reviews_per_day < 0) {
+      setMensagem("⚠️ O número de revisões não pode ser negativo.");
+      setMensagemTipo('warning');
+      return;
+    }
+    if (flashcardSettings.leech_threshold < 1) {
+      setMensagem("⚠️ O limiar de sanguessuga deve ser pelo menos 1.");
+      setMensagemTipo('warning');
+      return;
+    }
+
+    setSalvandoFlashcards(true);
+    try {
+      await updateUserSettings({
+        daily_limit: flashcardSettings.daily_limit,
+        new_cards_per_day: flashcardSettings.new_cards_per_day,
+        max_reviews_per_day: flashcardSettings.max_reviews_per_day,
+        leech_threshold: flashcardSettings.leech_threshold,
+        show_new_first: flashcardSettings.show_new_first,
+        learning_steps: flashcardSettings.learning_steps,
+        graduating_interval: flashcardSettings.graduating_interval,
+        easy_interval: flashcardSettings.easy_interval,
+        relearning_steps: flashcardSettings.relearning_steps,
+        day_start: flashcardSettings.day_start,
+        show_next_review_time: flashcardSettings.show_next_review_time,
+      });
+
+      setMensagem("✅ Configurações de flashcards salvas com sucesso!");
+      setMensagemTipo('success');
+      setTimeout(() => setMensagem(""), 4000);
+    } catch (error: any) {
+      console.error("Erro ao salvar configurações de flashcards:", error);
+      setMensagem("❌ Erro ao salvar: " + (error.message || 'Tente novamente.'));
+      setMensagemTipo('error');
+    } finally {
+      setSalvandoFlashcards(false);
+    }
+  }, [flashcardSettings, updateUserSettings]);
+
+  // ============================================================
+  // HELPERS PARA OS CAMPOS DE ARRAY
+  // ============================================================
+  const arrayToString = (arr: number[]) => arr.join(', ');
+  const stringToArray = (str: string): number[] => {
+    return str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  };
 
   // ============================================================
   // RENDER
@@ -623,6 +713,7 @@ export default function ConfigPage() {
             ["perfil", "Perfil"],
             ["aparencia", "Aparência"],
             ["estudo", "Plano de estudos"],
+            ["flashcards", "Flashcards"],
             ["dados", "Dados e sincronização"],
             ["conta", "Conta"],
           ].map(([k, l]) => (
@@ -633,7 +724,7 @@ export default function ConfigPage() {
         </nav>
 
         <div className="space-y-4">
-          {/* PERFIL */}
+          {/* PERFIL (ORIGINAL) */}
           <Section id="perfil" title="Perfil" desc="Suas informações pessoais.">
             <div className="flex items-center gap-4">
               <div className="relative">
@@ -682,7 +773,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* APARÊNCIA */}
+          {/* APARÊNCIA (ORIGINAL) */}
           <Section id="aparencia" title="Aparência" desc="Tema da interface.">
             <div className="grid grid-cols-3 gap-2">
               {([
@@ -704,9 +795,24 @@ export default function ConfigPage() {
                 </button>
               ))}
             </div>
+            {/* 🔥 Adicionar Início do Dia aqui (opcional) */}
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <label className="block text-sm font-medium text-foreground/70">
+                Início do dia (hora)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="23"
+                value={flashcardSettings.day_start}
+                onChange={(e) => setFlashcardSettings(prev => ({ ...prev, day_start: Number(e.target.value) }))}
+                className="mt-1 w-32 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              />
+              <p className="mt-1 text-xs text-foreground/40">Hora em que o dia começa (ex: 4 = 4h da manhã).</p>
+            </div>
           </Section>
 
-          {/* PLANO DE ESTUDOS (EDITÁVEL) */}
+          {/* PLANO DE ESTUDOS (ORIGINAL) */}
           <Section id="estudo" title="Plano de estudos" desc="Configurações da sua prova-alvo.">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -748,7 +854,187 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* DADOS E SINCRONIZAÇÃO */}
+          {/* ============================================================
+              🔥 NOVA SEÇÃO: CONFIGURAÇÕES DE FLASHCARDS
+              ============================================================ */}
+          <Section id="flashcards" title="Configurações de Flashcards" desc="Personalize seu estudo com repetição espaçada.">
+            {/* Limites Diários */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-4">
+              <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                Limites Diários
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Limite total de cards por dia</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={flashcardSettings.daily_limit}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, daily_limit: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Novos cards por dia</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999"
+                    value={flashcardSettings.new_cards_per_day}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, new_cards_per_day: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Máximo de revisões por dia</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999"
+                    value={flashcardSettings.max_reviews_per_day}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, max_reviews_per_day: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-foreground/35">
+                O limite total é a soma de novos + revisões. Se você definir menos que a soma, o limite total prevalece.
+              </p>
+            </div>
+
+            {/* Priorização e Sanguessugas */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-4">
+              <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-accent" />
+                Priorização e Sanguessugas (Leeches)
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Limiar de sanguessuga (erros)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={flashcardSettings.leech_threshold}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, leech_threshold: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-foreground/35">
+                    Quando um card atinge esse número de erros (lapses), ele é priorizado automaticamente.
+                  </p>
+                </div>
+                <div className="flex items-center">
+                  <label className="flex items-center gap-3 text-sm font-medium text-foreground/70">
+                    <input
+                      type="checkbox"
+                      checked={flashcardSettings.show_new_first}
+                      onChange={(e) => setFlashcardSettings(prev => ({ ...prev, show_new_first: e.target.checked }))}
+                      className="h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+                    />
+                    Mostrar novos cards primeiro
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Passos de Aprendizado */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-4">
+              <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                <Zap className="h-4 w-4 text-primary" />
+                Passos de Aprendizado
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Passos de aprendizado (minutos)</label>
+                  <input
+                    type="text"
+                    value={arrayToString(flashcardSettings.learning_steps)}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, learning_steps: stringToArray(e.target.value) }))}
+                    placeholder="Ex: 1, 10"
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-foreground/35">Intervalos entre as primeiras revisões de um card novo.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Passos de reaprendizado (minutos)</label>
+                  <input
+                    type="text"
+                    value={arrayToString(flashcardSettings.relearning_steps)}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, relearning_steps: stringToArray(e.target.value) }))}
+                    placeholder="Ex: 10"
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-foreground/35">Intervalos quando você erra um card de revisão.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Intervalo de graduação (dias)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={flashcardSettings.graduating_interval}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, graduating_interval: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-foreground/35">Após concluir os passos de aprendizado, em quantos dias o card volta.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/70">Intervalo fácil (dias)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={flashcardSettings.easy_interval}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, easy_interval: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-foreground/35">Intervalo para quando você avalia um card como "Fácil".</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Comportamento durante estudo */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+              <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                <Settings className="h-4 w-4 text-primary" />
+                Comportamento durante estudo
+              </h3>
+              <div className="mt-3 flex items-center gap-3">
+                <label className="flex items-center gap-3 text-sm font-medium text-foreground/70">
+                  <input
+                    type="checkbox"
+                    checked={flashcardSettings.show_next_review_time}
+                    onChange={(e) => setFlashcardSettings(prev => ({ ...prev, show_next_review_time: e.target.checked }))}
+                    className="h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+                  />
+                  Mostrar tempo da próxima revisão durante o estudo
+                </label>
+              </div>
+            </div>
+
+            {/* Botão Salvar flashcards */}
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveFlashcardSettings}
+                disabled={salvandoFlashcards}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
+              >
+                {salvandoFlashcards ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" /> Salvar configurações de flashcards
+                  </>
+                )}
+              </button>
+            </div>
+          </Section>
+
+          {/* DADOS E SINCRONIZAÇÃO (ORIGINAL) */}
           <Section id="dados" title="Dados e sincronização" desc="Importe flashcards, faça backup e gerencie seus dados.">
             <div className="bg-white/5 border border-white/10 rounded-xl p-4">
               <h3 className="text-sm font-medium text-white mb-1 flex items-center gap-2">
@@ -860,7 +1146,7 @@ export default function ConfigPage() {
             </div>
           </Section>
 
-          {/* CONTA */}
+          {/* CONTA (ORIGINAL) */}
           <Section id="conta" title="Conta" desc="Encerrar sessão, reabrir tour ou excluir conta.">
             <div className="flex flex-wrap gap-2">
               <button
@@ -899,7 +1185,7 @@ export default function ConfigPage() {
 }
 
 // ============================================================
-// COMPONENTES VISUAIS
+// COMPONENTES VISUAIS (ORIGINAIS)
 // ============================================================
 
 function Section({ id, title, desc, children }: { id: string; title: string; desc: string; children: React.ReactNode }) {

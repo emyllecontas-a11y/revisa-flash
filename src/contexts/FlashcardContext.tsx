@@ -57,6 +57,43 @@ interface CardMeta {
   errorId?: string;
 }
 
+// 🔥 NOVO: Interface para configurações do usuário
+interface UserSettings {
+  id: string;
+  user_id: string;
+  daily_limit: number;
+  new_cards_per_day: number;
+  max_reviews_per_day: number;
+  leech_threshold: number;
+  show_new_first: boolean;
+  theme: string;
+  learning_steps: number[];
+  graduating_interval: number;
+  easy_interval: number;
+  relearning_steps: number[];
+  day_start: number;
+  fsrs_params: any | null;
+  show_next_review_time: boolean;
+  updated_at: string;
+}
+
+// Valores padrão para configurações
+const DEFAULT_SETTINGS: Omit<UserSettings, 'id' | 'user_id' | 'updated_at'> = {
+  daily_limit: 100,
+  new_cards_per_day: 20,
+  max_reviews_per_day: 200,
+  leech_threshold: 5,
+  show_new_first: false,
+  theme: 'system',
+  learning_steps: [1, 10],
+  graduating_interval: 1,
+  easy_interval: 4,
+  relearning_steps: [10],
+  day_start: 4,
+  fsrs_params: null,
+  show_next_review_time: false
+};
+
 interface FlashcardContextType {
   refreshFlashcards: () => void;
   dueCards: Card[];
@@ -87,6 +124,18 @@ interface FlashcardContextType {
   addMemberToDeck: (deckId: string, newUserId: string, onProgress?: (current: number, total: number) => void) => Promise<void>;
   removeMemberFromDeck: (deckId: string, userIdToRemove: string) => Promise<void>;
   addMemberByEmail: (deckId: string, email: string) => Promise<void>;
+
+  // 🔥 NOVAS FUNÇÕES DE CONFIGURAÇÃO E PRIORIZAÇÃO
+  getUserSettings: () => Promise<UserSettings>;
+  updateUserSettings: (settings: Partial<UserSettings>) => Promise<void>;
+  getDailyStudyCards: (deckId?: string) => Promise<Card[]>;
+  getCardsReviewedToday: () => number;
+  getHardestCards: (limit?: number) => Card[];
+  getHardestCardsToday: (limit?: number) => Card[];
+  calculatePriority: (card: Card) => number;
+  getIsLeech: (card: Card) => boolean;
+  dailyLimit: number;
+  settings: UserSettings | null;
 }
 
 const FlashcardContext = createContext<FlashcardContextType | undefined>(undefined);
@@ -102,6 +151,9 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [decksData, setDecksData] = useState<Deck[]>([]);
   const [allFlashcards, setAllFlashcards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // 🔥 Estado para configurações do usuário (cache)
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
 
   const scheduler = useMemo(() => new FSRSScheduler(), []);
 
@@ -190,11 +242,53 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log(`📊 [loadLocalData] Encontrados ${filteredCards.length} flashcards (dos decks acessíveis).`);
       setAllFlashcards(filteredCards);
 
+      // 🔥 Carregar configurações do usuário
+      await loadUserSettings(db, userId);
+
       console.log('✅ Dados carregados do banco local');
     } catch (error) {
       console.error('❌ Erro ao carregar dados locais:', error);
       setDecksData([]);
       setAllFlashcards([]);
+    }
+  }, []);
+
+  // 🔥 Função auxiliar para carregar configurações
+  const loadUserSettings = useCallback(async (db: any, userId: string) => {
+    try {
+      const settingsDoc = await db.user_settings.findOne({
+        selector: { user_id: userId }
+      }).exec();
+
+      if (settingsDoc) {
+        const settings = settingsDoc.toJSON() as UserSettings;
+        setUserSettings(settings);
+        console.log('📋 Configurações carregadas:', settings);
+      } else {
+        // Criar configurações padrão se não existirem
+        const now = new Date().toISOString();
+        const newSettings: UserSettings = {
+          id: uid(),
+          user_id: userId,
+          ...DEFAULT_SETTINGS,
+          updated_at: now
+        };
+        await db.user_settings.insert(newSettings);
+        setUserSettings(newSettings);
+        console.log('📋 Configurações padrão criadas:', newSettings);
+
+        // Tentar sincronizar com Supabase
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          await supabaseClient.from('user_settings').insert(newSettings);
+        } catch (e) {
+          console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erro ao carregar configurações:', error);
+      // Fallback: usar padrões
+      setUserSettings(null);
     }
   }, []);
 
@@ -224,7 +318,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [userId]);
 
   // ============================================================
-  // CARREGAR USUÁRIO (agora com Clerk)
+  // CARREGAR USUÁRIO
   // ============================================================
   useEffect(() => {
     let isMounted = true;
@@ -276,6 +370,91 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
     reload();
   }, [userId, loadLocalData]);
+
+  // ============================================================
+  // 🔥 FUNÇÕES DE CONFIGURAÇÃO
+  // ============================================================
+
+  const getUserSettings = useCallback(async (): Promise<UserSettings> => {
+    if (userSettings) return userSettings;
+    if (!userId) throw new Error('Usuário não autenticado');
+
+    const db = await getDb();
+    const doc = await db.user_settings.findOne({
+      selector: { user_id: userId }
+    }).exec();
+
+    if (doc) {
+      const settings = doc.toJSON() as UserSettings;
+      setUserSettings(settings);
+      return settings;
+    }
+
+    // Criar com padrões
+    const now = new Date().toISOString();
+    const newSettings: UserSettings = {
+      id: uid(),
+      user_id: userId,
+      ...DEFAULT_SETTINGS,
+      updated_at: now
+    };
+    await db.user_settings.insert(newSettings);
+    setUserSettings(newSettings);
+
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+      await supabaseClient.from('user_settings').insert(newSettings);
+    } catch (e) {
+      console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
+    }
+
+    return newSettings;
+  }, [userId, userSettings]);
+
+  const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = await getDb();
+
+    const doc = await db.user_settings.findOne({
+      selector: { user_id: userId }
+    }).exec();
+
+    if (!doc) {
+      // Se não existir, criar com os valores fornecidos
+      const now = new Date().toISOString();
+      const newSettings: UserSettings = {
+        id: uid(),
+        user_id: userId,
+        ...DEFAULT_SETTINGS,
+        ...settings,
+        updated_at: now
+      };
+      await db.user_settings.insert(newSettings);
+      setUserSettings(newSettings);
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        await supabaseClient.from('user_settings').insert(newSettings);
+      } catch (e) { /* offline */ }
+      return;
+    }
+
+    const updatedData = {
+      ...settings,
+      updated_at: new Date().toISOString()
+    };
+    await doc.patch(updatedData);
+    const updatedSettings = { ...doc.toJSON(), ...updatedData } as UserSettings;
+    setUserSettings(updatedSettings);
+
+    // Sincronizar com Supabase
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+      await supabaseClient.from('user_settings').update(updatedData).eq('user_id', userId);
+    } catch (e) {
+      console.warn('⚠️ Falha ao sincronizar configurações, enfileirando.');
+      await enqueueOperation('update', 'user_settings', { id: doc.id, ...updatedData });
+    }
+  }, [userId]);
 
   // ============================================================
   // DERIVADOS
@@ -332,8 +511,191 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
   }, [dueCards]);
 
+  // 🔥 Função para obter cards revisados hoje (independente do dueCards)
+  const getCardsReviewedToday = useCallback(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return allFlashcards.filter(c =>
+      c.lastReview && c.lastReview.startsWith(todayStr)
+    ).length;
+  }, [allFlashcards]);
+
   // ============================================================
-  // CRUD
+  // 🔥 PRIORIZAÇÃO E SELEÇÃO
+  // ============================================================
+
+  // Função de prioridade (quanto maior, mais prioritário)
+  const calculatePriority = useCallback((card: Card): number => {
+    const lapses = card.lapses || 0;
+    const difficulty = card.difficulty || 5;
+    const stability = card.stability || 1;
+
+    // Peso para lapses (erros repetidos)
+    const lapsesWeight = 3;
+    // Peso para dificuldade
+    const difficultyWeight = 0.8;
+    // Peso inverso para estabilidade (cards menos estáveis têm prioridade)
+    const stabilityWeight = 2;
+
+    // 🔥 Se o card for considerado "sanguessuga" (leech), prioridade máxima
+    const isLeech = lapses >= (userSettings?.leech_threshold || 5);
+    const leechBonus = isLeech ? 100 : 0;
+
+    return (lapses * lapsesWeight) + (difficulty * difficultyWeight) + (1 / (stability + 0.1) * stabilityWeight) + leechBonus;
+  }, [userSettings]);
+
+  const getIsLeech = useCallback((card: Card): boolean => {
+    const threshold = userSettings?.leech_threshold || 5;
+    return (card.lapses || 0) >= threshold;
+  }, [userSettings]);
+
+  // 🔥 Função principal de seleção diária com limites e prioridade
+  const getDailyStudyCards = useCallback(async (deckId?: string): Promise<Card[]> => {
+    if (!userId) throw new Error('Usuário não autenticado');
+
+    // Carregar configurações
+    const settings = await getUserSettings();
+    const dailyLimit = settings.daily_limit;
+    const maxNew = settings.new_cards_per_day;
+    const maxReviews = settings.max_reviews_per_day;
+    const showNewFirst = settings.show_new_first;
+
+    // Cards já revisados hoje
+    const reviewedToday = getCardsReviewedToday();
+    const remainingSlots = Math.max(0, dailyLimit - reviewedToday);
+
+    if (remainingSlots <= 0) {
+      console.log('ℹ️ Limite diário atingido. Nenhum card disponível.');
+      return [];
+    }
+
+    // Obter todos os cards elegíveis (due)
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    let eligible: Card[];
+    if (deckId) {
+      eligible = allFlashcards.filter(c =>
+        c.deck_id === deckId &&
+        !c.isDeleted &&
+        (c.reps === 0 || new Date(c.dueDate) <= hoje)
+      );
+    } else {
+      eligible = dueCards; // já filtrado globalmente
+    }
+
+    // Separar grupos: atrasados, hoje, novos
+    const atrasados = eligible.filter(c =>
+      c.reps > 0 && new Date(c.dueDate) < hoje
+    );
+    const hojeCards = eligible.filter(c =>
+      c.reps > 0 && new Date(c.dueDate).getTime() === hoje.getTime()
+    );
+    const novos = eligible.filter(c => c.reps === 0);
+
+    // Ordenar cada grupo por prioridade (decrescente)
+    const sortByPriority = (cards: Card[]) =>
+      cards.sort((a, b) => calculatePriority(b) - calculatePriority(a));
+
+    const sortedAtrasados = sortByPriority([...atrasados]);
+    const sortedHoje = sortByPriority([...hojeCards]);
+    const sortedNovos = sortByPriority([...novos]);
+
+    // Aplicar limites
+    let selected: Card[] = [];
+
+    // 1. Atrasados: podem ocupar até 70% do remainingSlots, mas no máximo maxReviews (se aplicável)
+    const maxAtrasados = Math.min(
+      sortedAtrasados.length,
+      Math.floor(remainingSlots * 0.7),
+      maxReviews // se max_reviews_per_day for menor, respeitar
+    );
+    selected = selected.concat(sortedAtrasados.slice(0, maxAtrasados));
+
+    let usedSlots = selected.length;
+
+    // 2. Hoje: preenchem o restante (limitado por maxReviews e remainingSlots)
+    if (usedSlots < remainingSlots) {
+      const maxHoje = Math.min(
+        sortedHoje.length,
+        remainingSlots - usedSlots,
+        maxReviews - (selected.filter(c => c.reps > 0).length) // revisões já selecionadas
+      );
+      if (maxHoje > 0) {
+        selected = selected.concat(sortedHoje.slice(0, maxHoje));
+        usedSlots = selected.length;
+      }
+    }
+
+    // 3. Novos: garantimos pelo menos 5% do dailyLimit (se houver novos disponíveis)
+    // e respeitamos new_cards_per_day
+    if (usedSlots < remainingSlots && sortedNovos.length > 0) {
+      // Mínimo de 5% do limite diário, mas pelo menos 1 card
+      const minNovos = Math.max(1, Math.floor(dailyLimit * 0.05));
+      const maxNovos = Math.min(
+        sortedNovos.length,
+        remainingSlots - usedSlots,
+        maxNew
+      );
+      // Se showNewFirst for true, podemos colocar novos no início; senão, no final
+      const novosParaAdicionar = Math.max(minNovos, Math.min(maxNovos, remainingSlots - usedSlots));
+      if (novosParaAdicionar > 0) {
+        const novosSelecionados = sortedNovos.slice(0, novosParaAdicionar);
+        if (showNewFirst) {
+          selected = [...novosSelecionados, ...selected];
+        } else {
+          selected = selected.concat(novosSelecionados);
+        }
+      }
+    }
+
+    // 🔥 Intercalar grupos para diversificar (evitar todos atrasados no início)
+    const finalSelection = intercalar(selected);
+    console.log(`📋 Selecionados ${finalSelection.length} cards (limite: ${remainingSlots})`);
+    return finalSelection;
+  }, [userId, allFlashcards, dueCards, getUserSettings, calculatePriority, getCardsReviewedToday]);
+
+  // Função auxiliar para intercalar cards de diferentes grupos
+  function intercalar(cards: Card[]): Card[] {
+    // Como já temos os grupos separados, podemos reordenar para alternar
+    // Mas para simplificar, mantemos a ordem atual (que já tem prioridade)
+    // e adicionamos um leve shuffle controlado para não perder a prioridade completamente.
+    // Vamos apenas garantir que não fiquem todos os atrasados no começo.
+    // Como temos os grupos intercalados na seleção, já está bom.
+    // Mas para melhorar, podemos embaralhar levemente os primeiros 50%.
+    if (cards.length <= 10) return cards;
+
+    // Pegar os 20% mais prioritários e intercalar com os demais
+    const top = cards.slice(0, Math.floor(cards.length * 0.2));
+    const rest = cards.slice(Math.floor(cards.length * 0.2));
+    const result: Card[] = [];
+    const maxLen = Math.max(top.length, rest.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < top.length) result.push(top[i]);
+      if (i < rest.length) result.push(rest[i]);
+    }
+    return result;
+  }
+
+  // ============================================================
+  // 🔥 CARDS MAIS DIFÍCEIS
+  // ============================================================
+
+  const getHardestCards = useCallback((limit: number = 10): Card[] => {
+    return allFlashcards
+      .filter(c => !c.isDeleted)
+      .sort((a, b) => calculatePriority(b) - calculatePriority(a))
+      .slice(0, limit);
+  }, [allFlashcards, calculatePriority]);
+
+  const getHardestCardsToday = useCallback((limit: number = 5): Card[] => {
+    // Cards que estão na lista de hoje (usando dueCards)
+    return dueCards
+      .sort((a, b) => calculatePriority(b) - calculatePriority(a))
+      .slice(0, limit);
+  }, [dueCards, calculatePriority]);
+
+  // ============================================================
+  // CRUD (mantido igual, com pequenas adaptações)
   // ============================================================
 
   const createDeck = useCallback(async (
@@ -428,7 +790,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newDeck;
   }, [userId, refreshFlashcards]);
 
-  // --- ADD CARD (COM VERIFICAÇÃO GLOBAL DE DUPLICATA E isDeleted: false) ---
+  // --- ADD CARD (com verificação global de duplicata e isDeleted: false) ---
   const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
@@ -536,7 +898,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return userCard ? userCard.toJSON().id : createdCardIds[0];
   }, [userId, refreshFlashcards, setCardMeta, scheduler]);
 
-  // --- REVIEW CARD ---
+  // --- REVIEW CARD (mantido igual, mas podemos futuramente usar configurações) ---
   const reviewCard = useCallback(async (cardId: string, rating: Rating) => {
     if (!userId) throw new Error('Usuário não autenticado');
 
@@ -908,13 +1270,13 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     setCardMeta(cardId, meta);
   }, [setCardMeta]);
 
-  // --- GET HISTORY ---
+  // --- GET HISTORY (mock, como antes) ---
   const getCardHistory = useCallback((cardId: string) => {
     return [{ message: 'Histórico de revisões não disponível', type: 'info' }];
   }, []);
 
   // ============================================================
-  // GERENCIAR MEMBROS
+  // GERENCIAR MEMBROS (mantido igual)
   // ============================================================
 
   const addMemberToDeck = useCallback(async (
@@ -1184,6 +1546,18 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     addMemberToDeck,
     removeMemberFromDeck,
     addMemberByEmail,
+
+    // 🔥 NOVAS FUNÇÕES EXPORTADAS
+    getUserSettings,
+    updateUserSettings,
+    getDailyStudyCards,
+    getCardsReviewedToday,
+    getHardestCards,
+    getHardestCardsToday,
+    calculatePriority,
+    getIsLeech,
+    dailyLimit: userSettings?.daily_limit || 100,
+    settings: userSettings,
   }), [
     refreshFlashcards,
     dueCards,
@@ -1210,6 +1584,15 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     addMemberToDeck,
     removeMemberFromDeck,
     addMemberByEmail,
+    getUserSettings,
+    updateUserSettings,
+    getDailyStudyCards,
+    getCardsReviewedToday,
+    getHardestCards,
+    getHardestCardsToday,
+    calculatePriority,
+    getIsLeech,
+    userSettings,
   ]);
 
   return (

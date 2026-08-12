@@ -4,25 +4,22 @@ import {
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit, 
   CheckCircle, Search, Filter, Pencil, X, Bold, Italic, List,
   History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart,
-  Users, UserPlus, UserMinus, UserCheck
+  Users, UserPlus, UserMinus, UserCheck, Settings, Flame, Calendar
 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { findUserByEmail, findUsersByIds } from "@/services/clerkService";
+import { useNavigate } from "react-router-dom";
 
 // ============================================================
 // 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO
 // ============================================================
 function renderFormattedText(text: string): string {
   if (!text) return '';
-  // Escapa HTML básico para segurança
   let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // **texto** → <strong>texto</strong>
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // *texto* → <em>texto</em> (não confundir com listas)
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Listas: - item → <li>item</li> (simples)
   html = html.replace(/^-\s(.+)$/gm, '<li>$1</li>');
   html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
   return html;
@@ -37,6 +34,7 @@ function FormattedText({ text, className }: { text: string; className?: string }
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function FlashcardsPage() {
+  const navigate = useNavigate();
   const flashcardContext = useFlashcardContext();
   const { 
     decks, 
@@ -60,6 +58,14 @@ export default function FlashcardsPage() {
     addMemberToDeck,
     removeMemberFromDeck,
     addMemberByEmail,
+    getDailyStudyCards,
+    getCardsReviewedToday,
+    getHardestCards,
+    getHardestCardsToday,
+    calculatePriority,
+    getIsLeech,
+    dailyLimit,
+    settings,
   } = flashcardContext;
 
   // ============================================================
@@ -93,7 +99,9 @@ export default function FlashcardsPage() {
   const [newMemberId, setNewMemberId] = useState("");
   const [isManagingMember, setIsManagingMember] = useState(false);
   
-  // 🔥 NOVOS ESTADOS PARA MEMBROS E PROGRESSO
+  const [isHardestModalOpen, setIsHardestModalOpen] = useState(false);
+  const [hardestTab, setHardestTab] = useState<"geral" | "hoje">("hoje");
+
   const [membersInfo, setMembersInfo] = useState<Record<string, { name: string; email: string }>>({});
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [copyProgress, setCopyProgress] = useState<{ current: number; total: number } | null>(null);
@@ -109,7 +117,6 @@ export default function FlashcardsPage() {
   const [deckDescription, setDeckDescription] = useState("");
   const [deckDisciplina, setDeckDisciplina] = useState("");
   const [deckCor, setDeckCor] = useState("#14B8A6");
-  
   const [isShared, setIsShared] = useState(false);
   const [sharedWithInput, setSharedWithInput] = useState("");
   
@@ -133,6 +140,9 @@ export default function FlashcardsPage() {
   const [filterStatus, setFilterStatus] = useState<"todos" | "para_revisar">("todos");
   const [allCardsInDeck, setAllCardsInDeck] = useState<any[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
+  
+  // 🔥 ESTADO PARA PESQUISA
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Refs
   const editFrenteRef = useRef<HTMLTextAreaElement>(null);
@@ -146,6 +156,7 @@ export default function FlashcardsPage() {
   useEffect(() => {
     if (!selectedDeckId) {
       setAllCardsInDeck([]);
+      setSearchTerm("");
       return;
     }
     const loadAllCards = async () => {
@@ -164,7 +175,7 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, getAllCardsByDeck]);
 
   // ============================================================
-  // 🔥 CARREGAR INFORMAÇÕES DOS MEMBROS QUANDO O MODAL ABRIR
+  // CARREGAR INFORMAÇÕES DOS MEMBROS
   // ============================================================
   useEffect(() => {
     if (isMembersModalOpen && selectedDeckId) {
@@ -192,24 +203,35 @@ export default function FlashcardsPage() {
   }, [isMembersModalOpen, selectedDeckId, decks]);
 
   // ============================================================
-  // FILTRAR CARDS
+  // FILTRAR CARDS (COM PESQUISA)
   // ============================================================
   const deckCards = useMemo(() => {
-    if (filterStatus === "todos") {
-      return allCardsInDeck;
-    } else {
+    // Primeiro filtra por status
+    let filtered = allCardsInDeck;
+    if (filterStatus === "para_revisar") {
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
-      return allCardsInDeck.filter(c => {
+      filtered = allCardsInDeck.filter(c => {
         const due = new Date(c.dueDate);
         due.setHours(0, 0, 0, 0);
         return c.reps === 0 || due <= hoje;
       });
     }
-  }, [allCardsInDeck, filterStatus]);
+
+    // 🔥 Depois filtra por termo de busca
+    if (searchTerm.trim() !== "") {
+      const term = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter(c =>
+        c.front.toLowerCase().includes(term) ||
+        c.back.toLowerCase().includes(term)
+      );
+    }
+
+    return filtered;
+  }, [allCardsInDeck, filterStatus, searchTerm]);
 
   // ============================================================
-  // FUNÇÃO PARA ESTATÍSTICAS DOS DECKS
+  // ESTATÍSTICAS DOS DECKS
   // ============================================================
   const getDeckStats = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
@@ -229,7 +251,7 @@ export default function FlashcardsPage() {
   }, [getAllFlashcards]);
 
   // ============================================================
-  // FUNÇÃO PARA DADOS DO GRÁFICO
+  // DADOS DO GRÁFICO
   // ============================================================
   const getStabilityOverTime = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
@@ -274,7 +296,7 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE FORMATAÇÃO
+  // FORMATAÇÃO
   // ============================================================
   const applyFormatting = (
     ref: React.RefObject<HTMLTextAreaElement>, 
@@ -304,14 +326,13 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FUNÇÕES DE CRUD (TODAS MANTIDAS)
+  // CRUD
   // ============================================================
   const handleCreateDeck = useCallback(async () => {
     if (!deckName.trim()) {
       setErrorMessage("Digite um nome para o baralho");
       return;
     }
-    
     let sharedWithArray: string[] = [];
     if (isShared) {
       sharedWithArray = sharedWithInput
@@ -323,7 +344,6 @@ export default function FlashcardsPage() {
         return;
       }
     }
-    
     try {
       setIsSaving(true);
       setErrorMessage("");
@@ -401,7 +421,6 @@ export default function FlashcardsPage() {
       if (editTopico.trim()) {
         setCardMeta(editCardId, { topico: editTopico.trim() });
       }
-      
       if (editFromStudy) {
         setSessaoCards(prev => prev.map(card => 
           card.id === editCardId 
@@ -410,7 +429,6 @@ export default function FlashcardsPage() {
         ));
         setEditFromStudy(false);
       }
-      
       setIsEditModalOpen(false);
       setEditCardId(null);
       setEditFrente("");
@@ -493,7 +511,7 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, renameName, renameDescription, deckDisciplina, renameDeck, decks, setDeckMeta]);
 
   // ============================================================
-  // 🔥 FUNÇÕES PARA GERENCIAR MEMBROS (COM PROGRESSO)
+  // GERENCIAR MEMBROS
   // ============================================================
   const handleAddMember = useCallback(async () => {
     if (!selectedDeckId) return;
@@ -505,14 +523,10 @@ export default function FlashcardsPage() {
       setIsManagingMember(true);
       setCopyProgress(null);
       setErrorMessage("");
-
-      // 1. Busca o user_id pelo e-mail
       const foundUserId = await findUserByEmail(newMemberId.trim());
       if (!foundUserId) {
         throw new Error(`Nenhum usuário encontrado com o e-mail: ${newMemberId.trim()}`);
       }
-
-      // 2. Adiciona o membro com callback de progresso
       await addMemberToDeck(
         selectedDeckId, 
         foundUserId, 
@@ -524,11 +538,8 @@ export default function FlashcardsPage() {
           }
         }
       );
-
       setNewMemberId("");
       refreshFlashcards();
-
-      // 3. Atualiza a lista de membros (busca novamente)
       const deck = decks.find(d => d.id === selectedDeckId);
       if (deck) {
         const allMemberIds = [deck.owner_id, ...deck.shared_with];
@@ -544,7 +555,6 @@ export default function FlashcardsPage() {
           setMembersInfo(infoMap);
         }
       }
-
       setErrorMessage("✅ Membro adicionado com sucesso!");
       setTimeout(() => setErrorMessage(""), 3000);
     } catch (error: any) {
@@ -563,8 +573,6 @@ export default function FlashcardsPage() {
       setIsManagingMember(true);
       await removeMemberFromDeck(selectedDeckId, userIdToRemove);
       refreshFlashcards();
-      
-      // Atualiza a lista de membros
       const deck = decks.find(d => d.id === selectedDeckId);
       if (deck) {
         const allMemberIds = [deck.owner_id, ...deck.shared_with];
@@ -582,7 +590,6 @@ export default function FlashcardsPage() {
           setMembersInfo({});
         }
       }
-      
       setErrorMessage("✅ Membro removido com sucesso!");
       setTimeout(() => setErrorMessage(""), 3000);
     } catch (error: any) {
@@ -594,53 +601,55 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, removeMemberFromDeck, refreshFlashcards, decks]);
 
   // ============================================================
-  // FUNÇÃO DE INICIAR ESTUDO
+  // INICIAR ESTUDO
   // ============================================================
-  const iniciarEstudo = useCallback(async (deckId: string) => {
+  const iniciarEstudo = useCallback(async (deckId?: string) => {
     if (isStarting) return;
     setIsStarting(true);
+    setErrorMessage("");
     try {
-      const cards = await getAllCardsByDeck(deckId);
-      const hoje = new Date();
-      hoje.setHours(0, 0, 0, 0);
-      const due = cards.filter(c => {
-        const dueDate = new Date(c.dueDate);
-        dueDate.setHours(0, 0, 0, 0);
-        return c.reps === 0 || dueDate <= hoje;
-      });
-      if (due.length === 0) {
-        setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
-        setTimeout(() => setErrorMessage(""), 3000);
+      const cards = await getDailyStudyCards(deckId);
+      
+      if (cards.length === 0) {
+        const reviewedToday = getCardsReviewedToday();
+        if (reviewedToday >= (settings?.daily_limit || 100)) {
+          setErrorMessage(`🎉 Limite diário atingido (${reviewedToday}/${settings?.daily_limit || 100})! Volte amanhã.`);
+        } else {
+          setErrorMessage("🎉 Nenhum flashcard para revisar hoje!");
+        }
+        setTimeout(() => setErrorMessage(""), 4000);
         setIsStarting(false);
         return;
       }
-      
-      const sortedDue = due.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-      
-      setSessaoCards(sortedDue);
+
+      setSessaoCards(cards);
       setSessionStats({
         again: 0,
         hard: 0,
         good: 0,
         easy: 0,
-        novos: due.filter(c => c.reps === 0).length,
-        total: due.length,
+        novos: cards.filter(c => c.reps === 0).length,
+        total: cards.length,
       });
       setSessionStartTime(new Date());
-      setSelectedDeckId(deckId);
+      if (deckId) {
+        setSelectedDeckId(deckId);
+      } else {
+        setSelectedDeckId(null);
+      }
       setCurrentCardIndex(0);
       setVirado(false);
       setModo("estudo");
     } catch (error) {
       console.error("Erro ao iniciar estudo:", error);
-      setErrorMessage("Erro ao iniciar estudo");
+      setErrorMessage("Erro ao iniciar estudo: " + (error instanceof Error ? error.message : ""));
     } finally {
       setIsStarting(false);
     }
-  }, [getAllCardsByDeck, isStarting]);
+  }, [getDailyStudyCards, getCardsReviewedToday, settings, isStarting]);
 
   // ============================================================
-  // FUNÇÃO DE AVALIAÇÃO
+  // AVALIAÇÃO
   // ============================================================
   const handleRating = useCallback(async (rating: Rating) => {
     if (isRating) return;
@@ -696,6 +705,7 @@ export default function FlashcardsPage() {
     setSessaoCards([]);
     setSessionStats(null);
     setSessionStartTime(null);
+    setSearchTerm("");
   }, []);
 
   const openEditFromStudy = useCallback((card: any) => {
@@ -728,6 +738,11 @@ export default function FlashcardsPage() {
     const deck = decks?.find((d) => d.id === selectedDeckId);
 
     if (currentCard) {
+      const isLeech = getIsLeech(currentCard);
+      const nextReviewTime = settings?.show_next_review_time 
+        ? new Date(currentCard.dueDate).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })
+        : null;
+
       conteudo = (
         <AppShell breadcrumb="Flashcards · Estudo">
           <button
@@ -746,14 +761,17 @@ export default function FlashcardsPage() {
           </button>
           <div className="mx-auto max-w-2xl">
             <div className="mb-4 flex items-center justify-between text-xs">
-              <span className="font-medium uppercase tracking-widest text-primary">{deck?.name || "Estudo"}</span>
+              <span className="font-medium uppercase tracking-widest text-primary">
+                {selectedDeckId ? deck?.name || "Estudo" : "Estudo de Hoje"}
+                {isLeech && <span className="ml-2 text-accent">🩸 Sanguessuga</span>}
+              </span>
               <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {sessaoCards.length}</span>
             </div>
             <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/5">
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((currentCardIndex + 1) / sessaoCards.length) * 100}%` }} />
             </div>
             
-            <div className="flex justify-end mb-2">
+            <div className="flex justify-end mb-2 gap-2">
               <button
                 onClick={() => openEditFromStudy(currentCard)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors"
@@ -781,6 +799,11 @@ export default function FlashcardsPage() {
                   <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">
                     <FormattedText text={currentCard.back} />
                   </p>
+                  {nextReviewTime && (
+                    <p className="text-xs text-foreground/40">
+                      ⏳ Próxima revisão: {nextReviewTime}
+                    </p>
+                  )}
                 </div>
               )}
             </button>
@@ -821,7 +844,7 @@ export default function FlashcardsPage() {
             </div>
             <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">🎉 Revisão concluída!</h2>
             <p className="mt-2 text-sm text-foreground/55">
-              Você revisou todos os flashcards do baralho <span className="font-medium text-foreground">{deck?.name}</span>.
+              Você revisou {sessaoCards.length} flashcards {selectedDeckId ? `do baralho ${deck?.name}` : "de hoje"}.
             </p>
             
             {stats && (
@@ -853,34 +876,16 @@ export default function FlashcardsPage() {
                   if (selectedDeckId) {
                     setIsRestarting(true);
                     try {
-                      const cards = await getAllCardsByDeck(selectedDeckId);
-                      const hoje = new Date();
-                      hoje.setHours(0, 0, 0, 0);
-                      const due = cards.filter(c => {
-                        const dueDate = new Date(c.dueDate);
-                        dueDate.setHours(0, 0, 0, 0);
-                        return c.reps === 0 || dueDate <= hoje;
-                      });
-                      if (due.length > 0) {
-                        const sortedDue = due.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-                        setSessaoCards(sortedDue);
-                        setSessionStats({
-                          again: 0,
-                          hard: 0,
-                          good: 0,
-                          easy: 0,
-                          novos: due.filter(c => c.reps === 0).length,
-                          total: due.length,
-                        });
-                        setSessionStartTime(new Date());
-                        setModo("estudo");
-                        setCurrentCardIndex(0);
-                        setVirado(false);
-                      } else {
-                        setErrorMessage("🎉 Nenhum flashcard para revisar neste baralho!");
-                        setTimeout(() => setErrorMessage(""), 3000);
-                        voltarDaConclusao();
-                      }
+                      await iniciarEstudo(selectedDeckId);
+                    } catch (error) {
+                      console.error(error);
+                    } finally {
+                      setIsRestarting(false);
+                    }
+                  } else {
+                    setIsRestarting(true);
+                    try {
+                      await iniciarEstudo();
                     } catch (error) {
                       console.error(error);
                     } finally {
@@ -900,6 +905,9 @@ export default function FlashcardsPage() {
       </AppShell>
     );
   } else if (selectedDeckId) {
+    // ============================================================
+    // MODO DECKS - VISUALIZAÇÃO DE UM DECK ESPECÍFICO
+    // ============================================================
     const deck = decks.find(d => d.id === selectedDeckId);
     if (!deck) {
       setSelectedDeckId(null);
@@ -910,8 +918,10 @@ export default function FlashcardsPage() {
       const deckColor = deck.color || '#14B8A6';
       const chartData = getStabilityOverTime(selectedDeckId);
       
-const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
-const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.user_id === currentUserId);
+      const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
+      const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.user_id === currentUserId);
+      
+      const todayCards = dueCards.filter(c => c.deck_id === selectedDeckId);
       
       conteudo = (
         <AppShell breadcrumb={`Flashcards · ${deck.name}`}>
@@ -1042,7 +1052,20 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
               <Search className="h-3.5 w-3.5 text-foreground/40" />
-              <input placeholder="Buscar nesse baralho…" className="w-56 bg-transparent text-xs outline-none placeholder:text-foreground/35" value="" onChange={() => {}} />
+              <input
+                placeholder="Buscar nesse baralho…"
+                className="flex-1 bg-transparent text-xs outline-none placeholder:text-foreground/35"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="text-foreground/40 hover:text-foreground transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
           <div className="grid gap-3">
@@ -1054,6 +1077,8 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
               deckCards.map((card, index) => {
                 const status = getStatusBadge(card.reps, card.dueDate);
                 const meta = getCardMeta(card.id);
+                const isLeech = getIsLeech(card);
+                const priority = calculatePriority(card);
                 return (
                   <article key={card.id} className="rf-card rf-card-hover group flex items-start gap-3 sm:gap-4 p-4 sm:p-5 w-full max-w-full overflow-hidden">
                     <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
@@ -1062,6 +1087,7 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                       <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
                         {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
+                        {isLeech && <span className="text-[10px] text-accent font-medium">🩸 Sanguessuga</span>}
                       </div>
                       <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">
                         <FormattedText text={card.front} />
@@ -1069,6 +1095,10 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                       <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">
                         <FormattedText text={card.back} />
                       </p>
+                      <div className="mt-1 flex gap-2 text-[10px] text-foreground/30">
+                        <span>Erros: {card.lapses || 0}</span>
+                        <span>Dificuldade: {card.difficulty?.toFixed(1) || 0}</span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
@@ -1091,6 +1121,12 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
       );
     }
   } else {
+    // ============================================================
+    // MODO PRINCIPAL (DECKS)
+    // ============================================================
+    const reviewedToday = getCardsReviewedToday();
+    const remainingToday = Math.max(0, (settings?.daily_limit || 100) - reviewedToday);
+    
     conteudo = (
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
@@ -1100,10 +1136,44 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
           </div>
         )}
         <div className="-mt-4 mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <p className="max-w-xl text-sm text-foreground/55">Algoritmo de repetição espaçada FSRS. Cards são apresentados no momento ideal para fixar o conteúdo.</p>
-          <button onClick={() => { setIsModalOpen(true); setErrorMessage(""); }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90">
-            <Plus className="h-3.5 w-3.5" /> Novo baralho
-          </button>
+          <div>
+            <p className="max-w-xl text-sm text-foreground/55">
+              Algoritmo de repetição espaçada FSRS. Cards são apresentados no momento ideal para fixar o conteúdo.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-foreground/40">
+              <span>📊 Limite diário: <strong className="text-foreground">{settings?.daily_limit || 100}</strong></span>
+              <span>✅ Revisados hoje: <strong className="text-foreground">{reviewedToday}</strong></span>
+              <span>🟢 Restantes: <strong className="text-foreground">{remainingToday}</strong></span>
+              <button
+                onClick={() => navigate('/configuracoes#flashcards')}
+                className="inline-flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
+              >
+                <Settings className="h-3.5 w-3.5" /> Alterar limites
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsHardestModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs font-medium text-accent hover:bg-accent/20 transition-colors"
+            >
+              <Flame className="h-3.5 w-3.5" /> Cards difíceis
+            </button>
+            <button
+              onClick={() => iniciarEstudo()}
+              disabled={isStarting || remainingToday <= 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity"
+            >
+              {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Estudar hoje
+            </button>
+            <button
+              onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" /> Novo baralho
+            </button>
+          </div>
         </div>
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Mini icon={<Layers className="h-4 w-4" />} l="Decks" v={decks?.length || 0} />
@@ -1180,7 +1250,7 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   <div className="mt-4 flex items-center gap-2">
                     <button
                       onClick={(e) => { e.stopPropagation(); iniciarEstudo(deck.id); }}
-                      disabled={stats.due === 0 || isStarting}
+                      disabled={stats.due === 0 || isStarting || remainingToday <= 0}
                       className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30 inline-flex items-center justify-center gap-2"
                     >
                       {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -1208,13 +1278,13 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
   }
 
   // ============================================================
-  // RENDERIZAÇÃO FINAL (conteúdo + modais)
+  // MODAIS
   // ============================================================
   return (
     <>
       {conteudo}
 
-      {/* MODAL: CRIAR BARALHO (ATUALIZADO) */}
+      {/* MODAL: CRIAR BARALHO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
@@ -1273,7 +1343,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   </div>
                 </div>
               </div>
-              
               <div className="border-t border-border/50 pt-4 mt-2">
                 <div className="flex items-center gap-3 mb-3">
                   <button
@@ -1288,7 +1357,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                     Compartilhar este baralho com amigas
                   </span>
                 </div>
-                
                 {isShared && (
                   <div className="animate-fadeIn">
                     <label className="text-sm font-medium text-foreground/70">
@@ -1307,7 +1375,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   </div>
                 )}
               </div>
-
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
@@ -1364,7 +1431,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 font-display text-base text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
                 />
               </div>
-
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1386,7 +1452,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 text-sm leading-relaxed text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
                 />
               </div>
-
               <div>
                 <label className="text-sm font-medium text-foreground/70">Tópico</label>
                 <input
@@ -1397,7 +1462,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
                 />
               </div>
-
               <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
@@ -1487,7 +1551,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                 <X className="h-5 w-5" />
               </button>
             </div>
-
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs text-foreground/55">
                 <span className="rounded-full bg-white/5 px-2 py-0.5 font-medium">Card #{editCardId ? editCardId.slice(-3) : '--'}</span>
@@ -1522,7 +1585,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                 <Trash2 className="h-3.5 w-3.5" /> Excluir cartão
               </button>
             </div>
-
             <div className="space-y-4">
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
@@ -1545,7 +1607,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 font-display text-base text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
                 />
               </div>
-
               <div className="rf-card p-5 border border-border">
                 <header className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1567,7 +1628,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 text-sm leading-relaxed text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
                 />
               </div>
-
               <div>
                 <label className="text-sm font-medium text-foreground/70">Tópico</label>
                 <input
@@ -1578,7 +1638,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
                 />
               </div>
-
               {editCardId && (
                 <div className="rf-card p-5 border border-border">
                   <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">
@@ -1600,7 +1659,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   </ul>
                 </div>
               )}
-
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
@@ -1622,7 +1680,7 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
         </div>
       )}
 
-      {/* 🔥 MODAL GERENCIAR MEMBROS (COM NOMES E PROGRESSO) */}
+      {/* MODAL GERENCIAR MEMBROS */}
       {isMembersModalOpen && selectedDeckId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated max-h-[80vh] flex flex-col">
@@ -1638,7 +1696,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
             <div className="flex-1 overflow-y-auto">
               <div className="space-y-2 mb-4">
                 <p className="text-xs text-foreground/40">Membros atuais:</p>
@@ -1647,20 +1704,16 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   if (!deck) return <p className="text-sm text-foreground/55">Carregando...</p>;
                   const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
                   const allMembers = [deck.owner_id, ...deck.shared_with];
-                  
                   if (loadingMembers) {
                     return <div className="flex justify-center py-2"><Loader2 className="h-5 w-5 animate-spin text-primary/60" /></div>;
                   }
-                  
                   if (allMembers.length === 0) return <p className="text-sm text-foreground/40">Nenhum membro encontrado.</p>;
-                  
                   return allMembers.map((memberId, idx) => {
                     const isOwner = memberId === deck.owner_id;
                     const isYou = memberId === currentUserId;
                     const info = membersInfo[memberId];
                     const displayName = info?.name || memberId;
                     const displayEmail = info?.email ? ` (${info.email})` : '';
-                    
                     return (
                       <div key={idx} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -1691,7 +1744,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   });
                 })()}
               </div>
-              
               <div className="border-t border-border/50 pt-4">
                 <label className="text-sm font-medium text-foreground/70">Adicionar por e-mail</label>
                 <div className="flex gap-2 mt-1">
@@ -1714,8 +1766,6 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                 <p className="mt-1 text-[10px] text-foreground/40">
                   💡 Digite o e-mail cadastrado na conta da pessoa.
                 </p>
-
-                {/* 🔥 BARRA DE PROGRESSO */}
                 {copyProgress && copyProgress.total > 0 && (
                   <div className="mt-3 animate-fadeIn">
                     <div className="flex items-center justify-between text-xs text-foreground/60">
@@ -1736,6 +1786,71 @@ const isOwner = (deck.owner_id === currentUserId) || (!deck.owner_id && deck.use
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CARDS MAIS DIFÍCEIS */}
+      {isHardestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[80vh] flex flex-col shadow-elevated">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Flame className="h-5 w-5 text-accent" />
+                Cards mais difíceis
+              </h3>
+              <button
+                onClick={() => setIsHardestModalOpen(false)}
+                className="text-foreground/50 hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex gap-2 border-b border-border/50 pb-3 mb-3">
+              <button
+                onClick={() => setHardestTab("hoje")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  hardestTab === "hoje"
+                    ? "bg-primary/20 text-primary"
+                    : "text-foreground/50 hover:text-foreground/80"
+                }`}
+              >
+                📅 Cards de hoje
+              </button>
+              <button
+                onClick={() => setHardestTab("geral")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  hardestTab === "geral"
+                    ? "bg-primary/20 text-primary"
+                    : "text-foreground/50 hover:text-foreground/80"
+                }`}
+              >
+                📚 Geral
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {hardestTab === "hoje" ? (
+                <HardestList 
+                  title="🔥 Cards mais difíceis de hoje"
+                  cards={getHardestCardsToday(15)}
+                  getCardMeta={getCardMeta}
+                />
+              ) : (
+                <HardestList 
+                  title="📊 Todos os cards mais difíceis"
+                  cards={getHardestCards(20)}
+                  getCardMeta={getCardMeta}
+                />
+              )}
+            </div>
+            <div className="pt-3 border-t border-border/50 flex justify-end">
+              <button
+                onClick={() => setIsHardestModalOpen(false)}
+                className="rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+              >
+                Fechar
+              </button>
             </div>
           </div>
         </div>
@@ -1787,6 +1902,54 @@ function Pill({ l, v, accent }: { l: string; v: number; accent?: boolean }) {
     <div>
       <div className={["font-display text-sm font-semibold tabular-nums", accent ? "text-accent" : "text-foreground"].join(" ")}>{v}</div>
       <div className="text-[10px] uppercase tracking-widest text-foreground/40">{l}</div>
+    </div>
+  );
+}
+
+// ============================================================
+// COMPONENTE AUXILIAR PARA EXIBIR LISTA DE CARDS DIFÍCEIS
+// ============================================================
+function HardestList({ title, cards, getCardMeta }: { 
+  title: string; 
+  cards: any[]; 
+  getCardMeta: (id: string) => any;
+}) {
+  if (cards.length === 0) {
+    return <p className="text-sm text-foreground/40 text-center py-8">Nenhum card encontrado.</p>;
+  }
+  
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-foreground/40 mb-2">{title}</p>
+      {cards.map((card, index) => {
+        const meta = getCardMeta(card.id);
+        const lapses = card.lapses || 0;
+        const difficulty = card.difficulty || 0;
+        const stability = card.stability || 0;
+        const isLeech = lapses >= 5;
+        
+        return (
+          <div key={card.id} className="flex items-start gap-3 rounded-lg bg-background/40 p-3 hover:bg-background/60 transition-colors">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent/10 font-display text-sm font-bold text-accent">
+              {index + 1}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground line-clamp-2">
+                <FormattedText text={card.front} />
+              </p>
+              {meta.topico && (
+                <span className="text-[10px] text-foreground/40">{meta.topico}</span>
+              )}
+              <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-foreground/40">
+                <span>❌ Erros: <strong className="text-accent">{lapses}</strong></span>
+                <span>📊 Dificuldade: {difficulty.toFixed(1)}</span>
+                <span>⚡ Estabilidade: {stability.toFixed(1)}</span>
+                {isLeech && <span className="text-accent font-medium">🩸 Sanguessuga</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1,4 +1,3 @@
-// src/lib/db.ts
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
@@ -220,6 +219,35 @@ const pendingOperationSchema = {
 };
 
 // ============================================================
+// 🔥 NOVO SCHEMA: user_settings
+// ============================================================
+const userSettingsSchema = {
+  title: 'user_settings schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    daily_limit: { type: 'number', default: 100 },
+    new_cards_per_day: { type: 'number', default: 20 },
+    max_reviews_per_day: { type: 'number', default: 200 },
+    leech_threshold: { type: 'number', default: 5 },
+    show_new_first: { type: 'boolean', default: false },
+    theme: { type: 'string', default: 'system' },
+    learning_steps: { type: 'array', items: { type: 'number' }, default: [1, 10] },
+    graduating_interval: { type: 'number', default: 1 },
+    easy_interval: { type: 'number', default: 4 },
+    relearning_steps: { type: 'array', items: { type: 'number' }, default: [10] },
+    day_start: { type: 'number', default: 4 },
+    fsrs_params: { type: ['object', 'null'], default: null },
+    show_next_review_time: { type: 'boolean', default: false },
+    updated_at: { type: 'string' }
+  },
+  required: ['id', 'user_id']
+};
+
+// ============================================================
 // GERENCIADOR DO BANCO (getDb)
 // ============================================================
 let dbInstance: RxDatabase | null = null;
@@ -259,6 +287,7 @@ export async function getDb(): Promise<RxDatabase> {
       ignoreDuplicate: true
     });
 
+    // 🔥 ADICIONANDO user_settings ÀS COLEÇÕES
     await db.addCollections({
       decks: { schema: deckSchema },
       flashcards: { schema: flashcardSchema },
@@ -269,7 +298,8 @@ export async function getDb(): Promise<RxDatabase> {
       study_records: { schema: studyRecordSchema },
       study_sessions: { schema: studySessionSchema },
       areas: { schema: areaSchema },
-      pending_operations: { schema: pendingOperationSchema }
+      pending_operations: { schema: pendingOperationSchema },
+      user_settings: { schema: userSettingsSchema }  // <-- NOVA COLEÇÃO
     });
 
     console.log('✅ Banco local criado com sucesso.');
@@ -303,7 +333,7 @@ export async function syncWithSupabase(userId: string) {
 
     // 🔥 VERIFICA SE O BANCO LOCAL ESTÁ VAZIO
     let hasData = false;
-    const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
+    const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
     for (const name of collectionsToCheck) {
       const collection = database.collections[name];
       if (collection) {
@@ -324,7 +354,8 @@ export async function syncWithSupabase(userId: string) {
 
     const supabaseClient = await getSupabaseWithToken();
 
-    const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records'];
+    // 🔥 ADICIONANDO user_settings À LISTA DE COLEÇÕES A SINCRONIZAR
+    const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
 
     for (const name of collections) {
       const collection = database.collections[name];
@@ -337,6 +368,13 @@ export async function syncWithSupabase(userId: string) {
           .from(name)
           .select('*')
           .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
+          .gte('updated_at', lastSync);
+      } else if (name === 'user_settings') {
+        // user_settings é específica do usuário
+        query = supabaseClient
+          .from(name)
+          .select('*')
+          .eq('user_id', userId)
           .gte('updated_at', lastSync);
       } else {
         query = supabaseClient
@@ -393,7 +431,7 @@ export async function syncWithSupabase(userId: string) {
       }
     }
 
-    // study_sessions
+    // study_sessions (mantido igual)
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
