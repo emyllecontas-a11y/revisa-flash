@@ -1,7 +1,7 @@
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
-import { processPendingOperations } from '@/services/queueService';
+import { uid } from '@/utils/helpers';
 
 // ============================================================
 // SCHEMAS (com isDeleted booleano, version: 0)
@@ -219,7 +219,7 @@ const pendingOperationSchema = {
 };
 
 // ============================================================
-// 🔥 SCHEMA: user_settings
+// SCHEMA USER_SETTINGS
 // ============================================================
 const userSettingsSchema = {
   title: 'user_settings schema',
@@ -313,11 +313,18 @@ export async function getDb(): Promise<RxDatabase> {
 }
 
 // ============================================================
-// SINCRONIZAÇÃO COM SUPABASE (CORRIGIDA)
+// FUNÇÃO DE SINCRONIZAÇÃO (sem dependência circular)
 // ============================================================
 let isSyncing = false;
 
-export async function syncWithSupabase(userId: string) {
+/**
+ * Sincroniza com Supabase - a função `processPendingOperations`
+ * é passada como callback para evitar dependência circular.
+ */
+export async function syncWithSupabase(
+  userId: string,
+  processPendingOps?: () => Promise<void>
+) {
   if (isSyncing) {
     console.log('⏳ Sincronização já em andamento.');
     return;
@@ -325,12 +332,17 @@ export async function syncWithSupabase(userId: string) {
   isSyncing = true;
 
   try {
-    console.log('📦 Processando operações pendentes...');
-    await processPendingOperations();
+    // 🔥 Processa operações pendentes primeiro (se a função foi fornecida)
+    if (processPendingOps) {
+      console.log('📦 Processando operações pendentes...');
+      await processPendingOps();
+    } else {
+      console.log('ℹ️ Nenhuma função de processamento de pendências fornecida. Pulando.');
+    }
 
     const database = await getDb();
 
-    // 🔥 VERIFICA SE O BANCO LOCAL ESTÁ VAZIO
+    // Verifica se o banco está vazio
     let hasData = false;
     const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
     for (const name of collectionsToCheck) {
@@ -344,7 +356,6 @@ export async function syncWithSupabase(userId: string) {
       }
     }
 
-    // Se o banco estiver vazio, força pull completo
     let lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
     if (!hasData) {
       console.log('📭 Banco local vazio – forçando pull completo.');
@@ -428,7 +439,7 @@ export async function syncWithSupabase(userId: string) {
       }
     }
 
-    // study_sessions (mantido igual)
+    // study_sessions (mantido)
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
@@ -498,10 +509,8 @@ export async function syncWithSupabase(userId: string) {
       console.error('❌ Erro na sincronização de study_sessions:', err);
     }
 
-    // 🔥 ATUALIZAR TIMESTAMP DE ÚLTIMA SINCRONIZAÇÃO
-    const now = new Date().toISOString();
-    localStorage.setItem('lastSyncTimestamp', now);
-    console.log('✅ Sincronização concluída em:', now);
+    localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
+    console.log('✅ Sincronização concluída.');
 
   } catch (err) {
     console.error('❌ Erro na sincronização:', err);
