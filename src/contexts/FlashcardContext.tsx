@@ -235,7 +235,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
         try {
           const supabaseClient = await getSupabaseWithToken();
-          await supabaseClient.from('user_settings').insert(newSettings);
+          // 🔥 USAR user_settings_text
+          await supabaseClient.from('user_settings_text').insert(newSettings);
         } catch (e) {
           console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
         }
@@ -443,7 +444,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     try {
       const supabaseClient = await getSupabaseWithToken();
-      await supabaseClient.from('user_settings').insert(newSettings);
+      // 🔥 USAR user_settings_text
+      await supabaseClient.from('user_settings_text').insert(newSettings);
     } catch (e) {
       console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
     }
@@ -451,78 +453,78 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newSettings;
   }, [userId, userSettings]);
 
-// src/contexts/FlashcardContext.tsx
+  const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = await getDb();
 
-const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
-  if (!userId) throw new Error('Usuário não autenticado');
-  const db = await getDb();
-
-  // 🔥 Força o updated_at para garantir que seja uma data nova
-  const updatedData = {
-    ...settings,
-    updated_at: new Date().toISOString()
-  };
-
-  const doc = await db.user_settings.findOne({
-    selector: { user_id: userId }
-  }).exec();
-
-  if (!doc) {
-    // Criar novo registro
-    const now = new Date().toISOString();
-    const newSettings: UserSettings = {
-      id: uid(),
-      user_id: userId,
-      ...DEFAULT_SETTINGS,
+    // 🔥 Força o updated_at para garantir que seja uma data nova
+    const updatedData = {
       ...settings,
-      updated_at: now
+      updated_at: new Date().toISOString()
     };
-    await db.user_settings.insert(newSettings);
-    setUserSettings(newSettings);
 
-    // 🔥 Força sincronização imediata
-    try {
-      const supabaseClient = await getSupabaseWithToken();
-      await supabaseClient.from('user_settings').upsert(newSettings, { onConflict: 'id' });
-      console.log('✅ Configurações criadas e sincronizadas com Supabase.');
-    } catch (e) {
-      console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
-      await enqueueOperation('create', 'user_settings', newSettings);
+    const doc = await db.user_settings.findOne({
+      selector: { user_id: userId }
+    }).exec();
+
+    if (!doc) {
+      // Criar novo registro
+      const now = new Date().toISOString();
+      const newSettings: UserSettings = {
+        id: uid(),
+        user_id: userId,
+        ...DEFAULT_SETTINGS,
+        ...settings,
+        updated_at: now
+      };
+      await db.user_settings.insert(newSettings);
+      setUserSettings(newSettings);
+
+      // 🔥 Força sincronização imediata
+      try {
+        const supabaseClient = await getSupabaseWithToken();
+        // 🔥 USAR user_settings_text
+        await supabaseClient.from('user_settings_text').upsert(newSettings, { onConflict: 'id' });
+        console.log('✅ Configurações criadas e sincronizadas com Supabase.');
+      } catch (e) {
+        console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
+        await enqueueOperation('create', 'user_settings', newSettings);
+      }
+
+      // 🔥 Força refresh e sincronização completa
+      await refreshUserSettings();
+      await syncWithSupabase(userId);
+      return;
     }
 
-    // 🔥 Força refresh e sincronização completa
+    // Atualizar existente
+    const currentDoc = doc.toJSON() as UserSettings;
+    const patchData = {
+      ...updatedData,
+      updated_at: new Date().toISOString() // força atualização
+    };
+
+    await doc.patch(patchData);
+    const updatedSettings = { ...currentDoc, ...patchData } as UserSettings;
+    setUserSettings(updatedSettings);
+
+    // 🔥 Tenta sincronizar diretamente com Supabase
+    try {
+      const supabaseClient = await getSupabaseWithToken();
+      // 🔥 USAR user_settings_text
+      await supabaseClient.from('user_settings_text').upsert(updatedSettings, { onConflict: 'id' });
+      console.log('✅ Configurações atualizadas e sincronizadas com Supabase.');
+    } catch (e) {
+      console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
+      await enqueueOperation('update', 'user_settings', { id: doc.id, ...patchData });
+    }
+
+    // 🔥 Força refresh local
     await refreshUserSettings();
+
+    // 🔥 Força sincronização completa (pull + push)
     await syncWithSupabase(userId);
-    return;
-  }
-
-  // Atualizar existente
-  const currentDoc = doc.toJSON() as UserSettings;
-  const patchData = {
-    ...updatedData,
-    updated_at: new Date().toISOString() // força atualização
-  };
-
-  await doc.patch(patchData);
-  const updatedSettings = { ...currentDoc, ...patchData } as UserSettings;
-  setUserSettings(updatedSettings);
-
-  // 🔥 Tenta sincronizar diretamente com Supabase
-  try {
-    const supabaseClient = await getSupabaseWithToken();
-    await supabaseClient.from('user_settings').upsert(updatedSettings, { onConflict: 'id' });
-    console.log('✅ Configurações atualizadas e sincronizadas com Supabase.');
-  } catch (e) {
-    console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
-    await enqueueOperation('update', 'user_settings', { id: doc.id, ...patchData });
-  }
-
-  // 🔥 Força refresh local
-  await refreshUserSettings();
-
-  // 🔥 Força sincronização completa (pull + push)
-  await syncWithSupabase(userId);
-}, [userId, refreshUserSettings]);
+  }, [userId, refreshUserSettings]);
 
   // ============================================================
   // DERIVADOS

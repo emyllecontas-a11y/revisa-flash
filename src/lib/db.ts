@@ -351,19 +351,19 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       let query;
       if (name === 'decks') {
         query = supabaseClient
-          .from(name)
+          .from('user_settings_text')
           .select('*')
           .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
           .gte('updated_at', lastSync);
       } else if (name === 'user_settings') {
         query = supabaseClient
-          .from(name)
+          .from('user_settings_text')
           .select('*')
           .filter('user_id', 'eq', userId)
           .gte('updated_at', lastSync);
       } else {
         query = supabaseClient
-          .from(name)
+          .from('user_settings_text')
           .select('*')
           .eq('user_id', userId)
           .gte('updated_at', lastSync);
@@ -404,7 +404,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       if (localDocs.length > 0) {
         const docsToPush = localDocs.map(doc => doc.toJSON());
         const { error: upsertError } = await supabaseClient
-          .from(name)
+          .from('user_settings_text')
           .upsert(docsToPush, { onConflict: 'id' });
 
         if (upsertError) {
