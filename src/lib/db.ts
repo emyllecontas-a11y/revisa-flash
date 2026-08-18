@@ -305,7 +305,8 @@ export async function getDb(): Promise<RxDatabase> {
 
 let isSyncing = false;
 
-export async function syncWithSupabase(userId: string) {
+// 🔥 ADICIONA CALLBACK PARA NOTIFICAR QUANDO A SINCRONIZAÇÃO FOR CONCLUÍDA
+export async function syncWithSupabase(userId: string, onComplete?: () => void) {
   if (isSyncing) {
     console.log('⏳ Sincronização já em andamento.');
     return;
@@ -486,6 +487,11 @@ export async function syncWithSupabase(userId: string) {
 
     localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
     console.log('✅ Sincronização concluída.');
+
+    // 🔥 Executa callback se fornecido
+    if (onComplete) {
+      onComplete();
+    }
 
   } catch (err) {
     console.error('❌ Erro na sincronização:', err);

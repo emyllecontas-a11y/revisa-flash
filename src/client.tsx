@@ -5,7 +5,7 @@ import { ClerkProvider } from '@clerk/clerk-react';
 import { ptBR } from '@clerk/localizations';
 import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
-import { FlashcardProvider } from './contexts/FlashcardContext';
+import { FlashcardProvider, useFlashcardContext } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
@@ -13,7 +13,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider, useAppUser } from './contexts/UserContext';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
-import { processPendingOperations } from '@/services/queueService'; // mantido estático
+import { processPendingOperations } from '@/services/queueService';
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
 import { addRxPlugin } from 'rxdb';
@@ -42,6 +42,9 @@ function Root() {
   const { userId, isLoaded, isSignedIn, user } = useAppUser();
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(userId);
+  
+  // 🔥 Obtém a função refreshUserSettings do contexto
+  const { refreshUserSettings } = useFlashcardContext();
 
   // 🔥 Sincroniza perfil com Supabase
   useEffect(() => {
@@ -114,10 +117,15 @@ function Root() {
         setReady(true);
 
         try {
-          await syncWithSupabase(userId);
+          // 🔥 Sincroniza e recarrega configurações
+          await syncWithSupabase(userId, () => {
+            refreshUserSettings();
+          });
           console.log('✅ Sincronização RxDB concluída!');
           await processPendingOperations();
           console.log('✅ Fila de operações processada.');
+          // Recarrega configurações novamente após processar fila
+          await refreshUserSettings();
         } catch (syncError) {
           console.warn('⚠️ Sincronização falhou (offline ou erro):', syncError);
         }
@@ -127,7 +135,7 @@ function Root() {
       }
     };
     initialize();
-  }, [isLoaded, isSignedIn, userId]);
+  }, [isLoaded, isSignedIn, userId, refreshUserSettings]);
 
   // 🔥 LISTENER ONLINE E SETUP DO LISTENER DA FILA (COM IMPORT DINÂMICO)
   useEffect(() => {
@@ -135,7 +143,9 @@ function Root() {
       console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
       if (userIdRef.current) {
         processPendingOperations().catch(console.error);
-        syncWithSupabase(userIdRef.current).catch(console.warn);
+        syncWithSupabase(userIdRef.current, () => {
+          refreshUserSettings();
+        }).catch(console.warn);
       }
     };
     window.addEventListener('online', handleOnline);
@@ -150,7 +160,7 @@ function Root() {
     return () => {
       window.removeEventListener('online', handleOnline);
     };
-  }, []);
+  }, [refreshUserSettings]);
 
   // 🔥 REALTIME SUBSCRIPTION (com debounce)
   useEffect(() => {
@@ -175,7 +185,9 @@ function Root() {
           }
           syncTimeout = setTimeout(async () => {
             try {
-              await syncWithSupabase(userId);
+              await syncWithSupabase(userId, () => {
+                refreshUserSettings();
+              });
               console.log('✅ Re-sincronização concluída após mudança em tempo real.');
             } catch (syncError) {
               console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
@@ -201,7 +213,7 @@ function Root() {
       }
       supabase.removeChannel(channel);
     };
-  }, [ready]);
+  }, [ready, refreshUserSettings]);
 
   // 🔥 LISTENER DE VISIBILIDADE DA ABA (sincroniza quando a aba ganha foco)
   useEffect(() => {
@@ -211,7 +223,9 @@ function Root() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('👁️ Aba focada, sincronizando dados...');
-        syncWithSupabase(userId)
+        syncWithSupabase(userId, () => {
+          refreshUserSettings();
+        })
           .then(() => console.log('✅ Sincronização por foco concluída'))
           .catch(err => console.warn('⚠️ Falha ao sincronizar por foco:', err));
       }
@@ -221,7 +235,22 @@ function Root() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [ready]);
+  }, [ready, refreshUserSettings]);
+
+  // 🔥 SINCRONIZAÇÃO PERIÓDICA (a cada 5 minutos)
+  useEffect(() => {
+    if (!userIdRef.current || !ready) return;
+    const userId = userIdRef.current;
+
+    const intervalId = setInterval(() => {
+      console.log('⏰ Sincronização periódica (5min)...');
+      syncWithSupabase(userId, () => {
+        refreshUserSettings();
+      }).catch(err => console.warn('⚠️ Falha na sincronização periódica:', err));
+    }, 5 * 60 * 1000); // 5 minutos
+
+    return () => clearInterval(intervalId);
+  }, [ready, refreshUserSettings]);
 
   // 🚀 TELA DE CARREGAMENTO
   if (!isLoaded || !ready) {
