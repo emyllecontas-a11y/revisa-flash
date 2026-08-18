@@ -359,7 +359,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         query = supabaseClient
           .from(name)
           .select('*')
-          .eq('user_id', userId)
+          .filter('user_id', 'eq', userId)
           .gte('updated_at', lastSync);
       } else {
         query = supabaseClient
