@@ -313,6 +313,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
   isSyncing = true;
 
   try {
+    // 🔥 Importação dinâmica para evitar dependência circular
     const { processPendingOperations } = await import('@/services/queueService');
     console.log('📦 Processando operações pendentes...');
     await processPendingOperations();
@@ -349,49 +350,13 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       let query;
       if (name === 'decks') {
         query = supabaseClient
-          .from('decks')  // 🔥 CORRIGIDO: usa a tabela 'decks' no Supabase
+          .from('decks') // 🔥 CORRIGIDO: usa 'decks' em vez de 'user_settings_text'
           .select('*')
           .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
           .gte('updated_at', lastSync);
-      } else if (name === 'flashcards') {
-        query = supabaseClient
-          .from('flashcards')  // 🔥 CORRIGIDO: usa 'flashcards'
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
-      } else if (name === 'disciplines') {
-        query = supabaseClient
-          .from('disciplines')  // 🔥 CORRIGIDO
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
-      } else if (name === 'topics') {
-        query = supabaseClient
-          .from('topics')  // 🔥 CORRIGIDO
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
-      } else if (name === 'errors') {
-        query = supabaseClient
-          .from('errors')  // 🔥 CORRIGIDO
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
-      } else if (name === 'revisoes') {
-        query = supabaseClient
-          .from('revisoes')  // 🔥 CORRIGIDO
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
-      } else if (name === 'study_records') {
-        query = supabaseClient
-          .from('study_records')  // 🔥 CORRIGIDO
-          .select('*')
-          .eq('user_id', userId)
-          .gte('updated_at', lastSync);
       } else if (name === 'user_settings') {
         query = supabaseClient
-          .from('user_settings_text')  // 🔥 CORRIGIDO: usa a tabela separada
+          .from('user_settings_text') // 🔥 MANTIDO: usa 'user_settings_text'
           .select('*')
           .filter('user_id', 'eq', userId)
           .gte('updated_at', lastSync);
@@ -428,11 +393,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
-      // Push local -> Supabase
-      let tableName = name;
-      if (name === 'user_settings') {
-        tableName = 'user_settings_text';
-      }
       const localDocs = await collection.find({
         selector: {
           user_id: userId,
@@ -442,6 +402,13 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
 
       if (localDocs.length > 0) {
         const docsToPush = localDocs.map(doc => doc.toJSON());
+        // 🔥 CORRIGIDO: define o nome da tabela no Supabase
+        let tableName: string;
+        if (name === 'user_settings') {
+          tableName = 'user_settings_text';
+        } else {
+          tableName = name;
+        }
         const { error: upsertError } = await supabaseClient
           .from(tableName)
           .upsert(docsToPush, { onConflict: 'id' });
@@ -454,7 +421,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // study_sessions (não precisa mudar)
+    // study_sessions
     try {
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
@@ -527,6 +494,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
     console.log('✅ Sincronização concluída.');
 
+    // 🔥 Executa callback se fornecido
     if (onComplete) {
       onComplete();
     }
