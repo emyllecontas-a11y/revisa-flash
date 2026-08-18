@@ -23,10 +23,8 @@ import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
 addRxPlugin(RxDBMigrationPlugin);
 addRxPlugin(RxDBUpdatePlugin);
 
-// 🔥 VARIÁVEL INJETADA PELO VITE (timestamp do build)
 declare const __BUILD_TIMESTAMP__: string;
 
-// 🔥 VERSÃO DO SCHEMA – INCREMENTE SEMPRE QUE MUDAR A ESTRUTURA DO BANCO
 const SCHEMA_VERSION = '3';
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -36,108 +34,14 @@ if (!PUBLISHABLE_KEY) {
 }
 
 // ============================================================
-// 📦 COMPONENTE ROOT
+// 📦 COMPONENTE QUE USA O CONTEXTO (filho do FlashcardProvider)
 // ============================================================
-function Root() {
-  const { userId, isLoaded, isSignedIn, user } = useAppUser();
-  const [ready, setReady] = useState(false);
-  const userIdRef = useRef<string | null>(userId);
-  
-  // 🔥 Obtém a função refreshUserSettings do contexto
+function AppContent() {
   const { refreshUserSettings } = useFlashcardContext();
+  const { userId } = useAppUser();
+  const userIdRef = useRef<string | null>(userId);
 
-  // 🔥 Sincroniza perfil com Supabase
-  useEffect(() => {
-    if (!userId || !isLoaded || !isSignedIn) return;
-    const syncProfile = async () => {
-      try {
-        const { data: existing, error: fetchError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', userId)
-          .maybeSingle();
-        if (fetchError) throw fetchError;
-        if (!existing) {
-          const name = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário';
-          const email = user?.emailAddresses?.[0]?.emailAddress || null;
-          const { error: insertError } = await supabase
-            .from('profiles')
-            .insert({
-              id: userId,
-              name: name,
-              email: email,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            });
-          if (insertError) throw insertError;
-          console.log('✅ Perfil criado no Supabase para Clerk user:', userId);
-        }
-      } catch (error) {
-        console.error('❌ Erro ao sincronizar perfil com Supabase:', error);
-      }
-    };
-    syncProfile();
-  }, [userId, user, isLoaded, isSignedIn]);
-
-  // 🔥 INICIALIZAÇÃO DO RXDB COM VERIFICAÇÃO DE VERSÃO
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn || !userId) {
-      console.log('⏳ Usuário não autenticado – modo visitante ou login pendente.');
-      setReady(true);
-      return;
-    }
-
-    const initialize = async () => {
-      try {
-        console.log('🔄 Inicializando RxDB para usuário:', userId);
-        userIdRef.current = userId;
-        localStorage.setItem('revisaflash_user_id', userId);
-
-        // 🔥 VERIFICA VERSÃO DO SCHEMA
-        const storedVersion = localStorage.getItem('revisaflash_schema_version');
-        if (storedVersion !== SCHEMA_VERSION) {
-          console.log(`🔄 Versão do schema mudou (${storedVersion} → ${SCHEMA_VERSION}). Resetando banco local...`);
-          try {
-            const db = await getDb();
-            await db.destroy();
-            console.log('✅ Banco local destruído.');
-          } catch (destroyError) {
-            console.warn('⚠️ Erro ao destruir banco (pode já estar fechado):', destroyError);
-          }
-          localStorage.removeItem('revisaflash_schema_version');
-          await getDb();
-          localStorage.setItem('revisaflash_schema_version', SCHEMA_VERSION);
-          console.log('✅ Banco recriado com nova versão do schema.');
-        } else {
-          await getDb();
-        }
-
-        console.log('✅ Banco local inicializado.');
-        setReady(true);
-
-        try {
-          // 🔥 Sincroniza e recarrega configurações
-          await syncWithSupabase(userId, () => {
-            refreshUserSettings();
-          });
-          console.log('✅ Sincronização RxDB concluída!');
-          await processPendingOperations();
-          console.log('✅ Fila de operações processada.');
-          // Recarrega configurações novamente após processar fila
-          await refreshUserSettings();
-        } catch (syncError) {
-          console.warn('⚠️ Sincronização falhou (offline ou erro):', syncError);
-        }
-      } catch (error) {
-        console.error('❌ Erro ao inicializar RxDB:', error);
-        setReady(true);
-      }
-    };
-    initialize();
-  }, [isLoaded, isSignedIn, userId, refreshUserSettings]);
-
-  // 🔥 LISTENER ONLINE E SETUP DO LISTENER DA FILA (COM IMPORT DINÂMICO)
+  // 🔥 LISTENER ONLINE E SETUP DO LISTENER DA FILA
   useEffect(() => {
     const handleOnline = () => {
       console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
@@ -150,7 +54,6 @@ function Root() {
     };
     window.addEventListener('online', handleOnline);
 
-    // 🔥 Importação dinâmica para evitar dependência circular
     import('@/services/queueService').then(({ setupQueueListener }) => {
       setupQueueListener();
     }).catch(err => {
@@ -164,7 +67,7 @@ function Root() {
 
   // 🔥 REALTIME SUBSCRIPTION (com debounce)
   useEffect(() => {
-    if (!userIdRef.current || !ready) return;
+    if (!userIdRef.current) return;
     const userId = userIdRef.current;
 
     let syncTimeout: NodeJS.Timeout | null = null;
@@ -213,11 +116,11 @@ function Root() {
       }
       supabase.removeChannel(channel);
     };
-  }, [ready, refreshUserSettings]);
+  }, [refreshUserSettings]);
 
-  // 🔥 LISTENER DE VISIBILIDADE DA ABA (sincroniza quando a aba ganha foco)
+  // 🔥 LISTENER DE VISIBILIDADE DA ABA
   useEffect(() => {
-    if (!userIdRef.current || !ready) return;
+    if (!userIdRef.current) return;
     const userId = userIdRef.current;
 
     const handleVisibilityChange = () => {
@@ -235,11 +138,11 @@ function Root() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [ready, refreshUserSettings]);
+  }, [refreshUserSettings]);
 
   // 🔥 SINCRONIZAÇÃO PERIÓDICA (a cada 5 minutos)
   useEffect(() => {
-    if (!userIdRef.current || !ready) return;
+    if (!userIdRef.current) return;
     const userId = userIdRef.current;
 
     const intervalId = setInterval(() => {
@@ -250,7 +153,104 @@ function Root() {
     }, 5 * 60 * 1000); // 5 minutos
 
     return () => clearInterval(intervalId);
-  }, [ready, refreshUserSettings]);
+  }, [refreshUserSettings]);
+
+  return <RouterProvider router={router} />;
+}
+
+// ============================================================
+// 📦 COMPONENTE ROOT (configura o banco e prove os contextos)
+// ============================================================
+function Root() {
+  const { userId, isLoaded, isSignedIn, user } = useAppUser();
+  const [ready, setReady] = useState(false);
+  const userIdRef = useRef<string | null>(userId);
+
+  // 🔥 Sincroniza perfil com Supabase
+  useEffect(() => {
+    if (!userId || !isLoaded || !isSignedIn) return;
+    const syncProfile = async () => {
+      try {
+        const { data: existing, error: fetchError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', userId)
+          .maybeSingle();
+        if (fetchError) throw fetchError;
+        if (!existing) {
+          const name = user?.fullName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Usuário';
+          const email = user?.emailAddresses?.[0]?.emailAddress || null;
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert({
+              id: userId,
+              name: name,
+              email: email,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          if (insertError) throw insertError;
+          console.log('✅ Perfil criado no Supabase para Clerk user:', userId);
+        }
+      } catch (error) {
+        console.error('❌ Erro ao sincronizar perfil com Supabase:', error);
+      }
+    };
+    syncProfile();
+  }, [userId, user, isLoaded, isSignedIn]);
+
+  // 🔥 INICIALIZAÇÃO DO RXDB
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn || !userId) {
+      console.log('⏳ Usuário não autenticado – modo visitante ou login pendente.');
+      setReady(true);
+      return;
+    }
+
+    const initialize = async () => {
+      try {
+        console.log('🔄 Inicializando RxDB para usuário:', userId);
+        userIdRef.current = userId;
+        localStorage.setItem('revisaflash_user_id', userId);
+
+        const storedVersion = localStorage.getItem('revisaflash_schema_version');
+        if (storedVersion !== SCHEMA_VERSION) {
+          console.log(`🔄 Versão do schema mudou (${storedVersion} → ${SCHEMA_VERSION}). Resetando banco local...`);
+          try {
+            const db = await getDb();
+            await db.destroy();
+            console.log('✅ Banco local destruído.');
+          } catch (destroyError) {
+            console.warn('⚠️ Erro ao destruir banco (pode já estar fechado):', destroyError);
+          }
+          localStorage.removeItem('revisaflash_schema_version');
+          await getDb();
+          localStorage.setItem('revisaflash_schema_version', SCHEMA_VERSION);
+          console.log('✅ Banco recriado com nova versão do schema.');
+        } else {
+          await getDb();
+        }
+
+        console.log('✅ Banco local inicializado.');
+        setReady(true);
+
+        // 🔥 Sincronização inicial (sem callback, pois o FlashcardProvider ainda não montou)
+        try {
+          await syncWithSupabase(userId);
+          console.log('✅ Sincronização RxDB concluída!');
+          await processPendingOperations();
+          console.log('✅ Fila de operações processada.');
+        } catch (syncError) {
+          console.warn('⚠️ Sincronização falhou (offline ou erro):', syncError);
+        }
+      } catch (error) {
+        console.error('❌ Erro ao inicializar RxDB:', error);
+        setReady(true);
+      }
+    };
+    initialize();
+  }, [isLoaded, isSignedIn, userId]);
 
   // 🚀 TELA DE CARREGAMENTO
   if (!isLoaded || !ready) {
@@ -266,13 +266,14 @@ function Root() {
     );
   }
 
+  // 🔥 Quando pronto, renderiza os providers e o AppContent (que usa o contexto)
   return (
     <ThemeProvider>
       <LoadingProvider>
         <FlashcardProvider>
           <StudyProvider>
             <ErrorProvider>
-              <RouterProvider router={router} />
+              <AppContent />
             </ErrorProvider>
           </StudyProvider>
         </FlashcardProvider>
@@ -293,9 +294,7 @@ function AppWithAuth() {
       signUpUrl="/cadastro"
       fallbackRedirectUrl="/"
       __experimental_billing={{ enabled: true }}
-      appearance={{
-        // Mantenha a aparência que você já tinha
-      }}
+      appearance={{}}
     >
       <UserProvider>
         <Root />
@@ -305,7 +304,7 @@ function AppWithAuth() {
 }
 
 // ============================================================
-// 🔥 REGISTRO DO SERVICE WORKER (CORRIGIDO)
+// 🔥 REGISTRO DO SERVICE WORKER
 // ============================================================
 if ('serviceWorker' in navigator) {
   const registerSW = async () => {
@@ -329,7 +328,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ============================================================
-// 🔧 EXPORTA FUNÇÃO DE SINCRONIZAÇÃO MANUAL (opcional)
+// 🔧 EXPORTA FUNÇÃO DE SINCRONIZAÇÃO MANUAL
 // ============================================================
 export const manualSync = async () => {
   const userId = localStorage.getItem('revisaflash_user_id');
