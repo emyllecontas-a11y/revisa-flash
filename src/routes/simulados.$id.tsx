@@ -433,11 +433,13 @@ export default function SimuladoPlayerPage() {
   }
 
   // ============================================================
-  // RENDER: FASE CORREÇÃO
+  // 🔥 FASE CORREÇÃO (CORRIGIDA)
   // ============================================================
   if (fase === "correcao") {
     const q = simulado.questoes[idx];
-    const resp = progresso.respostas[q.numero];
+    // 🔥 CORREÇÃO AQUI: prioriza resultadoSalvo.respostas, fallback para progresso.respostas
+    const respostasParaExibir = resultadoSalvo?.respostas || progresso.respostas;
+    const resp = respostasParaExibir[q.numero];
     const correta = q.alternativas.find(a => a.correta)?.letra;
     const acertou = resp === correta;
 
