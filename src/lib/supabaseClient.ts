@@ -75,10 +75,11 @@ export const getClerkToken = async (): Promise<string | null> => {
 export const getSupabaseWithToken = async () => {
   const token = await getClerkToken();
   if (!token) {
-    console.warn('⚠️ Nenhum token do Clerk disponível. Usando cliente anônimo.');
+    // Limpa o cache
     cachedSupabaseClient = null;
     cachedToken = null;
-    return supabase;
+    // LANÇA O ERRO - quem chamar precisa tratar
+    throw new Error('Usuário não autenticado');
   }
 
   // Se o token mudou, recria o cliente

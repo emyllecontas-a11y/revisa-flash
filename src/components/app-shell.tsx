@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Home, BookOpen, Calendar, AlertTriangle, Layers, BarChart3, Settings,
+  Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
   Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -37,7 +37,7 @@ function LoadingScreen() {
 }
 
 // ============================================================
-// ROTAS
+// ROTAS (SEM ESTATISTICAS)
 // ============================================================
 const ROTAS = [
   { to: "/", label: "Início", icon: "home" },
@@ -45,7 +45,7 @@ const ROTAS = [
   { to: "/calendario", label: "Calendário", icon: "calendar" },
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
-  { to: "/desempenho", label: "Desempenho", icon: "chart" },
+  { to: "/simulados", label: "Simulados", icon: "file-text" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
 ] as const;
 
@@ -55,7 +55,7 @@ const ICONS = {
   calendar: Calendar,
   alert: AlertTriangle,
   layers: Layers,
-  chart: BarChart3,
+  "file-text": FileText,
   settings: Settings,
 } as const;
 
@@ -82,7 +82,7 @@ export function AppShell({
   const { user, isLoaded } = useAppUser();
   const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
   const { refresh: refreshErrors } = useErrors();
-  const { records: studyRecords, refresh: refreshStudy } = useStudy(); // 🔥 NOVO: refreshStudy
+  const { records: studyRecords, refresh: refreshStudy } = useStudy();
 
   // Estados
   const [profileName, setProfileName] = useState<string>("Usuário");
@@ -91,7 +91,7 @@ export function AppShell({
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
-  // 🔥 REF para evitar múltiplas sincronizações simultâneas
+  // Ref para evitar múltiplas sincronizações simultâneas
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ============================================================
@@ -154,7 +154,7 @@ export function AppShell({
   }, [studyRecords]);
 
   // ============================================================
-  // 🔥 FUNÇÃO DE SINCRONIZAÇÃO (estável, com ref)
+  // FUNÇÃO DE SINCRONIZAÇÃO
   // ============================================================
   const performSync = useCallback(async (showFeedback: boolean = false) => {
     console.log('🔁 [performSync] Chamado!');
@@ -176,10 +176,9 @@ export function AppShell({
       await processPendingOperations();
       await syncWithSupabase(userId);
 
-      // 🔥 RECARREGA OS DADOS
       refreshFlashcards();
       refreshErrors();
-      refreshStudy(); // 🔥 NOVO: recarrega StudyContext
+      refreshStudy();
 
       const now = new Date();
       setLastSyncTime(now.toLocaleTimeString());
@@ -197,15 +196,14 @@ export function AppShell({
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy]); // 🔥 NOVO: refreshStudy nas dependências
+  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy]);
 
   // ============================================================
-  // 🔥 SINCRONIZAÇÃO AUTOMÁTICA (com debounce)
+  // SINCRONIZAÇÃO AUTOMÁTICA (com debounce)
   // ============================================================
   useEffect(() => {
     if (!isLoaded || flashcardsLoading) return;
 
-    // 🔥 Função agendada com debounce
     const scheduleSync = () => {
       if (syncTimeoutRef.current) {
         clearTimeout(syncTimeoutRef.current);
@@ -213,20 +211,17 @@ export function AppShell({
       syncTimeoutRef.current = setTimeout(() => {
         performSync();
         syncTimeoutRef.current = null;
-      }, 1000); // espera 1 segundo antes de sincronizar
+      }, 1000);
     };
 
-    // 1. Sincronização inicial (apenas uma vez)
     const initialSync = setTimeout(() => {
       performSync();
     }, 2000);
 
-    // 2. Intervalo a cada 60 segundos (em vez de 30)
     const syncInterval = setInterval(() => {
       performSync();
     }, 60000);
 
-    // 3. Quando a aba ganhar foco (com debounce)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('🔄 [AppShell] Aba focada, agendando sincronização...');
@@ -235,14 +230,12 @@ export function AppShell({
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 4. Quando a conexão for restaurada (com debounce)
     const handleOnline = () => {
       console.log('📶 [AppShell] Conexão restaurada, agendando sincronização...');
       scheduleSync();
     };
     window.addEventListener('online', handleOnline);
 
-    // Limpeza
     return () => {
       clearTimeout(initialSync);
       clearInterval(syncInterval);
@@ -253,7 +246,6 @@ export function AppShell({
         syncTimeoutRef.current = null;
       }
     };
-    // 🔥 DEPENDÊNCIAS CORRETAS: apenas isLoaded e flashcardsLoading, NÃO performSync
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, flashcardsLoading]);
 
@@ -354,7 +346,6 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* 🔥 BOTÃO DE SINCRONIZAÇÃO MANUAL */}
             <button
               onClick={() => performSync(true)}
               disabled={isSyncing}

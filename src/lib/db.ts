@@ -2,7 +2,6 @@
 import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
-// ⚠️ REMOVIDO: import { processPendingOperations } from '@/services/queueService';
 
 const deckSchema = {
   title: 'deck schema',
@@ -313,7 +312,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
   isSyncing = true;
 
   try {
-    // 🔥 Importação dinâmica para evitar dependência circular
     const { processPendingOperations } = await import('@/services/queueService');
     console.log('📦 Processando operações pendentes...');
     await processPendingOperations();
@@ -340,6 +338,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     }
 
     const supabaseClient = await getSupabaseWithToken();
+    const userIdStr = String(userId);
 
     const collections = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
 
@@ -347,34 +346,59 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const collection = database.collections[name];
       if (!collection) continue;
 
-      let query;
-      if (name === 'decks') {
-        query = supabaseClient
-          .from('decks') // 🔥 CORRIGIDO: usa 'decks' em vez de 'user_settings_text'
-          .select('*')
-          .or(`user_id.eq.${userId},shared_with.cs.{${userId}}`)
-          .gte('updated_at', lastSync);
+      let supabaseData: any[] = [];
+      let error: any = null;
+
+      // 🔥 PULL: USAR RPC PARA study_records E user_settings
+      if (name === 'study_records') {
+        const { data, error: rpcError } = await supabaseClient
+          .rpc('buscar_study_records_usuario', {
+            p_user_id: userIdStr,
+            p_last_sync: lastSync,
+          });
+        if (rpcError) {
+          console.error(`❌ RPC buscar_study_records_usuario:`, rpcError);
+          continue;
+        }
+        supabaseData = data || [];
+        console.log(`✅ RPC study_records: ${supabaseData.length} registros`);
       } else if (name === 'user_settings') {
-        query = supabaseClient
-          .from('user_settings_text') // 🔥 MANTIDO: usa 'user_settings_text'
+        const { data, error: rpcError } = await supabaseClient
+          .rpc('buscar_user_settings_usuario', {
+            p_user_id: userIdStr,
+            p_last_sync: lastSync,
+          });
+        if (rpcError) {
+          console.error(`❌ RPC buscar_user_settings_usuario:`, rpcError);
+          continue;
+        }
+        supabaseData = data || [];
+        console.log(`✅ RPC user_settings: ${supabaseData.length} registros`);
+      } else if (name === 'decks') {
+        const { data, error: queryError } = await supabaseClient
+          .from('decks')
           .select('*')
-          .filter('user_id', 'eq', userId)
+          .or(`user_id.eq.${userIdStr},shared_with.cs.{${userIdStr}}`)
           .gte('updated_at', lastSync);
+        if (queryError) {
+          console.error(`❌ Pull ${name}:`, queryError);
+          continue;
+        }
+        supabaseData = data || [];
       } else {
-        query = supabaseClient
+        const { data, error: queryError } = await supabaseClient
           .from(name)
           .select('*')
-          .eq('user_id', userId)
+          .eq('user_id', userIdStr)
           .gte('updated_at', lastSync);
+        if (queryError) {
+          console.error(`❌ Pull ${name}:`, queryError);
+          continue;
+        }
+        supabaseData = data || [];
       }
 
-      const { data: supabaseData, error } = await query;
-      if (error) {
-        console.error(`❌ Pull ${name}:`, error);
-        continue;
-      }
-
-      if (supabaseData && supabaseData.length > 0) {
+      if (supabaseData.length > 0) {
         for (const doc of supabaseData) {
           const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
           if (existing) {
@@ -393,30 +417,48 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
+      // 🔥 PUSH: USAR RPC PARA study_records E user_settings
       const localDocs = await collection.find({
         selector: {
-          user_id: userId,
+          user_id: userIdStr,
           updated_at: { $gt: lastSync }
         }
       }).exec();
 
       if (localDocs.length > 0) {
         const docsToPush = localDocs.map(doc => doc.toJSON());
-        // 🔥 CORRIGIDO: define o nome da tabela no Supabase
-        let tableName: string;
-        if (name === 'user_settings') {
-          tableName = 'user_settings_text';
+        
+        if (name === 'study_records') {
+          const { error: rpcError } = await supabaseClient
+            .rpc('salvar_study_records_batch', {
+              p_records: docsToPush,
+            });
+          if (rpcError) {
+            console.error(`❌ Push ${name} via RPC:`, rpcError);
+          } else {
+            console.log(`✅ Push ${name} via RPC: ${docsToPush.length} registros enviados`);
+          }
+        } else if (name === 'user_settings') {
+          const { error: rpcError } = await supabaseClient
+            .rpc('salvar_user_settings_batch', {
+              p_records: docsToPush,
+            });
+          if (rpcError) {
+            console.error(`❌ Push ${name} via RPC:`, rpcError);
+          } else {
+            console.log(`✅ Push ${name} via RPC: ${docsToPush.length} registros enviados`);
+          }
         } else {
-          tableName = name;
-        }
-        const { error: upsertError } = await supabaseClient
-          .from(tableName)
-          .upsert(docsToPush, { onConflict: 'id' });
+          let tableName: string = name;
+          const { error: upsertError } = await supabaseClient
+            .from(tableName)
+            .upsert(docsToPush, { onConflict: 'id' });
 
-        if (upsertError) {
-          console.error(`❌ Push ${name}:`, upsertError);
-        } else {
-          console.log(`✅ Push ${name}: ${docsToPush.length} registros enviados`);
+          if (upsertError) {
+            console.error(`❌ Push ${name}:`, upsertError);
+          } else {
+            console.log(`✅ Push ${name}: ${docsToPush.length} registros enviados`);
+          }
         }
       }
     }
@@ -427,7 +469,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const decksCollection = database.collections.decks;
       const userDecks = await decksCollection.find({
         selector: { 
-          user_id: userId,
+          user_id: userIdStr,
           isDeleted: { $ne: true }
         }
       }).exec();
@@ -494,7 +536,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
     console.log('✅ Sincronização concluída.');
 
-    // 🔥 Executa callback se fornecido
     if (onComplete) {
       onComplete();
     }

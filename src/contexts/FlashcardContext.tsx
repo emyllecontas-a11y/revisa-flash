@@ -453,77 +453,71 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newSettings;
   }, [userId, userSettings]);
 
+  // ============================================================
+  // 🔥 FUNÇÃO updateUserSettings CORRIGIDA (AQUI ESTÁ A CORREÇÃO)
+  // ============================================================
   const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
 
-    // 🔥 Força o updated_at para garantir que seja uma data nova
+    // Força o updated_at para garantir que seja uma data nova
     const updatedData = {
       ...settings,
       updated_at: new Date().toISOString()
     };
 
-    const doc = await db.user_settings.findOne({
+    console.log('💾 [updateUserSettings] Salvando configurações:', updatedData);
+
+    // 1. Busca o documento no RxDB
+    let doc = await db.user_settings.findOne({
       selector: { user_id: userId }
     }).exec();
 
+    let updatedSettings: UserSettings;
+
     if (!doc) {
-      // Criar novo registro
+      // Se não existir, cria um novo
+      console.log('📄 [updateUserSettings] Documento não encontrado, criando novo...');
       const now = new Date().toISOString();
       const newSettings: UserSettings = {
         id: uid(),
         user_id: userId,
         ...DEFAULT_SETTINGS,
-        ...settings,
+        ...updatedData,
         updated_at: now
       };
       await db.user_settings.insert(newSettings);
+      updatedSettings = newSettings;
       setUserSettings(newSettings);
-
-      // 🔥 Força sincronização imediata
-      try {
-        const supabaseClient = await getSupabaseWithToken();
-        // 🔥 USAR user_settings_text
-        await supabaseClient.from('user_settings_text').upsert(newSettings, { onConflict: 'id' });
-        console.log('✅ Configurações criadas e sincronizadas com Supabase.');
-      } catch (e) {
-        console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
-        await enqueueOperation('create', 'user_settings', newSettings);
-      }
-
-      // 🔥 Força refresh e sincronização completa
-      await refreshUserSettings();
-      await syncWithSupabase(userId);
-      return;
+    } else {
+      // Se existir, atualiza com $set (mais confiável que patch para persistência)
+      console.log('📄 [updateUserSettings] Documento encontrado, atualizando com $set...');
+      const currentDoc = doc.toJSON() as UserSettings;
+      
+      // Usa update com $set para garantir que a mudança seja aplicada no banco
+      await doc.update({ $set: updatedData });
+      
+      updatedSettings = { ...currentDoc, ...updatedData } as UserSettings;
+      setUserSettings(updatedSettings);
     }
 
-    // Atualizar existente
-    const currentDoc = doc.toJSON() as UserSettings;
-    const patchData = {
-      ...updatedData,
-      updated_at: new Date().toISOString() // força atualização
-    };
+    console.log('✅ [updateUserSettings] Configurações atualizadas localmente:', updatedSettings);
 
-    await doc.patch(patchData);
-    const updatedSettings = { ...currentDoc, ...patchData } as UserSettings;
-    setUserSettings(updatedSettings);
-
-    // 🔥 Tenta sincronizar diretamente com Supabase
+    // 2. Tenta sincronizar com Supabase (user_settings_text)
     try {
       const supabaseClient = await getSupabaseWithToken();
-      // 🔥 USAR user_settings_text
       await supabaseClient.from('user_settings_text').upsert(updatedSettings, { onConflict: 'id' });
-      console.log('✅ Configurações atualizadas e sincronizadas com Supabase.');
+      console.log('✅ [updateUserSettings] Configurações sincronizadas com Supabase.');
     } catch (e) {
-      console.warn('⚠️ Falha ao sincronizar (offline), enfileirando.');
-      await enqueueOperation('update', 'user_settings', { id: doc.id, ...patchData });
+      console.warn('⚠️ [updateUserSettings] Falha ao sincronizar (offline), enfileirando.');
+      await enqueueOperation('update', 'user_settings', updatedSettings);
     }
 
-    // 🔥 Força refresh local
-    await refreshUserSettings();
+    // 3. 🔥 FORÇA RECARGA COMPLETA para garantir que tudo esteja consistente
+    await refreshUserSettings(); // Recarrega o estado local do contexto
+    await syncWithSupabase(userId); // Força pull/push completo
 
-    // 🔥 Força sincronização completa (pull + push)
-    await syncWithSupabase(userId);
+    console.log('✅ [updateUserSettings] Processo concluído com recarga forçada.');
   }, [userId, refreshUserSettings]);
 
   // ============================================================

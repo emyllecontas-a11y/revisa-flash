@@ -7,12 +7,15 @@ import Login from './routes/login';
 import Index from './routes/index';
 import Flashcards from './routes/flashcards';
 import Erros from './routes/erros';
-import Desempenho from './routes/desempenho';
+// import Desempenho from './routes/desempenho'; // 🔥 REMOVIDO
 import Conteudo from './routes/conteudo';
 import Configuracoes from './routes/configuracoes';
 import Calendario from './routes/calendario';
 import LandingPage from './routes/landing';
-// Importação do Flash IA foi removida
+// 🔥 IMPORTAÇÕES DE SIMULADOS
+import Simulados from './routes/simulados';
+import SimuladoPlayer from './routes/simulados.$id';
+// 🔥 REMOVIDO: import Estatisticas from './routes/estatisticas';
 
 // Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
@@ -60,14 +63,41 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
+  // 🔥 ROTA /desempenho REMOVIDA
+  // {
+  //   path: '/desempenho',
+  //   element: (
+  //     <ClerkProtectedRoute>
+  //       <Desempenho />
+  //     </ClerkProtectedRoute>
+  //   ),
+  // },
+  // 🔥 ROTAS DE SIMULADOS
   {
-    path: '/desempenho',
+    path: '/simulados',
     element: (
       <ClerkProtectedRoute>
-        <Desempenho />
+        <Simulados />
       </ClerkProtectedRoute>
     ),
   },
+  {
+    path: '/simulados/:id',
+    element: (
+      <ClerkProtectedRoute>
+        <SimuladoPlayer />
+      </ClerkProtectedRoute>
+    ),
+  },
+  // 🔥 ROTA /estatisticas REMOVIDA (agora é modal)
+  // {
+  //   path: '/estatisticas',
+  //   element: (
+  //     <ClerkProtectedRoute>
+  //       <Estatisticas />
+  //     </ClerkProtectedRoute>
+  //   ),
+  // },
   {
     path: '/conteudo',
     element: (
