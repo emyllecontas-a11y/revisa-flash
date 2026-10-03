@@ -104,6 +104,8 @@ const errorSchema = {
     topic: { type: 'string' },
     type: { type: 'string' },
     source: { type: 'string' },
+    source_lista_id: { type: 'string' },
+    discipline_id: { type: 'string' },
     comment: { type: 'string' },
     repetitions: { type: 'number' },
     status: { type: 'string' },
@@ -264,7 +266,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v2';
+    const DB_NAME = 'revisaflash_db_v3';
 
     try {
       indexedDB.deleteDatabase('revisaflash-db');
@@ -318,23 +320,26 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
 
     const database = await getDb();
 
-    let hasData = false;
-    const collectionsToCheck = ['decks', 'flashcards', 'disciplines', 'topics', 'errors', 'revisoes', 'study_records', 'user_settings'];
+    // ============================================================
+    // 🔥 VERIFICAÇÃO POR COLEÇÃO
+    // Se uma coleção está vazia localmente, força pull completo dela.
+    // ============================================================
+    const lastSyncGlobal = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
+
+    const collectionsToCheck = [
+      'decks', 'flashcards', 'disciplines', 'topics', 'errors',
+      'revisoes', 'study_records', 'user_settings'
+    ];
+    const emptyCollections = new Set<string>();
     for (const name of collectionsToCheck) {
       const collection = database.collections[name];
       if (collection) {
         const count = await collection.find({ selector: {} }).exec();
-        if (count.length > 0) {
-          hasData = true;
-          break;
+        if (count.length === 0) {
+          emptyCollections.add(name);
+          console.log(`📭 Coleção "${name}" vazia localmente — pull completo será forçado.`);
         }
       }
-    }
-
-    let lastSync = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
-    if (!hasData) {
-      console.log('📭 Banco local vazio – forçando pull completo.');
-      lastSync = '1970-01-01T00:00:00Z';
     }
 
     const supabaseClient = await getSupabaseWithToken();
@@ -346,15 +351,16 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const collection = database.collections[name];
       if (!collection) continue;
 
+      const pullFrom = emptyCollections.has(name) ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
+
       let supabaseData: any[] = [];
       let error: any = null;
 
-      // 🔥 PULL: USAR RPC PARA study_records E user_settings
       if (name === 'study_records') {
         const { data, error: rpcError } = await supabaseClient
           .rpc('buscar_study_records_usuario', {
             p_user_id: userIdStr,
-            p_last_sync: lastSync,
+            p_last_sync: pullFrom,
           });
         if (rpcError) {
           console.error(`❌ RPC buscar_study_records_usuario:`, rpcError);
@@ -366,7 +372,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         const { data, error: rpcError } = await supabaseClient
           .rpc('buscar_user_settings_usuario', {
             p_user_id: userIdStr,
-            p_last_sync: lastSync,
+            p_last_sync: pullFrom,
           });
         if (rpcError) {
           console.error(`❌ RPC buscar_user_settings_usuario:`, rpcError);
@@ -379,7 +385,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           .from('decks')
           .select('*')
           .or(`user_id.eq.${userIdStr},shared_with.cs.{${userIdStr}}`)
-          .gte('updated_at', lastSync);
+          .gte('updated_at', pullFrom);
         if (queryError) {
           console.error(`❌ Pull ${name}:`, queryError);
           continue;
@@ -390,7 +396,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           .from(name)
           .select('*')
           .eq('user_id', userIdStr)
-          .gte('updated_at', lastSync);
+          .gte('updated_at', pullFrom);
         if (queryError) {
           console.error(`❌ Pull ${name}:`, queryError);
           continue;
@@ -417,17 +423,16 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         console.log(`ℹ️ Pull ${name}: Nenhuma atualização nova.`);
       }
 
-      // 🔥 PUSH: USAR RPC PARA study_records E user_settings
       const localDocs = await collection.find({
         selector: {
           user_id: userIdStr,
-          updated_at: { $gt: lastSync }
+          updated_at: { $gt: lastSyncGlobal }
         }
       }).exec();
 
       if (localDocs.length > 0) {
         const docsToPush = localDocs.map(doc => doc.toJSON());
-        
+
         if (name === 'study_records') {
           const { error: rpcError } = await supabaseClient
             .rpc('salvar_study_records_batch', {
@@ -468,22 +473,26 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       console.log('📥 Pull: study_sessions');
       const decksCollection = database.collections.decks;
       const userDecks = await decksCollection.find({
-        selector: { 
+        selector: {
           user_id: userIdStr,
           isDeleted: { $ne: true }
         }
       }).exec();
-      
+
       const deckIds = userDecks.map(doc => doc.get('id'));
 
       if (deckIds.length === 0) {
         console.log('⚠️ study_sessions: Nenhum deck encontrado');
       } else {
+        const sessionsPullFrom = emptyCollections.has('study_sessions')
+          ? '1970-01-01T00:00:00Z'
+          : lastSyncGlobal;
+
         const { data: sessionsData, error } = await supabaseClient
           .from('study_sessions')
           .select('*')
           .in('deckId', deckIds)
-          .gte('updated_at', lastSync);
+          .gte('updated_at', sessionsPullFrom);
 
         if (error) {
           console.error('❌ Erro ao buscar study_sessions:', error);
@@ -507,7 +516,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         const collection = database.collections.study_sessions;
         const localSessions = await collection.find({
           selector: {
-            updated_at: { $gt: lastSync }
+            updated_at: { $gt: lastSyncGlobal }
           }
         }).exec();
 

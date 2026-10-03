@@ -15,6 +15,8 @@ import LandingPage from './routes/landing';
 // 🔥 IMPORTAÇÕES DE SIMULADOS
 import Simulados from './routes/simulados';
 import SimuladoPlayer from './routes/simulados.$id';
+// 🔥 IMPORTAÇÃO DE LISTAS
+import ListaPlayer from './routes/listas.$id';
 // 🔥 REMOVIDO: import Estatisticas from './routes/estatisticas';
 
 // Importa o componente de proteção
@@ -86,6 +88,15 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <SimuladoPlayer />
+      </ClerkProtectedRoute>
+    ),
+  },
+  // 🔥 ROTA DE LISTAS (player)
+  {
+    path: '/listas/:id',
+    element: (
+      <ClerkProtectedRoute>
+        <ListaPlayer />
       </ClerkProtectedRoute>
     ),
   },

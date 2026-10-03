@@ -11,6 +11,7 @@ import {
   buscarHistoricoCompleto
 } from "@/services/simuladoService";
 import { useStudy } from "@/contexts/StudyContext";
+import { ListasTab } from "@/components/ListasTab";
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
@@ -25,6 +26,9 @@ export default function SimuladosPage() {
   const navigate = useNavigate();
   const { user } = useAppUser();
   const { records: studyRecords } = useStudy();
+
+  // 🔥 Aba principal (Simulados / Listas)
+  const [mainTab, setMainTab] = useState<'simulados' | 'listas'>('simulados');
 
   const [simulados, setSimulados] = useState<Simulado[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +50,7 @@ export default function SimuladosPage() {
   // Estado para modal de estatísticas
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   
-  // Estado para abas do modal
+  // Estado para abas do modal (estatísticas / histórico)
   const [activeTab, setActiveTab] = useState<'estatisticas' | 'historico'>('estatisticas');
 
   // Estado para histórico
@@ -471,85 +475,111 @@ export default function SimuladosPage() {
   // ============================================================
   // RENDER
   // ============================================================
-  if (loading) {
-    return (
-      <AppShell breadcrumb="Simulados" title="Carregando...">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (error) {
-    return (
-      <AppShell breadcrumb="Simulados" title="Erro">
-        <div className="rf-card p-6 text-center">
-          <p className="text-accent">{error}</p>
-          <button
-            onClick={loadData}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-          >
-            Tentar novamente
-          </button>
-        </div>
-      </AppShell>
-    );
-  }
-
   return (
     <AppShell breadcrumb="Simulados" title="Simulados">
-      {/* KPIs */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Disponíveis" value={metricas.total} icon={<Layers className="h-3.5 w-3.5" />} />
-        <Kpi label="Em andamento" value={metricas.emAndamento} icon={<Clock className="h-3.5 w-3.5" />} accent />
-        <Kpi label="Concluídos" value={metricas.concluidos} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
-        <Kpi label="Média geral" value={`${metricas.mediaGeral}%`} icon={<ListChecks className="h-3.5 w-3.5" />} accent />
+      {/* 🔥 ABAS PRINCIPAIS (Simulados / Listas) */}
+      <div className="mb-6 flex gap-1 border-b border-border">
+        <button
+          onClick={() => setMainTab('simulados')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+            mainTab === 'simulados'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-foreground/50 hover:text-foreground'
+          }`}
+        >
+          Simulados
+        </button>
+        <button
+          onClick={() => setMainTab('listas')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+            mainTab === 'listas'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-foreground/50 hover:text-foreground'
+          }`}
+        >
+          Listas
+        </button>
       </div>
 
-      {/* Botão Estatísticas */}
-      {resultadosLista.length > 0 && (
-        <button
-          onClick={() => setIsStatsModalOpen(true)}
-          className="mb-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
-        >
-          <TrendingUp className="h-4 w-4" />
-          Ver estatísticas completas ({resultadosLista.length} simulados)
-        </button>
+      {/* ============================================================ */}
+      {/* CONTEÚDO DA ABA SIMULADOS */}
+      {/* ============================================================ */}
+      {mainTab === 'simulados' ? (
+        loading ? (
+          <div className="flex items-center justify-center min-h-[400px]">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : error ? (
+          <div className="rf-card p-6 text-center">
+            <p className="text-accent">{error}</p>
+            <button
+              onClick={loadData}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Kpi label="Disponíveis" value={metricas.total} icon={<Layers className="h-3.5 w-3.5" />} />
+              <Kpi label="Em andamento" value={metricas.emAndamento} icon={<Clock className="h-3.5 w-3.5" />} accent />
+              <Kpi label="Concluídos" value={metricas.concluidos} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
+              <Kpi label="Média geral" value={`${metricas.mediaGeral}%`} icon={<ListChecks className="h-3.5 w-3.5" />} accent />
+            </div>
+
+            {/* Botão Estatísticas */}
+            {resultadosLista.length > 0 && (
+              <button
+                onClick={() => setIsStatsModalOpen(true)}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
+              >
+                <TrendingUp className="h-4 w-4" />
+                Ver estatísticas completas ({resultadosLista.length} simulados)
+              </button>
+            )}
+
+            {/* Lista de simulados */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              {simulados.map((s) => (
+                <SimuladoCard
+                  key={s.id}
+                  simulado={s}
+                  onStart={handleStartSimulado}
+                  onVerResultado={handleVerResultado}
+                  onExcluir={handleExcluirSimulado}
+                  excluindo={excluindo === s.id}
+                  resultado={resultadosUsuario[s.id] || null}
+                />
+              ))}
+
+              <article className="grid place-items-center rounded-2xl border border-dashed border-border/80 bg-surface/25 p-8 text-center">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <Upload className="h-5 w-5" />
+                </div>
+                <h3 className="mt-3 font-display text-sm font-semibold">Adicionar novo simulado</h3>
+                <p className="mt-1 max-w-xs text-xs text-foreground/45">
+                  Envie um arquivo JSON com a estrutura do simulado.
+                </p>
+                <button
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+                >
+                  <FileText className="h-3.5 w-3.5" /> Importar JSON
+                </button>
+              </article>
+            </div>
+          </>
+        )
+      ) : (
+        /* ============================================================ */
+        /* CONTEÚDO DA ABA LISTAS */
+        /* ============================================================ */
+        <ListasTab />
       )}
 
-      {/* Lista de simulados */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {simulados.map((s) => (
-          <SimuladoCard
-            key={s.id}
-            simulado={s}
-            onStart={handleStartSimulado}
-            onVerResultado={handleVerResultado}
-            onExcluir={handleExcluirSimulado}
-            excluindo={excluindo === s.id}
-            resultado={resultadosUsuario[s.id] || null}
-          />
-        ))}
-
-        <article className="grid place-items-center rounded-2xl border border-dashed border-border/80 bg-surface/25 p-8 text-center">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
-            <Upload className="h-5 w-5" />
-          </div>
-          <h3 className="mt-3 font-display text-sm font-semibold">Adicionar novo simulado</h3>
-          <p className="mt-1 max-w-xs text-xs text-foreground/45">
-            Envie um arquivo JSON com a estrutura do simulado.
-          </p>
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
-          >
-            <FileText className="h-3.5 w-3.5" /> Importar JSON
-          </button>
-        </article>
-      </div>
-
-      {/* MODAL DE IMPORTAÇÃO */}
+      {/* MODAL DE IMPORTAÇÃO (só de simulados) */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">

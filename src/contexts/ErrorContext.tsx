@@ -14,10 +14,15 @@ export interface ErrorRecord {
   question: string;
   correctAnswer: string;
   yourAnswer?: string;
-  area: string;
+  /** @deprecated Campo legado. */
+  area?: string;
+  /** Vínculo com a tabela `disciplines`. */
+  discipline_id?: string;
   topic?: string;
   type: ErrorType;
   source?: string;
+  /** ID da lista de origem (se veio de uma lista de questões). */
+  source_lista_id?: string;
   comment?: string;
   repetitions: number;
   status: 'ativo' | 'resolvido' | 'arquivado';
@@ -27,45 +32,71 @@ export interface ErrorRecord {
   isDeleted?: boolean;
 }
 
-type AddErrorData = Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId' | 'isDeleted' | 'updated_at'>;
+export interface Discipline {
+  id: string;
+  name: string;
+}
+
+type AddErrorData = Omit<
+  ErrorRecord,
+  'id' | 'user_id' | 'createdAt' | 'repetitions' | 'status' | 'flashcardId' | 'isDeleted' | 'updated_at'
+>;
 
 interface ErrorContextType {
   records: ErrorRecord[];
   addError: (data: AddErrorData) => Promise<ErrorRecord>;
-  editError: (id: string, data: Partial<Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt'>>) => Promise<void>;
+  addOrIncrementError: (data: AddErrorData) => Promise<{ error: ErrorRecord; wasIncremented: boolean }>;
+  editError: (
+    id: string,
+    data: Partial<Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt'>>
+  ) => Promise<void>;
   deleteError: (id: string) => Promise<void>;
-  getErrorsByArea: (area: string) => ErrorRecord[];
-  getAreaStats: () => { name: string; icon: string; total: number; errors: number }[];
+  getErrorsByDiscipline: (disciplineId: string | null) => ErrorRecord[];
+  getDisciplineStats: () => { id: string | null; name: string; errors: number }[];
   getTotalErrors: () => number;
   userId: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  areas: { name: string; icon: string }[];
-  addArea: (name: string, icon: string) => Promise<void>;
-  removeArea: (name: string) => Promise<void>;
+  disciplines: Discipline[];
+  disciplinesLoading: boolean;
 }
 
 const ErrorContext = createContext<ErrorContextType | undefined>(undefined);
-
-const DEFAULT_AREAS = [
-  { name: 'Patologia Oral', icon: '🔬' },
-  { name: 'Periodontia', icon: '🦷' },
-  { name: 'Cirurgia BMF', icon: '💉' },
-  { name: 'Endodontia', icon: '⚙️' },
-  { name: 'Ortodontia', icon: '📐' },
-  { name: 'Dentística', icon: '🪥' },
-  { name: 'Farmacologia', icon: '💊' },
-  { name: 'Radiologia', icon: '📷' },
-];
 
 export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [records, setRecords] = useState<ErrorRecord[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [areas, setAreas] = useState<{ name: string; icon: string }[]>(DEFAULT_AREAS);
+  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
+  const [disciplinesLoading, setDisciplinesLoading] = useState(true);
 
   // ============================================================
-  // CARREGAR DADOS (com filtro isDeleted: false)
+  // CARREGAR DISCIPLINAS DO SUPABASE (só as ativas)
+  // ============================================================
+  const loadDisciplines = useCallback(async (uid: string) => {
+    try {
+      setDisciplinesLoading(true);
+      const client = await getSupabaseWithToken();
+      const { data, error } = await client
+        .from('disciplines')
+        .select('id, name')
+        .eq('user_id', uid)
+        .eq('isDeleted', false)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setDisciplines((data || []) as Discipline[]);
+      console.log(`✅ [ErrorContext] ${data?.length || 0} disciplinas carregadas.`);
+    } catch (e) {
+      console.warn('⚠️ [ErrorContext] Erro ao carregar disciplinas:', e);
+      setDisciplines([]);
+    } finally {
+      setDisciplinesLoading(false);
+    }
+  }, []);
+
+  // ============================================================
+  // CARREGAR ERROS (RxDB local)
   // ============================================================
   const loadData = useCallback(async () => {
     try {
@@ -84,89 +115,29 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       setUserId(userIdFromAuth);
 
+      loadDisciplines(userIdFromAuth);
+
       const db = await getDb();
 
-      // 🔥 Carregar erros não deletados
       const errorsResult = await db.errors.find({
-        selector: { 
+        selector: {
           user_id: userIdFromAuth,
-          isDeleted: { $ne: true }
-        }
+          isDeleted: { $ne: true },
+        },
       }).exec();
       const loadedRecords = errorsResult.map((doc: any) => doc.toJSON() as ErrorRecord);
       setRecords(loadedRecords);
-
-      // ----------------------------------------------------------
-      // 🔥 CARREGAR ÁREAS – CORRIGIDO
-      // ----------------------------------------------------------
-      const areasResult = await db.areas?.find({ 
-        selector: { 
-          user_id: userIdFromAuth,
-          isDeleted: { $ne: true }
-        }
-      }).exec();
-
-      if (areasResult && areasResult.length > 0) {
-        // Se há áreas no banco local, use-as
-        const loadedAreas = areasResult.map((doc: any) => doc.toJSON());
-        setAreas(loadedAreas);
-        console.log(`✅ [ErrorContext] ${loadedAreas.length} áreas carregadas do banco local.`);
-      } else {
-        // Se não há áreas no banco local, verifica no Supabase
-        let supabaseAreas: any[] = [];
-        try {
-          const supabaseClient = await getSupabaseWithToken();
-          const { data, error } = await supabaseClient
-            .from('areas')
-            .select('*')
-            .eq('user_id', userIdFromAuth)
-            .eq('isDeleted', false);
-          
-          if (error) throw error;
-          if (data && data.length > 0) {
-            supabaseAreas = data;
-          }
-        } catch (error) {
-          console.warn('⚠️ Erro ao buscar áreas do Supabase:', error);
-        }
-
-        if (supabaseAreas.length > 0) {
-          // 🔥 Se há áreas no Supabase, insere no banco local e usa elas
-          for (const area of supabaseAreas) {
-            await db.areas.insert(area);
-          }
-          setAreas(supabaseAreas);
-          console.log(`✅ [ErrorContext] ${supabaseAreas.length} áreas carregadas do Supabase.`);
-        } else {
-          // 🔥 Se não há áreas em lugar nenhum, insere as padrão (apenas uma vez)
-          const now = new Date().toISOString();
-          const areasToInsert = DEFAULT_AREAS.map(area => ({
-            id: uid(),
-            user_id: userIdFromAuth,
-            name: area.name,
-            icon: area.icon,
-            isDeleted: false,
-            created_at: now,
-            updated_at: now,
-          }));
-
-          for (const area of areasToInsert) {
-            await db.areas.insert(area);
-          }
-          setAreas(DEFAULT_AREAS);
-          console.log(`✅ [ErrorContext] ${DEFAULT_AREAS.length} áreas padrão inseridas no banco local.`);
-        }
-      }
-
       console.log(`✅ [ErrorContext] ${loadedRecords.length} erros carregados.`);
     } catch (error) {
       console.error('❌ [ErrorContext] Erro ao carregar dados:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadDisciplines]);
 
-  // 🔥 LISTENER PARA RECARREGAR AUTOMATICAMENTE (COM DEBOUNCE)
+  // ============================================================
+  // LISTENER
+  // ============================================================
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
     let isSubscribed = true;
@@ -203,277 +174,234 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [loadData]);
 
   // ============================================================
-  // ADICIONAR ERRO (com isDeleted: false e updated_at)
+  // ADICIONAR ERRO
   // ============================================================
-  const addError = useCallback(async (data: AddErrorData): Promise<ErrorRecord> => {
-    if (!userId) throw new Error('Usuário não autenticado');
+  const addError = useCallback(
+    async (data: AddErrorData): Promise<ErrorRecord> => {
+      if (!userId) throw new Error('Usuário não autenticado');
 
-    const now = new Date().toISOString();
-    const newError: ErrorRecord = {
-      ...data,
-      id: uid(),
-      user_id: userId,
-      repetitions: 0,
-      status: 'ativo',
-      flashcardId: undefined,
-      createdAt: now,
-      updated_at: now,
-      isDeleted: false,
-    };
-
-    try {
-      const db = await getDb();
-      await db.errors.insert(newError);
-      setRecords(prev => [...prev, newError]);
-      console.log('📝 Erro registrado e salvo no RxDB:', newError);
+      const now = new Date().toISOString();
+      const newError: ErrorRecord = {
+        ...data,
+        area: data.area ?? '',
+        id: uid(),
+        user_id: userId,
+        repetitions: 0,
+        status: 'ativo',
+        flashcardId: undefined,
+        createdAt: now,
+        updated_at: now,
+        isDeleted: false,
+      };
 
       try {
-        const supabaseClient = await getSupabaseWithToken();
-        const { error } = await supabaseClient
-          .from('errors')
-          .insert(newError);
-        if (error) throw error;
-        console.log('✅ [ErrorContext] Erro sincronizado com Supabase.');
-      } catch (supabaseError) {
-        console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
-        await enqueueOperation('create', 'errors', newError);
-      }
+        const db = await getDb();
+        await db.errors.insert(newError);
+        setRecords(prev => [...prev, newError]);
+        console.log('📝 Erro registrado e salvo no RxDB:', newError);
 
-      return newError;
-    } catch (error) {
-      console.error('❌ [ErrorContext] Erro ao salvar erro:', error);
-      throw error;
-    }
-  }, [userId]);
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { error } = await supabaseClient
+            .from('errors')
+            .insert(newError);
+          if (error) throw error;
+          console.log('✅ [ErrorContext] Erro sincronizado com Supabase.');
+        } catch (supabaseError) {
+          console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
+          await enqueueOperation('create', 'errors', newError);
+        }
+
+        return newError;
+      } catch (error) {
+        console.error('❌ [ErrorContext] Erro ao salvar erro:', error);
+        throw error;
+      }
+    },
+    [userId]
+  );
 
   // ============================================================
   // EDITAR ERRO
   // ============================================================
-  const editError = useCallback(async (id: string, data: Partial<Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt'>>) => {
-    try {
-      const db = await getDb();
-      const doc = await db.errors.findOne({ selector: { id } }).exec();
-      if (!doc) {
-        console.warn('⚠️ Erro não encontrado no RxDB:', id);
-        return;
-      }
-
-      const updatedData = {
-        ...data,
-        updated_at: new Date().toISOString()
-      };
-      await doc.incrementalPatch(updatedData);
-
-      setRecords(prev => prev.map(r =>
-        r.id === id ? { ...r, ...updatedData } : r
-      ));
-
+  const editError = useCallback(
+    async (
+      id: string,
+      data: Partial<Omit<ErrorRecord, 'id' | 'user_id' | 'createdAt'>>
+    ) => {
       try {
-        const supabaseClient = await getSupabaseWithToken();
-        const { error } = await supabaseClient
-          .from('errors')
-          .update(updatedData)
-          .eq('id', id);
-        if (error) throw error;
-        console.log('✅ [ErrorContext] Erro atualizado no Supabase.');
-      } catch (supabaseError) {
-        console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
-        await enqueueOperation('update', 'errors', { id, ...updatedData });
-      }
-    } catch (error) {
-      console.error('❌ [ErrorContext] Erro ao editar erro:', error);
-      throw error;
-    }
-  }, []);
-
-  // ============================================================
-  // EXCLUIR ERRO (SOFT DELETE com isDeleted: true e updated_at)
-  // ============================================================
-  const deleteError = useCallback(async (id: string) => {
-    if (!userId) return;
-    try {
-      const db = await getDb();
-      const doc = await db.errors.findOne({ selector: { id } }).exec();
-      if (!doc) {
-        console.warn('⚠️ Erro não encontrado no RxDB:', id);
-        return;
-      }
-
-      const now = new Date().toISOString();
-
-      // 🔥 SOFT DELETE com updated_at correto
-      await doc.incrementalPatch({
-        isDeleted: true,
-        updated_at: now,
-      });
-      
-      setRecords(prev => prev.filter(r => r.id !== id));
-      console.log('🗑️ Erro marcado como deletado localmente.');
-
-      try {
-        const supabaseClient = await getSupabaseWithToken();
-        const { error } = await supabaseClient
-          .from('errors')
-          .update({ isDeleted: true, updated_at: now })
-          .eq('id', id);
-        if (error) throw error;
-        console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
-      } catch (supabaseError) {
-        console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete (offline?), adicionando à fila.');
-        await enqueueOperation('update', 'errors', { id, isDeleted: true, updated_at: now });
-      }
-    } catch (error) {
-      console.error('❌ [ErrorContext] Erro ao excluir erro:', error);
-      throw error;
-    }
-  }, [userId]);
-
-  // ============================================================
-  // GESTÃO DE ÁREAS (COM SOFT DELETE)
-  // ============================================================
-  const addArea = useCallback(async (name: string, icon: string) => {
-    if (!userId) throw new Error('Usuário não autenticado');
-    if (areas.some(a => a.name === name)) {
-      alert('Área já existe.');
-      return;
-    }
-    
-    const now = new Date().toISOString();
-    const newArea = {
-      id: uid(),
-      user_id: userId,
-      name,
-      icon,
-      isDeleted: false,
-      created_at: now,
-      updated_at: now,
-    };
-
-    try {
-      const db = await getDb();
-      if (db.areas) {
-        await db.areas.insert(newArea);
-      }
-      setAreas(prev => [...prev, { name, icon }]);
-      console.log('📝 Área adicionada localmente:', name);
-
-      try {
-        const supabaseClient = await getSupabaseWithToken();
-        const { error } = await supabaseClient
-          .from('areas')
-          .insert(newArea);
-        if (error) throw error;
-        console.log('✅ [ErrorContext] Área sincronizada com Supabase.');
-      } catch (supabaseError) {
-        console.warn('⚠️ [ErrorContext] Falha ao sincronizar área (offline?), adicionando à fila.');
-        await enqueueOperation('create', 'areas', newArea);
-      }
-    } catch (error) {
-      console.error('❌ [ErrorContext] Erro ao adicionar área:', error);
-      throw error;
-    }
-  }, [userId, areas]);
-
-  // 🔥 REMOVER ÁREA (SOFT DELETE)
-  const removeArea = useCallback(async (name: string) => {
-    if (!userId) return;
-    if (records.some(r => r.area === name)) {
-      alert(`Não é possível remover a área "${name}" pois há erros associados.`);
-      return;
-    }
-
-    try {
-      const db = await getDb();
-      let areaId: string | null = null;
-      if (db.areas) {
-        const doc = await db.areas.findOne({ 
-          selector: { 
-            user_id: userId, 
-            name,
-            isDeleted: { $ne: true }
-          }
-        }).exec();
-        if (doc) {
-          areaId = doc.toJSON().id;
-          await doc.incrementalPatch({
-            isDeleted: true,
-            updated_at: new Date().toISOString(),
-          });
+        const db = await getDb();
+        const doc = await db.errors.findOne({ selector: { id } }).exec();
+        if (!doc) {
+          console.warn('⚠️ Erro não encontrado no RxDB:', id);
+          return;
         }
-      }
-      setAreas(prev => prev.filter(a => a.name !== name));
-      console.log('🗑️ Área marcada como deletada localmente:', name);
 
-      if (areaId) {
+        const updatedData = {
+          ...data,
+          updated_at: new Date().toISOString(),
+        };
+        await doc.incrementalPatch(updatedData);
+
+        setRecords(prev => prev.map(r => (r.id === id ? { ...r, ...updatedData } : r)));
+
         try {
           const supabaseClient = await getSupabaseWithToken();
           const { error } = await supabaseClient
-            .from('areas')
-            .update({ isDeleted: true, updated_at: new Date().toISOString() })
-            .eq('id', areaId);
+            .from('errors')
+            .update(updatedData)
+            .eq('id', id);
           if (error) throw error;
-          console.log('✅ [ErrorContext] Área marcada como deletada no Supabase.');
+          console.log('✅ [ErrorContext] Erro atualizado no Supabase.');
         } catch (supabaseError) {
-          console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete de área, enfileirando.');
-          await enqueueOperation('update', 'areas', { id: areaId, isDeleted: true, updated_at: new Date().toISOString() });
+          console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
+          await enqueueOperation('update', 'errors', { id, ...updatedData });
         }
+      } catch (error) {
+        console.error('❌ [ErrorContext] Erro ao editar erro:', error);
+        throw error;
       }
-    } catch (error) {
-      console.error('❌ [ErrorContext] Erro ao remover área:', error);
-      throw error;
-    }
-  }, [userId, records]);
+    },
+    []
+  );
+
+  // ============================================================
+  // ADICIONAR OU INCREMENTAR (depois de editError!)
+  // ============================================================
+  const addOrIncrementError = useCallback(
+    async (data: AddErrorData): Promise<{ error: ErrorRecord; wasIncremented: boolean }> => {
+      if (!userId) throw new Error('Usuário não autenticado');
+
+      const existente = records.find(r =>
+        r.question.trim().toLowerCase() === data.question.trim().toLowerCase() &&
+        (r.discipline_id || null) === (data.discipline_id || null)
+      );
+
+      if (existente) {
+        const updated = {
+          repetitions: (existente.repetitions || 0) + 1,
+          yourAnswer: data.yourAnswer || existente.yourAnswer,
+          updated_at: new Date().toISOString(),
+        };
+        await editError(existente.id, updated);
+        console.log(`♻️ Erro existente incrementado: ${existente.id} (rep: ${updated.repetitions})`);
+        return { error: { ...existente, ...updated }, wasIncremented: true };
+      }
+
+      const novo = await addError(data);
+      return { error: novo, wasIncremented: false };
+    },
+    [userId, records, addError, editError]
+  );
+
+  // ============================================================
+  // EXCLUIR ERRO
+  // ============================================================
+  const deleteError = useCallback(
+    async (id: string) => {
+      if (!userId) return;
+      try {
+        const db = await getDb();
+        const doc = await db.errors.findOne({ selector: { id } }).exec();
+        if (!doc) {
+          console.warn('⚠️ Erro não encontrado no RxDB:', id);
+          return;
+        }
+
+        const now = new Date().toISOString();
+        await doc.incrementalPatch({ isDeleted: true, updated_at: now });
+        setRecords(prev => prev.filter(r => r.id !== id));
+        console.log('🗑️ Erro marcado como deletado localmente.');
+
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { error } = await supabaseClient
+            .from('errors')
+            .update({ isDeleted: true, updated_at: now })
+            .eq('id', id);
+          if (error) throw error;
+          console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
+        } catch (supabaseError) {
+          console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete, enfileirando.');
+          await enqueueOperation('update', 'errors', { id, isDeleted: true, updated_at: now });
+        }
+      } catch (error) {
+        console.error('❌ [ErrorContext] Erro ao excluir erro:', error);
+        throw error;
+      }
+    },
+    [userId]
+  );
 
   // ============================================================
   // GETTERS
   // ============================================================
-  const getErrorsByArea = useCallback((area: string) => {
-    return records.filter(r => r.area === area);
-  }, [records]);
+  const getErrorsByDiscipline = useCallback(
+    (disciplineId: string | null) => {
+      if (disciplineId === null) {
+        return records.filter(r => !r.discipline_id);
+      }
+      return records.filter(r => r.discipline_id === disciplineId);
+    },
+    [records]
+  );
 
-  const getAreaStats = useCallback(() => {
-    return areas.map(area => {
-      const areaRecords = records.filter(r => r.area === area.name);
-      const erroCount = areaRecords.length;
-      const total = Math.max(erroCount + Math.floor(Math.random() * 20) + 5, 10);
-      return {
-        name: area.name,
-        icon: area.icon,
-        total,
-        errors: erroCount,
-      };
-    });
-  }, [areas, records]);
+  const getDisciplineStats = useCallback(() => {
+    const stats: { id: string | null; name: string; errors: number }[] = [];
 
-  const getTotalErrors = useCallback(() => {
-    return records.length;
-  }, [records]);
+    for (const d of disciplines) {
+      const errors = records.filter(r => r.discipline_id === d.id).length;
+      stats.push({ id: d.id, name: d.name, errors });
+    }
+
+    const orphans = records.filter(r => !r.discipline_id).length;
+    if (orphans > 0) {
+      stats.push({ id: null, name: 'Sem disciplina', errors: orphans });
+    }
+
+    return stats;
+  }, [disciplines, records]);
+
+  const getTotalErrors = useCallback(() => records.length, [records]);
 
   const refresh = useCallback(async () => {
     await loadData();
   }, [loadData]);
 
-  const value = useMemo(() => ({
-    records,
-    addError,
-    editError,
-    deleteError,
-    getErrorsByArea,
-    getAreaStats,
-    getTotalErrors,
-    userId,
-    loading,
-    refresh,
-    areas,
-    addArea,
-    removeArea,
-  }), [records, addError, editError, deleteError, getErrorsByArea, getAreaStats, getTotalErrors, userId, loading, refresh, areas, addArea, removeArea]);
-
-  return (
-    <ErrorContext.Provider value={value}>
-      {children}
-    </ErrorContext.Provider>
+  const value = useMemo(
+    () => ({
+      records,
+      addError,
+      addOrIncrementError,
+      editError,
+      deleteError,
+      getErrorsByDiscipline,
+      getDisciplineStats,
+      getTotalErrors,
+      userId,
+      loading,
+      refresh,
+      disciplines,
+      disciplinesLoading,
+    }),
+    [
+      records,
+      addError,
+      addOrIncrementError,
+      editError,
+      deleteError,
+      getErrorsByDiscipline,
+      getDisciplineStats,
+      getTotalErrors,
+      userId,
+      loading,
+      refresh,
+      disciplines,
+      disciplinesLoading,
+    ]
   );
+
+  return <ErrorContext.Provider value={value}>{children}</ErrorContext.Provider>;
 };
 
 export const useErrors = () => {

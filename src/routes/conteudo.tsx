@@ -526,19 +526,30 @@ export default function ConteudoPage() {
     // await loadData();
   }, [topicos]);
 
-  // ---------- EXCLUIR DISCIPLINA (SOFT DELETE) ----------
+  // ---------- EXCLUIR DISCIPLINA (SOFT DELETE + ERROS) ----------
   const handleDeleteDiscipline = useCallback(async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta disciplina e todos os seus tópicos?")) return;
+    if (!confirm("Tem certeza que deseja excluir esta disciplina, seus tópicos e todos os erros vinculados?")) return;
     try {
       const db = await getDb();
       const now = new Date().toISOString();
 
-      // 🔥 1. Soft delete local (sempre faz)
+      // 🔥 1. Soft delete local da disciplina
       const disciplineDoc = await db.disciplines.findOne({ selector: { id } }).exec();
       if (disciplineDoc) {
         await disciplineDoc.patch({ isDeleted: true, updated_at: now });
       }
 
+      // 🔥 1.5 Soft delete local dos erros vinculados à disciplina
+      const errosDaDisciplina = await db.errors.find({ selector: { discipline_id: id } }).exec();
+      const erroIds: string[] = [];
+      for (const e of errosDaDisciplina) {
+        const j = e.toJSON();
+        erroIds.push(j.id);
+        await e.patch({ isDeleted: true, updated_at: now });
+      }
+      console.log(`🗑️ [ConteudoPage] ${errosDaDisciplina.length} erros vinculados marcados como deletados localmente.`);
+
+      // 🔥 2. Soft delete local dos tópicos + revisões
       const topics = await db.topics.find({ selector: { discipline_id: id } }).exec();
       const topicIds = topics.map(t => t.id);
       for (const t of topics) {
@@ -549,19 +560,37 @@ export default function ConteudoPage() {
         }
       }
 
-      // 🔥 2. Tenta enviar direto para o Supabase
+      // 🔥 3. Sincroniza com Supabase
       try {
         const supabaseClient = await getSupabaseWithToken();
-        await supabaseClient.from('disciplines').update({ isDeleted: true, updated_at: now }).eq('id', id);
+
+        // 3a. Disciplina
+        await supabaseClient.from('disciplines')
+          .update({ isDeleted: true, updated_at: now })
+          .eq('id', id);
+
+        // 3b. Erros vinculados
+        await supabaseClient.from('errors')
+          .update({ isDeleted: true, updated_at: now })
+          .eq('discipline_id', id);
+
+        // 3c. Tópicos
         for (const tid of topicIds) {
-          await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', tid);
+          await supabaseClient.from('topics')
+            .update({ isDeleted: true, updated_at: now })
+            .eq('id', tid);
         }
-        console.log('✅ [ConteudoPage] Disciplina excluída no Supabase.');
+
+        console.log('✅ [ConteudoPage] Disciplina, erros e tópicos excluídos no Supabase.');
       } catch (supabaseError) {
         console.warn('⚠️ [ConteudoPage] Falha ao excluir no Supabase, enfileirando.');
         await enqueueOperation('update', 'disciplines', { id, isDeleted: true, updated_at: now });
         for (const tid of topicIds) {
           await enqueueOperation('update', 'topics', { id: tid, isDeleted: true, updated_at: now });
+        }
+        // Enfileira os erros
+        for (const erroId of erroIds) {
+          await enqueueOperation('update', 'errors', { id: erroId, isDeleted: true, updated_at: now });
         }
       }
 
@@ -571,7 +600,7 @@ export default function ConteudoPage() {
       }
 
       await loadData();
-      setErrorMessage("✅ Disciplina excluída com sucesso!");
+      setErrorMessage("✅ Disciplina e erros vinculados excluídos!");
       setTimeout(() => setErrorMessage(""), 3000);
 
     } catch (error: any) {
@@ -579,7 +608,7 @@ export default function ConteudoPage() {
       setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
     }
   }, [selectedDisciplineId, loadData]);
-
+  
   // ---------- EXCLUIR TÓPICO (SOFT DELETE) ----------
   const handleDeleteTopic = useCallback(async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este tópico?")) return;
