@@ -39,7 +39,6 @@ function isOnline(): boolean {
   return typeof navigator === 'undefined' ? true : navigator.onLine;
 }
 
-/** Timeout defensivo para chamadas que podem pendurar */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     p,
@@ -134,7 +133,6 @@ export async function getListaCompleta(
     let linkDocs = await db.listas_questoes.find({ selector: { lista_id: listaId } }).exec();
     console.log(`📖 [getListaCompleta] Local: lista=${!!listaDoc}, links=${linkDocs.length}`);
 
-    // Se falta a lista OU não há links, tenta rede
     const precisaBuscar = (!listaDoc || linkDocs.length === 0);
     if (precisaBuscar && isOnline()) {
       try {
@@ -142,7 +140,6 @@ export async function getListaCompleta(
         const client = await withTimeout(getSupabaseWithToken(), 8000, 'getSupabaseWithToken');
         console.log('📖 [getListaCompleta] Cliente Supabase ok');
 
-        // 1) Lista
         if (!listaDoc) {
           const { data: lista, error: lErr } = await withTimeout(
             client.from('listas').select('*').eq('id', listaId).eq('user_id', userId).eq('isdeleted', false).maybeSingle(),
@@ -154,7 +151,6 @@ export async function getListaCompleta(
           console.log(`📖 [getListaCompleta] Lista vinda do servidor: ${!!lista}`);
         }
 
-        // 2) Links
         const { data: links, error: lkErr } = await withTimeout(
           client.from('listas_questoes').select('*').eq('lista_id', listaId),
           8000,
@@ -167,10 +163,8 @@ export async function getListaCompleta(
           if (!ex) await db.listas_questoes.insert(l).catch(() => {});
         }
 
-        // 3) Questões — SÓ as que estão nos links
         const questaoIds = (links || []).map((l: any) => l.questao_id).filter(Boolean);
         if (questaoIds.length > 0) {
-          // Chunking de 100 por vez
           const chunks: string[][] = [];
           for (let i = 0; i < questaoIds.length; i += 100) {
             chunks.push(questaoIds.slice(i, i + 100));
@@ -197,7 +191,6 @@ export async function getListaCompleta(
           console.log(`📖 [getListaCompleta] Questões do servidor: ${totalQ}`);
         }
 
-        // Relê
         listaDoc = await db.listas.findOne({ selector: { id: listaId } }).exec();
         linkDocs = await db.listas_questoes.find({ selector: { lista_id: listaId } }).exec();
         console.log(`📖 [getListaCompleta] Após fallback: lista=${!!listaDoc}, links=${linkDocs.length}`);
@@ -430,8 +423,11 @@ export async function excluirLista(
     const db = await getDb();
     const now = nowIso();
 
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const listaDoc = await db.listas.findOne({ selector: { id: listaId } }).exec();
-    if (listaDoc) await listaDoc.patch({ isdeleted: true, updated_at: now });
+    if (listaDoc && listaDoc.get('user_id') === userId) {
+      await listaDoc.patch({ isdeleted: true, updated_at: now });
+    }
 
     const resultados = await db.resultados_lista.find({
       selector: { lista_id: listaId, user_id: userId, isdeleted: false },
@@ -463,7 +459,9 @@ export async function restaurarLista(
     const now = nowIso();
 
     const listaDoc = await db.listas.findOne({ selector: { id: listaId } }).exec();
-    if (listaDoc) await listaDoc.patch({ isdeleted: false, updated_at: now });
+    if (listaDoc && listaDoc.get('user_id') === userId) {
+      await listaDoc.patch({ isdeleted: false, updated_at: now });
+    }
     await enqueueOperation('update', 'listas', {
       id: listaId, isdeleted: false, updated_at: now,
     });
@@ -626,7 +624,7 @@ export function calcularAcertosPorArea(
 }
 
 // ============================================================
-// 11. ATUALIZAR LISTA
+// 11. ATUALIZAR LISTA (corrigido — busca por PK)
 // ============================================================
 
 export async function atualizarLista(
@@ -646,8 +644,11 @@ export async function atualizarLista(
       updated_at: now,
     };
 
-    const doc = await db.listas.findOne({ selector: { id: listaId, user_id: userId } }).exec();
-    if (!doc) return { success: false, error: 'Lista não encontrada' };
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const doc = await db.listas.findOne({ selector: { id: listaId } }).exec();
+    if (!doc || doc.get('user_id') !== userId) {
+      return { success: false, error: 'Lista não encontrada' };
+    }
     await doc.patch(patch);
     await enqueueOperation('update', 'listas', { id: listaId, ...patch });
 
@@ -659,7 +660,7 @@ export async function atualizarLista(
 }
 
 // ============================================================
-// 12-16. QUESTÕES
+// 12-16. QUESTÕES (corrigido — busca por PK)
 // ============================================================
 
 export async function removerQuestaoDALista(
@@ -791,6 +792,10 @@ export async function criarQuestaoNaLista(
   }
 }
 
+// ============================================================
+// CORRIGIDO — busca só pela PK + valida em JS
+// ============================================================
+
 export async function atualizarQuestaoLista(
   questaoId: string,
   userId: string,
@@ -829,8 +834,11 @@ export async function atualizarQuestaoLista(
       updated_at: now,
     };
 
-    const doc = await db.questoes_lista.findOne({ selector: { id: questaoId, user_id: userId } }).exec();
-    if (!doc) return { success: false, error: 'Questão não encontrada' };
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const doc = await db.questoes_lista.findOne({ selector: { id: questaoId } }).exec();
+    if (!doc || doc.get('user_id') !== userId) {
+      return { success: false, error: 'Questão não encontrada' };
+    }
     await doc.patch(patch);
     await enqueueOperation('update', 'questoes_lista', { id: questaoId, ...patch });
 
@@ -847,11 +855,16 @@ export async function buscarQuestao(
 ): Promise<{ success: boolean; data?: QuestaoLista; error?: string }> {
   try {
     const db = await getDb();
-    const doc = await db.questoes_lista.findOne({
-      selector: { id: questaoId, user_id: userId, isdeleted: false },
-    }).exec();
+
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const doc = await db.questoes_lista.findOne({ selector: { id: questaoId } }).exec();
     if (!doc) return { success: false, error: 'Questão não encontrada' };
-    return { success: true, data: doc.toJSON() as QuestaoLista };
+
+    const q: any = doc.toJSON();
+    if (q.user_id !== userId || q.isdeleted) {
+      return { success: false, error: 'Questão não encontrada' };
+    }
+    return { success: true, data: q as QuestaoLista };
   } catch (error: any) {
     console.error('Erro ao buscar questão:', error);
     return { success: false, error: error.message };
@@ -859,7 +872,7 @@ export async function buscarQuestao(
 }
 
 // ============================================================
-// 17-22. PASTAS
+// 17-22. PASTAS (corrigido — busca por PK)
 // ============================================================
 
 export async function getPastas(
@@ -931,8 +944,12 @@ export async function renomearPasta(
 
     const db = await getDb();
     const now = nowIso();
-    const doc = await db.listas_pastas.findOne({ selector: { id: pastaId, user_id: userId } }).exec();
-    if (!doc) return { success: false, error: 'Pasta não encontrada' };
+
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const doc = await db.listas_pastas.findOne({ selector: { id: pastaId } }).exec();
+    if (!doc || doc.get('user_id') !== userId) {
+      return { success: false, error: 'Pasta não encontrada' };
+    }
 
     await doc.patch({ name: nomeLimpo, updated_at: now });
     await enqueueOperation('update', 'listas_pastas', { id: pastaId, name: nomeLimpo, updated_at: now });
@@ -959,8 +976,11 @@ export async function excluirPasta(
       await enqueueOperation('update', 'listas', { id: l.get('id'), folder_id: null, updated_at: now });
     }
 
-    const pastaDoc = await db.listas_pastas.findOne({ selector: { id: pastaId, user_id: userId } }).exec();
-    if (pastaDoc) await pastaDoc.patch({ isdeleted: true, updated_at: now });
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const pastaDoc = await db.listas_pastas.findOne({ selector: { id: pastaId } }).exec();
+    if (pastaDoc && pastaDoc.get('user_id') === userId) {
+      await pastaDoc.patch({ isdeleted: true, updated_at: now });
+    }
     await enqueueOperation('update', 'listas_pastas', { id: pastaId, isdeleted: true, updated_at: now });
 
     return { success: true, listasMovidas: listas.length };
@@ -978,8 +998,13 @@ export async function moverListaParaPasta(
   try {
     const db = await getDb();
     const now = nowIso();
-    const doc = await db.listas.findOne({ selector: { id: listaId, user_id: userId, isdeleted: false } }).exec();
+
+    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+    const doc = await db.listas.findOne({ selector: { id: listaId } }).exec();
     if (!doc) return { success: false, error: 'Lista não encontrada' };
+    if (doc.get('user_id') !== userId || doc.get('isdeleted')) {
+      return { success: false, error: 'Lista não encontrada' };
+    }
 
     await doc.patch({ folder_id: folderId, updated_at: now });
     await enqueueOperation('update', 'listas', { id: listaId, folder_id: folderId, updated_at: now });
@@ -1001,8 +1026,9 @@ export async function reordenarPastas(
     const now = nowIso();
 
     for (const item of itens) {
-      const doc = await db.listas_pastas.findOne({ selector: { id: item.id, user_id: userId } }).exec();
-      if (!doc) continue;
+      // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
+      const doc = await db.listas_pastas.findOne({ selector: { id: item.id } }).exec();
+      if (!doc || doc.get('user_id') !== userId) continue;
       await doc.patch({ order: item.order, updated_at: now });
       await enqueueOperation('update', 'listas_pastas', { id: item.id, order: item.order, updated_at: now });
     }
