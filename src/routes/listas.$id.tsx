@@ -1,15 +1,23 @@
 // src/routes/listas.$id.tsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { AppShell } from "@/components/app-shell";
-import { getListaCompleta, calcularResultadoLista, calcularAcertosPorArea, salvarResultadoLista } from "@/services/listaService";
+import {
+  getListaCompleta,
+  calcularResultadoLista,
+  calcularAcertosPorArea,
+  salvarResultadoLista,
+  getProgressoLista,
+  salvarProgressoLista,
+} from "@/services/listaService";
 import { QuestaoListaPlayer, ResultadoListaCalc } from "@/lib/listas-types";
 import { EnviarErrosModal, QuestaoErrada } from "@/components/EnviarErrosModal";
+import { useToast } from "@/hooks/useToast";
 import {
   ArrowLeft, ArrowRight, Bookmark, Check, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, ListChecks,
+  Loader2, Keyboard,
 } from "lucide-react";
 
 type Fase = "resolvendo" | "resultado" | "correcao";
@@ -34,6 +42,7 @@ export default function ListaPlayerPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAppUser();
+  const toast = useToast();
 
   const [lista, setLista] = useState<{
     id: string;
@@ -57,9 +66,34 @@ export default function ListaPlayerPage() {
   const [errosParaEnviar, setErrosParaEnviar] = useState<QuestaoErrada[] | null>(null);
   const [mostrarModalErros, setMostrarModalErros] = useState(false);
   const [enviadosAoBanco, setEnviadosAoBanco] = useState(false);
+  const [mostrarAtalhos, setMostrarAtalhos] = useState(false);
+
+  // Flag que bloqueia autosave até o boot terminar
+  const [booted, setBooted] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Refs para listeners pegarem estado atual
+  const respostasRef = useRef(respostas);
+  useEffect(() => { respostasRef.current = respostas; }, [respostas]);
+
+  const marcadasRef = useRef(marcadas);
+  useEffect(() => { marcadasRef.current = marcadas; }, [marcadas]);
+
+  const tempoRef = useRef(tempoDecorrido);
+  useEffect(() => { tempoRef.current = tempoDecorrido; }, [tempoDecorrido]);
+
+  const faseRef = useRef(fase);
+  useEffect(() => { faseRef.current = fase; }, [fase]);
+
+  const lastSavedRef = useRef<string>('');
+
+  const snapshotDe = (r: Record<number, string>, m: number[]) =>
+    JSON.stringify({ r, m });
+
+  // ============================================================
+  // CARREGAMENTO
+  // ============================================================
   useEffect(() => {
     const load = async () => {
       if (!id || !user?.id) {
@@ -87,15 +121,33 @@ export default function ListaPlayerPage() {
           questoes: result.data.questoes,
           discipline_id: result.data.discipline_id ?? null,
         });
+
+        // Carrega progresso local (se existir)
+        const prog = await getProgressoLista(id, user.id);
+        if (prog.success && prog.data) {
+          setRespostas(prog.data.respostas || {});
+          setMarcadas(prog.data.marcadas || []);
+          setTempoDecorrido(prog.data.tempo_decorrido || 0);
+          lastSavedRef.current = snapshotDe(
+            prog.data.respostas || {},
+            prog.data.marcadas || []
+          );
+        } else {
+          lastSavedRef.current = snapshotDe({}, []);
+        }
       } catch (err: any) {
         setError(err.message || "Erro ao carregar lista");
       } finally {
         setLoading(false);
+        setBooted(true);
       }
     };
     load();
   }, [id, user?.id]);
 
+  // ============================================================
+  // CRONÔMETRO
+  // ============================================================
   useEffect(() => {
     if (fase !== "resolvendo" || !lista) return;
     timerRef.current = setInterval(() => {
@@ -106,15 +158,158 @@ export default function ListaPlayerPage() {
     };
   }, [fase, lista]);
 
-  const responder = (numero: number, letra: string) => {
-    setRespostas(prev => ({ ...prev, [numero]: letra }));
-  };
+  // ============================================================
+  // AUTOSAVE IMEDIATO (respostas + marcadas)
+  // ============================================================
+  useEffect(() => {
+    if (!id || !user?.id || fase !== "resolvendo" || !lista) return;
+    if (!booted) return;
 
-  const toggleMarcar = (numero: number) => {
+    const snap = snapshotDe(respostas, marcadas);
+    if (snap === lastSavedRef.current) return;
+
+    salvarProgressoLista(id, user.id, {
+      respostas,
+      marcadas,
+      tempo_decorrido: tempoRef.current,
+      status: 'em-andamento',
+    }).then(() => {
+      lastSavedRef.current = snap;
+    }).catch((e) => {
+      console.warn('⚠️ Falha ao salvar progresso:', e);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [respostas, marcadas, id, user?.id, fase, lista, booted]);
+
+  // ============================================================
+  // AUTOSAVE DE TEMPO (a cada 10s)
+  // ============================================================
+  useEffect(() => {
+    if (!id || !user?.id || fase !== "resolvendo" || !lista) return;
+    if (!booted) return;
+
+    const interval = setInterval(() => {
+      if (tempoRef.current > 0) {
+        salvarProgressoLista(id, user.id, {
+          respostas: respostasRef.current,
+          marcadas: marcadasRef.current,
+          tempo_decorrido: tempoRef.current,
+          status: 'em-andamento',
+        }).catch(() => {});
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [id, user?.id, fase, lista, booted]);
+
+  // ============================================================
+  // BEFOREUNLOAD + VISIBILITYCHANGE
+  // ============================================================
+  useEffect(() => {
+    if (!id || !user?.id) return;
+
+    const persist = () => {
+      if (faseRef.current !== "resolvendo") return;
+      if (!booted) return;
+      salvarProgressoLista(id, user.id, {
+        respostas: respostasRef.current,
+        marcadas: marcadasRef.current,
+        tempo_decorrido: tempoRef.current,
+        status: 'em-andamento',
+      }).catch(() => {});
+    };
+
+    const onBeforeUnload = () => persist();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') persist();
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [id, user?.id, booted]);
+
+  // ============================================================
+  // ATALHOS DE TECLADO
+  // ============================================================
+  useEffect(() => {
+    if (fase !== "resolvendo" || !lista) return;
+
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const q = lista.questoes[idx];
+      if (!q) return;
+
+      if (confirmar) {
+        if (e.key === "Enter") { e.preventDefault(); handleFinalizar(); }
+        else if (e.key === "Escape") { e.preventDefault(); setConfirmar(false); }
+        return;
+      }
+
+      if (painel) {
+        if (e.key === "Escape") { e.preventDefault(); setPainel(false); }
+        return;
+      }
+
+      const tecla = e.key.toUpperCase();
+      const numeros = ["1", "2", "3", "4", "5"];
+      const letras = ["A", "B", "C", "D", "E"];
+
+      if (q.tipo === "multipla_escolha" && q.alternativas) {
+        let letraAlvo: string | null = null;
+        const idxNum = numeros.indexOf(tecla);
+        if (idxNum >= 0) letraAlvo = letras[idxNum];
+        else if (letras.includes(tecla)) letraAlvo = tecla;
+
+        if (letraAlvo) {
+          const existe = q.alternativas.some(a => a.letra === letraAlvo);
+          if (existe) { e.preventDefault(); responder(q.numero, letraAlvo); return; }
+        }
+      } else if (q.tipo === "certo_errado") {
+        if (tecla === "1" || tecla === "C") { e.preventDefault(); responder(q.numero, "C"); return; }
+        if (tecla === "2" || tecla === "E") { e.preventDefault(); responder(q.numero, "E"); return; }
+      }
+
+      if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, i - 1)); return; }
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        if (idx === lista.questoes.length - 1) setConfirmar(true);
+        else setIdx(i => i + 1);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (idx === lista.questoes.length - 1) setConfirmar(true);
+        else setIdx(i => i + 1);
+        return;
+      }
+      if (tecla === "M") { e.preventDefault(); toggleMarcar(q.numero); return; }
+      if (tecla === "F") { e.preventDefault(); setConfirmar(true); return; }
+      if (tecla === "?" || e.key === "?") { e.preventDefault(); setMostrarAtalhos(v => !v); return; }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [fase, lista, idx, confirmar, painel]);
+
+  // ============================================================
+  // AÇÕES
+  // ============================================================
+  const responder = useCallback((numero: number, letra: string) => {
+    setRespostas(prev => ({ ...prev, [numero]: letra }));
+  }, []);
+
+  const toggleMarcar = useCallback((numero: number) => {
     setMarcadas(prev =>
       prev.includes(numero) ? prev.filter(n => n !== numero) : [...prev, numero]
     );
-  };
+  }, []);
 
   const montarErros = (): QuestaoErrada[] => {
     if (!lista) return [];
@@ -176,10 +371,18 @@ export default function ListaPlayerPage() {
       areasMap,
       acertosPorArea
     );
+
+    // Marca progresso como concluído
+    await salvarProgressoLista(lista.id, user.id, {
+      respostas,
+      marcadas,
+      tempo_decorrido: tempoDecorrido,
+      status: 'concluido',
+    });
     setSalvando(false);
 
     if (!save.success) {
-      alert("Erro ao salvar resultado: " + save.error);
+      toast.error("Erro ao salvar resultado", { description: save.error });
       return;
     }
 
@@ -196,6 +399,9 @@ export default function ListaPlayerPage() {
     setFase("resultado");
   };
 
+  // ============================================================
+  // RENDER: LOADING / ERRO
+  // ============================================================
   if (loading) {
     return (
       <AppShell breadcrumb="Listas" title="Carregando...">
@@ -224,6 +430,9 @@ export default function ListaPlayerPage() {
 
   const total = lista.questoes.length;
 
+  // ============================================================
+  // RESULTADO
+  // ============================================================
   if (fase === "resultado" && resultado) {
     const pct = resultado.porcentagem;
 
@@ -345,6 +554,9 @@ export default function ListaPlayerPage() {
     );
   }
 
+  // ============================================================
+  // CORREÇÃO
+  // ============================================================
   if (fase === "correcao") {
     const q = lista.questoes[idx];
     const resp = respostas[q.numero];
@@ -404,11 +616,9 @@ export default function ListaPlayerPage() {
                       key={a.letra}
                       className={[
                         "rounded-xl border p-3",
-                        isCorreta
-                          ? "border-primary/50 bg-primary/10"
-                          : isSua
-                            ? "border-accent/50 bg-accent/10"
-                            : "border-border bg-surface/40",
+                        isCorreta ? "border-primary/50 bg-primary/10" :
+                        isSua ? "border-accent/50 bg-accent/10" :
+                        "border-border bg-surface/40",
                       ].join(" ")}
                     >
                       <div className="flex items-start gap-3">
@@ -512,6 +722,9 @@ export default function ListaPlayerPage() {
     );
   }
 
+  // ============================================================
+  // RESOLVENDO
+  // ============================================================
   const q = lista.questoes[idx];
   const selecionada = respostas[q.numero];
   const respondidas = Object.keys(respostas).length;
@@ -543,6 +756,13 @@ export default function ListaPlayerPage() {
               </span>
             </div>
             <button
+              onClick={() => setMostrarAtalhos(v => !v)}
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+              title="Atalhos de teclado"
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+            </button>
+            <button
               onClick={() => setPainel(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
             >
@@ -558,6 +778,30 @@ export default function ListaPlayerPage() {
           />
         </div>
       </div>
+
+      {mostrarAtalhos && (
+        <div className="rf-card mb-4 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="font-display text-sm font-semibold">Atalhos de teclado</h4>
+            <button
+              onClick={() => setMostrarAtalhos(false)}
+              className="grid h-6 w-6 place-items-center rounded-md text-foreground/50 hover:bg-white/5"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-[11px] sm:grid-cols-4">
+            <Shortcut keys={["1", "2", "3"]} label="Escolher alternativa" />
+            <Shortcut keys={["←", "→"]} label="Navegar questões" />
+            <Shortcut keys={["Enter"]} label="Próxima / finalizar" />
+            <Shortcut keys={["Espaço"]} label="Próxima questão" />
+            <Shortcut keys={["M"]} label="Marcar para revisão" />
+            <Shortcut keys={["F"]} label="Finalizar lista" />
+            <Shortcut keys={["?"]} label="Mostrar / esconder atalhos" />
+            <Shortcut keys={["Esc"]} label="Fechar painéis" />
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="rf-card p-5 sm:p-6">
@@ -597,7 +841,7 @@ export default function ListaPlayerPage() {
 
           {q.tipo === "multipla_escolha" && q.alternativas && (
             <div className="mt-5 space-y-2">
-              {q.alternativas.map(a => {
+              {q.alternativas.map((a, i) => {
                 const ativa = selecionada === a.letra;
                 return (
                   <button
@@ -621,9 +865,14 @@ export default function ListaPlayerPage() {
                     >
                       {ativa ? <Check className="h-3.5 w-3.5" /> : a.letra}
                     </span>
-                    <span className="min-w-0 text-xs leading-relaxed text-foreground/80">
+                    <span className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/80">
                       {a.texto}
                     </span>
+                    {i < 5 && (
+                      <span className="hidden shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/35 sm:inline-block">
+                        {i + 1}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -633,8 +882,8 @@ export default function ListaPlayerPage() {
           {q.tipo === "certo_errado" && (
             <div className="mt-5 grid grid-cols-2 gap-3">
               {[
-                { letra: "C", label: "Certo" },
-                { letra: "E", label: "Errado" },
+                { letra: "C", label: "Certo", tecla: "1" },
+                { letra: "E", label: "Errado", tecla: "2" },
               ].map(opt => {
                 const ativa = selecionada === opt.letra;
                 return (
@@ -656,7 +905,7 @@ export default function ListaPlayerPage() {
                       {opt.label}
                     </div>
                     <div className="mt-1 text-[10px] text-foreground/40">
-                      {ativa ? "Selecionado" : "Toque para escolher"}
+                      {ativa ? "Selecionado" : `Tecla ${opt.tecla}`}
                     </div>
                   </button>
                 );
@@ -748,7 +997,10 @@ export default function ListaPlayerPage() {
               <Linha label="Não respondidas" value={total - respondidas} tone="bad" />
               <Linha label="Marcadas para revisão" value={marcadas.length} />
             </div>
-            <div className="mt-5 flex gap-2">
+            <p className="mt-3 text-center text-[10px] text-foreground/35">
+              Pressione <kbd className="rounded border border-border px-1">Enter</kbd> para confirmar
+            </p>
+            <div className="mt-4 flex gap-2">
               <button
                 onClick={() => setConfirmar(false)}
                 disabled={salvando}
@@ -827,6 +1079,24 @@ function Legenda({ className, label }: { className: string; label: string }) {
     <span className="inline-flex items-center gap-1.5">
       <span className={["h-2 w-2 rounded-full", className].join(" ")} /> {label}
     </span>
+  );
+}
+
+function Shortcut({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex gap-0.5">
+        {keys.map((k) => (
+          <kbd
+            key={k}
+            className="rounded border border-border bg-background px-1.5 py-0.5 font-display text-[10px] font-semibold text-foreground/70"
+          >
+            {k}
+          </kbd>
+        ))}
+      </div>
+      <span className="text-foreground/55">{label}</span>
+    </div>
   );
 }
 

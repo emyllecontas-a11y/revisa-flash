@@ -49,8 +49,29 @@ export default function SimuladoPlayerPage() {
   const [confirmar, setConfirmar] = useState(false);
   const [resultadoSalvo, setResultadoSalvo] = useState<any>(null);
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // NOVO: bloqueia autosave até o boot terminar
+  const [booted, setBooted] = useState(false);
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Refs para acesso em listeners / intervalos (sempre o valor mais recente)
+  const progressoRef = useRef(progresso);
+  useEffect(() => { progressoRef.current = progresso; }, [progresso]);
+
+  const faseRef = useRef(fase);
+  useEffect(() => { faseRef.current = fase; }, [fase]);
+
+  // Snapshot do que já foi salvo — evita salvar o que acabou de vir do banco
+  const lastSavedRef = useRef<string>('');
+
+  // ============================================================
+  // HELPERS DE PERSISTÊNCIA
+  // ============================================================
+  const snapshotDe = (p: ProgressoPlayer) => JSON.stringify({
+    r: p.respostas || {},
+    m: p.marcadas || [],
+    e: p.eliminadas || {},
+  });
 
   // ============================================================
   // CARREGAR DADOS INICIAIS
@@ -81,38 +102,38 @@ export default function SimuladoPlayerPage() {
 
         setSimulado(simResult.data);
 
-        // 1. Buscar progresso do usuário
+        // 1. Buscar progresso do usuário (local-first)
         const progResult = await getProgresso(id, user.id);
         if (progResult.success && progResult.data) {
-          setProgresso({
+          const p: ProgressoPlayer = {
             respostas: progResult.data.respostas || {},
             eliminadas: progResult.data.eliminadas || {},
             marcadas: progResult.data.marcadas || [],
             tempo_decorrido: progResult.data.tempo_decorrido || 0,
-            status: progResult.data.status,
-          });
-          
-          if (progResult.data.status === "concluido") {
+            status: (progResult.data.status as 'em-andamento' | 'concluido') || 'em-andamento',
+          };
+          setProgresso(p);
+          lastSavedRef.current = snapshotDe(p);
+
+          if (p.status === "concluido") {
             setFase("resultado");
           }
+        } else {
+          // Sem progresso anterior — registra snapshot vazio
+          lastSavedRef.current = snapshotDe({
+            respostas: {}, eliminadas: {}, marcadas: [], tempo_decorrido: 0, status: 'em-andamento',
+          });
         }
 
         // 2. Buscar resultado salvo (se existir)
         const resultResult = await buscarResultadoSimulado(id, user.id);
-        console.log('📊 Resultado salvo:', resultResult);
-        
         if (resultResult.success && resultResult.data) {
-          console.log('✅ RESULTADO SALVO ENCONTRADO:', resultResult.data);
           setResultadoSalvo(resultResult.data);
-        } else {
-          console.log('❌ NENHUM RESULTADO SALVO ENCONTRADO');
         }
 
         // 3. Verificar se veio com view=resultado
         const searchParams = new URLSearchParams(location.search);
-        const viewParam = searchParams.get('view');
-        
-        if (viewParam === 'resultado') {
+        if (searchParams.get('view') === 'resultado') {
           setFase("resultado");
         }
 
@@ -120,6 +141,8 @@ export default function SimuladoPlayerPage() {
         setError(err.message || "Erro ao carregar simulado");
       } finally {
         setLoading(false);
+        // Marca como pronto para salvar — só depois de tudo carregado
+        setBooted(true);
       }
     };
 
@@ -145,20 +168,63 @@ export default function SimuladoPlayerPage() {
   }, [fase, simulado]);
 
   // ============================================================
-  // AUTO-SAVE
+  // AUTOSAVE — RESPOSTAS/MARCADAS/ELIMINADAS (imediato)
   // ============================================================
   useEffect(() => {
     if (!id || !user?.id || fase !== "resolvendo" || !simulado) return;
+    if (!booted) return;   // guarda contra race no boot
 
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      salvarProgresso(id, user.id, progresso);
-    }, 2000);
+    const snap = snapshotDe(progresso);
+    if (snap === lastSavedRef.current) return;
 
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    salvarProgresso(id, user.id, progresso).then(() => {
+      lastSavedRef.current = snap;
+    }).catch((e) => {
+      console.warn('⚠️ Falha ao salvar progresso (respostas):', e);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progresso.respostas, progresso.marcadas, progresso.eliminadas, id, user?.id, fase, simulado, booted]);
+
+  // ============================================================
+  // AUTOSAVE — TEMPO DECORRIDO (a cada 10s)
+  // ============================================================
+  useEffect(() => {
+    if (!id || !user?.id || fase !== "resolvendo" || !simulado) return;
+    if (!booted) return;
+
+    const interval = setInterval(() => {
+      if (progressoRef.current.tempo_decorrido > 0) {
+        salvarProgresso(id, user.id, progressoRef.current).catch(() => {});
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [id, user?.id, fase, simulado, booted]);
+
+  // ============================================================
+  // AUTOSAVE — BEFOREUNLOAD + VISIBILITYCHANGE
+  // ============================================================
+  useEffect(() => {
+    if (!id || !user?.id) return;
+
+    const persist = () => {
+      if (faseRef.current !== "resolvendo") return;
+      if (!booted) return;
+      salvarProgresso(id, user.id, progressoRef.current).catch(() => {});
     };
-  }, [progresso, id, user?.id, fase, simulado]);
+
+    const onBeforeUnload = () => persist();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') persist();
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [id, user?.id, booted]);
 
   // ============================================================
   // FUNÇÕES DE INTERAÇÃO
@@ -176,7 +242,6 @@ export default function SimuladoPlayerPage() {
   const responder = (letra: string) => {
     if (!simulado || !simulado.questoes[idx]) return;
     const q = simulado.questoes[idx];
-    console.log(`📝 Respondendo questão ${q.numero} com ${letra}`);
     setProgresso(prev => ({
       ...prev,
       respostas: { ...prev.respostas, [q.numero]: letra },
@@ -198,22 +263,15 @@ export default function SimuladoPlayerPage() {
     if (!id || !user?.id || !simulado) return;
     setConfirmar(false);
 
-    console.log('🔍 Respostas ANTES de finalizar:', progresso.respostas);
-    console.log('🔍 Número de respostas:', Object.keys(progresso.respostas).length);
-
     const result = calcularResultado(simulado.questoes, progresso.respostas);
     result.tempoDecorrido = progresso.tempo_decorrido;
 
-    // 🔥 Construir mapa de áreas
     const areasMap: Record<number, string> = {};
     simulado.questoes.forEach(q => {
       areasMap[q.numero] = q.area || 'Não categorizada';
     });
-    console.log('📊 Áreas das questões:', areasMap);
 
-    // 🔥 GARANTIR QUE AS RESPOSTAS E ÁREAS SÃO PASSADAS
     const respostasParaSalvar = progresso.respostas || {};
-    console.log('📝 Respostas a salvar:', respostasParaSalvar);
 
     const finalResult = await finalizarSimulado(
       id,
@@ -231,9 +289,6 @@ export default function SimuladoPlayerPage() {
     if (finalResult.success) {
       const savedResult = await buscarResultadoSimulado(id, user.id);
       if (savedResult.success && savedResult.data) {
-        console.log('📊 RESULTADO SALVO APÓS FINALIZAR:', savedResult.data);
-        console.log('📝 RESPOSTAS SALVAS:', savedResult.data.respostas);
-        console.log('📊 ÁREAS SALVAS:', savedResult.data.areas);
         setResultadoSalvo(savedResult.data);
       }
       setFase("resultado");
@@ -319,27 +374,19 @@ export default function SimuladoPlayerPage() {
     let tempoExibido = progresso.tempo_decorrido;
     let respostasParaExibir: Record<number, string> = {};
 
-    // 🔥 PRIORIZAR O RESULTADO SALVO
     if (resultadoSalvo) {
-      console.log('📊 Usando resultado salvo:', resultadoSalvo);
       acertos = resultadoSalvo.acertos || 0;
       erros = resultadoSalvo.erros || 0;
       naoRespondidas = resultadoSalvo.nao_respondidas || 0;
       tempoExibido = resultadoSalvo.tempo_segundos || 0;
       respostasParaExibir = resultadoSalvo.respostas || {};
       usarResultadoSalvo = true;
-      console.log(`📝 Respostas salvas: ${Object.keys(respostasParaExibir).length}`);
     } else {
-      // Fallback: calcular do progresso
-      console.log('📊 Calculando resultado do progresso:', progresso.respostas);
       const respostas = progresso.respostas;
       respostasParaExibir = respostas;
       questoes.forEach(q => {
         const resp = respostas[q.numero];
-        if (!resp) { 
-          naoRespondidas++; 
-          return; 
-        }
+        if (!resp) { naoRespondidas++; return; }
         const correta = q.alternativas.find(a => a.correta)?.letra;
         if (resp === correta) acertos++;
         else erros++;
@@ -396,7 +443,7 @@ export default function SimuladoPlayerPage() {
                   const correta = q.alternativas.find(a => a.correta)?.letra;
                   const acertou = resp === correta;
                   const status = !resp ? "nao-respondida" : acertou ? "acertou" : "errou";
-                  
+
                   return (
                     <button
                       key={q.id}
@@ -410,15 +457,15 @@ export default function SimuladoPlayerPage() {
                       <span
                         className={[
                           "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          status === "nao-respondida" ? "bg-white/5 text-foreground/45" : 
-                          status === "acertou" ? "bg-primary/15 text-primary" : 
+                          status === "nao-respondida" ? "bg-white/5 text-foreground/45" :
+                          status === "acertou" ? "bg-primary/15 text-primary" :
                           "bg-accent/15 text-accent",
                         ].join(" ")}
                       >
-                        {status === "nao-respondida" ? <MinusCircle className="h-3 w-3" /> : 
-                         status === "acertou" ? <CheckCircle2 className="h-3 w-3" /> : 
+                        {status === "nao-respondida" ? <MinusCircle className="h-3 w-3" /> :
+                         status === "acertou" ? <CheckCircle2 className="h-3 w-3" /> :
                          <XCircle className="h-3 w-3" />}
-                        {status === "nao-respondida" ? "Não respondida" : 
+                        {status === "nao-respondida" ? "Não respondida" :
                          status === "acertou" ? "Acertou" : "Errou"}
                       </span>
                     </button>
@@ -433,11 +480,10 @@ export default function SimuladoPlayerPage() {
   }
 
   // ============================================================
-  // 🔥 FASE CORREÇÃO (CORRIGIDA)
+  // FASE CORREÇÃO
   // ============================================================
   if (fase === "correcao") {
     const q = simulado.questoes[idx];
-    // 🔥 CORREÇÃO AQUI: prioriza resultadoSalvo.respostas, fallback para progresso.respostas
     const respostasParaExibir = resultadoSalvo?.respostas || progresso.respostas;
     const resp = respostasParaExibir[q.numero];
     const correta = q.alternativas.find(a => a.correta)?.letra;
@@ -731,7 +777,6 @@ export default function SimuladoPlayerPage() {
         </aside>
       </div>
 
-      {/* Painel mobile */}
       {painel && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setPainel(false)}>
           <div className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5" onClick={(e) => e.stopPropagation()}>
@@ -752,7 +797,6 @@ export default function SimuladoPlayerPage() {
         </div>
       )}
 
-      {/* Confirmação de finalização */}
       {confirmar && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6">

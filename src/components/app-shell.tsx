@@ -1,3 +1,4 @@
+// src/components/app-shell.tsx
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -15,6 +16,9 @@ import { OnboardingTour } from "@/components/OnboardingTour";
 import { syncWithSupabase } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
+import { Toaster } from "@/components/ui/sonner";
+import { ConfirmProvider, useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/hooks/useToast";
 
 // ============================================================
 // COMPONENTE DE LOADING (estilo raio)
@@ -62,9 +66,25 @@ const ICONS = {
 type RouteIcon = keyof typeof ICONS;
 
 // ============================================================
-// COMPONENTE PRINCIPAL
+// COMPONENTE PRINCIPAL (wrapper com providers + Toaster)
 // ============================================================
-export function AppShell({
+export function AppShell(props: {
+  children: ReactNode;
+  title?: string;
+  breadcrumb?: string;
+}) {
+  return (
+    <ConfirmProvider>
+      <AppShellInner {...props} />
+      <Toaster position="top-right" richColors closeButton />
+    </ConfirmProvider>
+  );
+}
+
+// ============================================================
+// COMPONENTE INTERNO
+// ============================================================
+function AppShellInner({
   children,
   title,
   breadcrumb,
@@ -77,6 +97,8 @@ export function AppShell({
   const pathname = location.pathname;
   const navigate = useNavigate();
   const { signOut } = useClerk();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
 
   // Contextos
   const { user, isLoaded } = useAppUser();
@@ -186,17 +208,19 @@ export function AppShell({
 
       console.log('✅ [AppShell] Sincronização concluída com sucesso!');
       if (showFeedback) {
-        alert('✅ Sincronização concluída com sucesso!');
+        toast.success('Sincronização concluída');
       }
     } catch (error) {
       console.error('❌ [AppShell] Erro na sincronização:', error);
       if (showFeedback) {
-        alert('❌ Falha ao sincronizar. Verifique o console para mais detalhes.');
+        toast.error('Falha ao sincronizar', {
+          description: 'Verifique o console para mais detalhes.',
+        });
       }
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy]);
+  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy, toast]);
 
   // ============================================================
   // SINCRONIZAÇÃO AUTOMÁTICA (com debounce)
@@ -253,7 +277,14 @@ export function AppShell({
   // HANDLE LOGOUT
   // ============================================================
   const handleLogout = async () => {
-    if (confirm("Deseja realmente sair?")) {
+    const ok = await confirmDialog({
+      title: "Sair da conta?",
+      description: "Você será redirecionado para a tela de login.",
+      confirmText: "Sair",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (ok) {
       try {
         await signOut();
         localStorage.removeItem('revisaflash_user_id');

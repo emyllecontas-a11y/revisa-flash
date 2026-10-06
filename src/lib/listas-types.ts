@@ -13,10 +13,25 @@ export interface AlternativaLista {
   comentario: string | null;
 }
 
+// Pasta de listas (tabela listas_pastas)
+export interface Pasta {
+  id: string;
+  user_id: string;
+  discipline_id: string;
+  name: string;
+  order: number;
+  created_at: string;
+  updated_at: string;
+  isdeleted: boolean;
+  /** Quantidade de listas ativas dentro desta pasta (calculado em query) */
+  listas_count?: number;
+}
+
 export interface Lista {
   id: string;
   user_id: string;
   discipline_id: string;
+  folder_id: string | null; // null = lista direto na disciplina
   titulo: string;
   descricao: string | null;
   created_at: string;
@@ -127,4 +142,21 @@ export interface ResultadoListaCalc {
   naoRespondidas: number;
   porcentagem: number;
   tempoDecorrido: number;
+}
+
+// ============================================================
+// FILTRO DE LISTAGEM DE LISTAS
+// ============================================================
+//
+// Todas as propriedades são opcionais.
+// - sem filtro               → retorna todas as listas do usuário (comportamento atual)
+// - { disciplineId }         → só listas daquela disciplina (com ou sem pasta)
+// - { folderId }             → só listas daquela pasta
+// - { disciplineId, apenasSemPasta: true }
+//                            → só listas direto na disciplina (folder_id = null)
+//
+export interface FiltroListas {
+  disciplineId?: string;
+  folderId?: string;
+  apenasSemPasta?: boolean;
 }

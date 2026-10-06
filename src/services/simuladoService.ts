@@ -1,6 +1,8 @@
 // src/services/simuladoService.ts
 
 import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
+import { getDb } from '@/lib/db';
+import { enqueueOperation } from '@/services/queueService';
 import {
   Simulado,
   Questao,
@@ -14,28 +16,78 @@ import {
 } from '@/lib/simulados-types';
 
 // ============================================================
-// 1. BUSCAR TODOS OS SIMULADOS (público - cliente anônimo)
+// HELPERS
+// ============================================================
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' ? true : navigator.onLine;
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
+// Serializa escritas por chave (evita race no RxDB)
+const saveQueues = new Map<string, Promise<any>>();
+function serializar<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const anterior = saveQueues.get(key) || Promise.resolve();
+  const proxima = anterior.then(() => fn()).catch((e) => {
+    console.warn('⚠️ Erro na fila serializada:', e);
+    return undefined as any;
+  });
+  saveQueues.set(key, proxima);
+  // Limpa quando terminar para não vazar memória
+  proxima.finally(() => {
+    if (saveQueues.get(key) === proxima) saveQueues.delete(key);
+  });
+  return proxima;
+}
+
+// ============================================================
+// 1. LISTAR SIMULADOS
 // ============================================================
 
 export async function getSimulados(): Promise<{ success: boolean; data?: Simulado[]; error?: string }> {
   try {
-    const { data, error } = await supabase
-      .from('simulados')
-      .select(`
-        *,
-        questoes:questoes(count)
-      `)
-      .eq('isdeleted', false)
-      .order('created_at', { ascending: false });
+    const db = await getDb();
+    const docs = await db.simulados.find({ selector: { isdeleted: false } }).exec();
+    let simulados: Simulado[] = docs.map((d: any) => d.toJSON());
 
-    if (error) throw error;
+    if (simulados.length === 0 && isOnline()) {
+      try {
+        const client = await getSupabaseWithToken();
+        const { data } = await client.from('simulados').select('*').eq('isdeleted', false);
+        for (const doc of data || []) {
+          const ex = await db.simulados.findOne({ selector: { id: doc.id } }).exec();
+          if (!ex) await db.simulados.insert(doc).catch(() => {});
+        }
+        simulados = (data || []) as Simulado[];
+      } catch (e) {
+        console.warn('⚠️ Fallback getSimulados falhou:', e);
+      }
+    }
 
-    const simuladosComContagem = data?.map((s: any) => ({
+    const questoes = await db.questoes.find({ selector: {} }).exec();
+    const contagemPorSimulado: Record<string, number> = {};
+    for (const q of questoes) {
+      const j: any = q.toJSON();
+      if (j.isdeleted) continue;
+      contagemPorSimulado[j.simulado_id] = (contagemPorSimulado[j.simulado_id] || 0) + 1;
+    }
+
+    simulados = simulados.map((s) => ({
       ...s,
-      questoes_count: s.questoes?.[0]?.count || 0,
-    })) || [];
+      questoes_count: contagemPorSimulado[s.id] || 0,
+    }));
+    simulados.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
 
-    return { success: true, data: simuladosComContagem };
+    return { success: true, data: simulados };
   } catch (error: any) {
     console.error('Erro ao buscar simulados:', error);
     return { success: false, error: error.message };
@@ -43,81 +95,105 @@ export async function getSimulados(): Promise<{ success: boolean; data?: Simulad
 }
 
 // ============================================================
-// 2. BUSCAR SIMULADO COMPLETO (público - questões e alternativas)
+// 2. BUSCAR SIMULADO COMPLETO
 // ============================================================
 
 export async function getSimuladoCompleto(
   simuladoId: string
 ): Promise<{ success: boolean; data?: SimuladoPlayer; error?: string }> {
   try {
-    console.log('🔍 Buscando simulado:', simuladoId);
-    
-    const { data: simulado, error: simuladoError } = await supabase
-      .from('simulados')
-      .select('*')
-      .eq('id', simuladoId)
-      .eq('isdeleted', false)
-      .single();
+    const db = await getDb();
 
-    if (simuladoError) {
-      console.error('❌ Erro ao buscar simulado:', simuladoError);
-      throw simuladoError;
-    }
-    if (!simulado) throw new Error('Simulado não encontrado');
+    let simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+    let qDocs = await db.questoes.find({
+      selector: { simulado_id: simuladoId, isdeleted: false },
+    }).exec();
 
-    console.log('✅ Simulado encontrado:', simulado.titulo);
+    const precisaBuscar = (!simDoc || qDocs.length === 0);
+    if (precisaBuscar && isOnline()) {
+      try {
+        const client = await getSupabaseWithToken();
 
-    const { data: questoes, error: questoesError } = await supabase
-      .from('questoes')
-      .select('*')
-      .eq('simulado_id', simuladoId)
-      .eq('isdeleted', false)
-      .order('numero', { ascending: true });
+        if (!simDoc) {
+          const { data: sim } = await client
+            .from('simulados')
+            .select('*')
+            .eq('id', simuladoId)
+            .eq('isdeleted', false)
+            .maybeSingle();
+          if (sim) await db.simulados.insert(sim).catch(() => {});
+        }
 
-    if (questoesError) {
-      console.error('❌ Erro ao buscar questoes:', questoesError);
-      throw questoesError;
-    }
+        const { data: qs } = await client
+          .from('questoes')
+          .select('*')
+          .eq('simulado_id', simuladoId)
+          .eq('isdeleted', false);
 
-    console.log(`📝 Encontradas ${questoes?.length || 0} questões para o simulado`);
+        for (const q of qs || []) {
+          const ex = await db.questoes.findOne({ selector: { id: q.id } }).exec();
+          if (!ex) await db.questoes.insert(q).catch(() => {});
+        }
 
-    const questoesComAlternativas: QuestaoPlayer[] = [];
-    for (const q of questoes || []) {
-      const { data: alternativas, error: altError } = await supabase
-        .from('alternativas')
-        .select('*')
-        .eq('questao_id', q.id)
-        .eq('isdeleted', false)
-        .order('letra', { ascending: true });
+        const qIds = (qs || []).map((q: any) => q.id);
+        for (const chunk of chunkArray(qIds, 100)) {
+          const { data: alts } = await client
+            .from('alternativas')
+            .select('*')
+            .in('questao_id', chunk)
+            .eq('isdeleted', false);
+          for (const a of alts || []) {
+            const ex = await db.alternativas.findOne({ selector: { id: a.id } }).exec();
+            if (!ex) await db.alternativas.insert(a).catch(() => {});
+          }
+        }
 
-      if (altError) {
-        console.error('❌ Erro ao buscar alternativas:', altError);
-        throw altError;
+        simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+        qDocs = await db.questoes.find({
+          selector: { simulado_id: simuladoId, isdeleted: false },
+        }).exec();
+      } catch (e) {
+        console.warn('⚠️ Fallback online do simulado falhou:', e);
       }
-
-      questoesComAlternativas.push({
-        ...q,
-        alternativas: alternativas || [],
-      });
     }
 
-    console.log(`✅ Simulado ${simulado.titulo} carregado com ${questoesComAlternativas.length} questões`);
+    if (!simDoc) return { success: false, error: 'Simulado não encontrado' };
+    const simulado: any = simDoc.toJSON();
 
-    return {
-      success: true,
-      data: {
-        ...simulado,
-        questoes: questoesComAlternativas,
-      },
-    };
+    if (qDocs.length === 0) {
+      if (!isOnline()) {
+        return {
+          success: false,
+          error: 'Este simulado ainda não foi baixado. Conecte-se à internet uma vez para baixá-lo.',
+        };
+      }
+      return { success: false, error: 'Este simulado não possui questões cadastradas.' };
+    }
+
+    const questoes = qDocs
+      .map((d: any) => d.toJSON())
+      .sort((a: any, b: any) => (a.numero || 0) - (b.numero || 0));
+
+    const questoesComAlt: QuestaoPlayer[] = [];
+    for (const q of questoes) {
+      const altDocs = await db.alternativas.find({
+        selector: { questao_id: q.id, isdeleted: false },
+      }).exec();
+      const alternativas: Alternativa[] = altDocs
+        .map((d: any) => d.toJSON())
+        .sort((a: any, b: any) => (a.letra || '').localeCompare(b.letra || ''));
+      questoesComAlt.push({ ...q, alternativas });
+    }
+
+    return { success: true, data: { ...simulado, questoes: questoesComAlt } };
   } catch (error: any) {
-    console.error('❌ Erro ao buscar simulado completo:', error);
+    console.error('Erro ao buscar simulado completo:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 3. BUSCAR PROGRESSO DO USUÁRIO (via RPC)
+// 3. BUSCAR PROGRESSO
 // ============================================================
 
 export async function getProgresso(
@@ -125,25 +201,31 @@ export async function getProgresso(
   userId: string
 ): Promise<{ success: boolean; data?: ProgressoSimulado; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
-    
-    console.log(`🔍 Buscando progresso via RPC - simulado: ${simuladoId}, user: ${userIdStr}`);
+    const db = await getDb();
+    let doc = await db.progresso_simulado.findOne({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
 
-    const { data, error } = await supabaseClient
-      .rpc('buscar_progresso_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC buscar_progresso_simulado:', error);
-      throw error;
+    if (!doc && isOnline()) {
+      try {
+        const client = await getSupabaseWithToken();
+        const { data } = await client
+          .from('progresso_simulado')
+          .select('*')
+          .eq('simulado_id', simuladoId)
+          .eq('user_id', userId)
+          .eq('isdeleted', false)
+          .maybeSingle();
+        if (data) {
+          await db.progresso_simulado.insert(data).catch(() => {});
+          doc = await db.progresso_simulado.findOne({ selector: { id: data.id } }).exec();
+        }
+      } catch (e) {
+        console.warn('⚠️ Fallback getProgresso falhou:', e);
+      }
     }
 
-    console.log('✅ Progresso encontrado:', data ? 'Sim' : 'Não');
-
-    return { success: true, data: data || undefined };
+    return { success: true, data: doc ? (doc.toJSON() as ProgressoSimulado) : undefined };
   } catch (error: any) {
     console.error('Erro ao buscar progresso:', error);
     return { success: false, error: error.message };
@@ -151,7 +233,7 @@ export async function getProgresso(
 }
 
 // ============================================================
-// 4. SALVAR PROGRESSO (via RPC)
+// 4. SALVAR PROGRESSO — serializado + merge seguro
 // ============================================================
 
 export async function salvarProgresso(
@@ -159,147 +241,170 @@ export async function salvarProgresso(
   userId: string,
   progresso: Partial<Omit<ProgressoSimulado, 'id' | 'simulado_id' | 'user_id' | 'created_at'>>
 ): Promise<{ success: boolean; data?: ProgressoSimulado; error?: string }> {
-  try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+  const lockKey = `progresso_simulado:${simuladoId}:${userId}`;
 
-    console.log(`💾 Salvando progresso via RPC - simulado: ${simuladoId}, user: ${userIdStr}`);
+  return serializar(lockKey, async () => {
+    try {
+      const db = await getDb();
+      const now = nowIso();
 
-    const { data, error } = await supabaseClient
-      .rpc('salvar_progresso_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-        p_respostas: progresso.respostas || {},
-        p_eliminadas: progresso.eliminadas || {},
-        p_marcadas: progresso.marcadas || [],
-        p_tempo_decorrido: progresso.tempo_decorrido || 0,
-        p_status: progresso.status || 'em-andamento',
-      });
+      // SEMPRE lê o doc atual antes de tocar (evita usar state velho)
+      const existing = await db.progresso_simulado.findOne({
+        selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+      }).exec();
 
-    if (error) {
-      console.error('❌ Erro na RPC salvar_progresso_simulado:', error);
-      throw error;
+      // Regra de proteção: nunca sobrescrever com dados vazios se já tem dados
+      const existingRespostas: any = existing?.get('respostas') || {};
+      const existingMarcadas: any = existing?.get('marcadas') || [];
+      const existingTempo: number = existing?.get('tempo_decorrido') || 0;
+
+      const novasRespostas = progresso.respostas ?? existingRespostas;
+      const novasMarcadas = progresso.marcadas ?? existingMarcadas;
+      const novoTempo = progresso.tempo_decorrido ?? existingTempo;
+
+      // Se a chamada veio com TUDO vazio mas já tem dados no banco, ignora
+      const veioVazio =
+        Object.keys(progresso.respostas || {}).length === 0 &&
+        (progresso.marcadas || []).length === 0 &&
+        (progresso.tempo_decorrido || 0) === 0;
+      const jaTemDados =
+        Object.keys(existingRespostas).length > 0 ||
+        existingMarcadas.length > 0 ||
+        existingTempo > 0;
+
+      if (veioVazio && jaTemDados) {
+        console.log('⏭️ Ignorando save com dados vazios (já tem progresso)');
+        return {
+          success: true,
+          data: existing ? (existing.toJSON() as ProgressoSimulado) : undefined,
+        };
+      }
+
+      if (existing) {
+        const patch = {
+          respostas: novasRespostas,
+          eliminadas: progresso.eliminadas ?? existing.get('eliminadas') ?? {},
+          marcadas: novasMarcadas,
+          tempo_decorrido: novoTempo,
+          status: progresso.status ?? existing.get('status') ?? 'em-andamento',
+          updated_at: now,
+        };
+        await existing.patch(patch);
+        await enqueueOperation('update', 'progresso_simulado', {
+          id: existing.get('id'), ...patch,
+        });
+        const updated: any = (await db.progresso_simulado.findOne({
+          selector: { id: existing.get('id') },
+        }).exec())?.toJSON();
+        return { success: true, data: updated };
+      } else {
+        const doc = {
+          id: crypto.randomUUID(),
+          simulado_id: simuladoId,
+          user_id: userId,
+          respostas: progresso.respostas || {},
+          eliminadas: progresso.eliminadas || {},
+          marcadas: progresso.marcadas || [],
+          tempo_decorrido: progresso.tempo_decorrido || 0,
+          status: progresso.status || 'em-andamento',
+          created_at: now,
+          updated_at: now,
+          isdeleted: false,
+        };
+        await db.progresso_simulado.insert(doc);
+        await enqueueOperation('create', 'progresso_simulado', doc);
+        return { success: true, data: doc as any };
+      }
+    } catch (error: any) {
+      console.error('Erro ao salvar progresso:', error);
+      return { success: false, error: error.message };
     }
-
-    console.log('✅ Progresso salvo via RPC');
-    return { success: true, data: data || undefined };
-  } catch (error: any) {
-    console.error('Erro ao salvar progresso:', error);
-    return { success: false, error: error.message };
-  }
+  });
 }
 
 // ============================================================
-// 5. FINALIZAR SIMULADO (via RPC) - COM ÁREAS
+// 5. FINALIZAR SIMULADO
 // ============================================================
 
 export async function finalizarSimulado(
   simuladoId: string,
   userId: string,
-  resultado: {
-    acertos: number;
-    erros: number;
-    naoRespondidas: number;
-    tempoDecorrido: number;
-  },
+  resultado: { acertos: number; erros: number; naoRespondidas: number; tempoDecorrido: number },
   respostas: Record<number, string>,
   areas: Record<number, string>
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const now = nowIso();
 
-    console.log(`🏁 Finalizando simulado via RPC - simulado: ${simuladoId}, user: ${userIdStr}`);
-
-    // 1. Finalizar progresso via RPC
-    const { error: rpcError } = await supabaseClient
-      .rpc('finalizar_progresso_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-      });
-
-    if (rpcError) {
-      console.error('❌ Erro na RPC finalizar_progresso_simulado:', rpcError);
-      throw rpcError;
-    }
-
-    console.log('✅ Progresso finalizado via RPC');
-
-    // 2. Buscar o simulado para obter título e área
-    const { data: simulado, error: simError } = await supabase
-      .from('simulados')
-      .select('titulo, area')
-      .eq('id', simuladoId)
-      .eq('isdeleted', false)
-      .single();
-
-    if (simError) {
-      console.error('❌ Erro ao buscar simulado:', simError);
-      throw simError;
-    }
-
-    // 3. Salvar StudyRecord via RPC
     const totalQuestoes = resultado.acertos + resultado.erros + resultado.naoRespondidas;
-    const today = new Date().toISOString().split('T')[0];
-
-    console.log(`📝 Salvando StudyRecord via RPC - user: ${userIdStr}, topic: ${simulado.titulo}`);
-
-    const { error: recordError } = await supabaseClient
-      .rpc('salvar_study_record', {
-        p_user_id: userIdStr,
-        p_date: today,
-        p_type: 'pratico',
-        p_discipline: simulado.area,
-        p_topic: simulado.titulo,
-        p_duration: Math.round(resultado.tempoDecorrido / 60),
-        p_questions_count: totalQuestoes,
-        p_correct_count: resultado.acertos,
-        p_wrong_count: resultado.erros,
-        p_observations: `Simulado finalizado: ${simulado.titulo}`,
-      });
-
-    if (recordError) {
-      console.error('❌ Erro na RPC salvar_study_record:', recordError);
-      throw recordError;
-    }
-
-    // 4. Salvar resultado na tabela resultados_simulado (COM RESPOSTAS E ÁREAS)
     const porcentagem = totalQuestoes > 0 ? Math.round((resultado.acertos / totalQuestoes) * 100) : 0;
-    const respostasJson = respostas || {};
-    const areasJson = areas || {};
 
-    console.log(`💾 Salvando resultado com ${Object.keys(respostasJson).length} respostas e ${Object.keys(areasJson).length} áreas`);
-
-    const { error: resultError } = await supabaseClient
-      .rpc('salvar_resultado_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-        p_total_questoes: totalQuestoes,
-        p_acertos: resultado.acertos,
-        p_erros: resultado.erros,
-        p_nao_respondidas: resultado.naoRespondidas,
-        p_porcentagem: porcentagem,
-        p_tempo_segundos: resultado.tempoDecorrido,
-        p_respostas: respostasJson,
-        p_areas: areasJson,
+    const progDoc = await db.progresso_simulado.findOne({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+    if (progDoc) {
+      await progDoc.patch({ status: 'concluido', updated_at: now });
+      await enqueueOperation('update', 'progresso_simulado', {
+        id: progDoc.get('id'), status: 'concluido', updated_at: now,
       });
-
-    if (resultError) {
-      console.error('❌ Erro na RPC salvar_resultado_simulado:', resultError);
-    } else {
-      console.log('✅ Resultado salvo com sucesso!');
     }
 
-    console.log('✅ Simulado finalizado com sucesso!');
+    const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+    const sim: any = simDoc ? simDoc.toJSON() : { titulo: 'Simulado', area: 'Não categorizada' };
+
+    const today = new Date().toISOString().split('T')[0];
+    const studyRecord = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      date: today,
+      type: 'pratico',
+      discipline: sim.area || 'Não categorizada',
+      topic: sim.titulo || 'Simulado',
+      duration: Math.round(resultado.tempoDecorrido / 60),
+      material: null,
+      questionsCount: totalQuestoes,
+      correctCount: resultado.acertos,
+      wrongCount: resultado.erros,
+      source: 'simulado',
+      observations: `Simulado finalizado: ${sim.titulo || ''}`,
+      createdAt: now,
+      updated_at: now,
+      isDeleted: false,
+    };
+    await db.study_records.insert(studyRecord).catch((e) => {
+      console.warn('⚠️ Erro ao inserir study_record local:', e);
+    });
+
+    const resultadoDoc = {
+      id: crypto.randomUUID(),
+      simulado_id: simuladoId,
+      user_id: userId,
+      total_questoes: totalQuestoes,
+      acertos: resultado.acertos,
+      erros: resultado.erros,
+      nao_respondidas: resultado.naoRespondidas,
+      porcentagem,
+      tempo_segundos: resultado.tempoDecorrido,
+      respostas: respostas || {},
+      areas: areas || {},
+      comentarios_gerais: null,
+      created_at: now,
+      updated_at: now,
+      isdeleted: false,
+    };
+    await db.resultados_simulado.insert(resultadoDoc);
+    await enqueueOperation('create', 'resultados_simulado', resultadoDoc);
+
     return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao finalizar simulado:', error);
+    console.error('Erro ao finalizar simulado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 6. IMPORTAÇÃO DE SIMULADO (via RPC)
+// 6. IMPORTAR SIMULADO
 // ============================================================
 
 export async function importarSimulado(
@@ -307,18 +412,17 @@ export async function importarSimulado(
   userId: string
 ): Promise<{ success: boolean; simuladoId?: string; error?: string }> {
   try {
-    if (!userId) {
-      return { success: false, error: 'Usuário não autenticado' };
+    if (!userId) return { success: false, error: 'Usuário não autenticado' };
+    if (!isOnline()) {
+      return {
+        success: false,
+        error: 'Você está offline. A importação de simulados precisa de conexão com a internet.',
+      };
     }
 
     const userIdStr = String(userId);
     const supabaseClient = await getSupabaseWithToken();
     const simuladoId = crypto.randomUUID();
-
-    console.log('📦 Importando simulado via RPC:', dados.titulo);
-    console.log('👤 Usuário ID:', userIdStr);
-    console.log('🆔 Simulado ID:', simuladoId);
-    console.log('📝 Número de questões:', dados.questoes.length);
 
     const questoesFormatadas = dados.questoes.map((q, index) => {
       const alternativas = q.alternativas.map(a => ({
@@ -327,13 +431,12 @@ export async function importarSimulado(
         correta: a.correta || false,
         comentario: a.comentario || null,
       }));
-
       return {
         numero: q.numero || index + 1,
         enunciado: q.enunciado || '',
         area: q.area || null,
         comentario_geral: q.comentario_geral || null,
-        alternativas: alternativas,
+        alternativas,
       };
     });
 
@@ -351,29 +454,23 @@ export async function importarSimulado(
         p_questoes: questoesFormatadas,
       });
 
-    console.log('📤 RPC - Data:', data);
-    console.log('📤 RPC - Error:', error);
-
-    if (error) {
-      console.error('❌ Erro ao importar simulado via RPC:', error);
-      throw error;
-    }
+    if (error) throw error;
 
     if (data && data.success === true) {
-      console.log(`✅ Simulado importado com sucesso! Questões inseridas: ${data.questoes_inseridas || 0}`);
+      import('@/lib/db').then(({ syncWithSupabase }) => {
+        syncWithSupabase(userId).catch(() => {});
+      });
       return { success: true, simuladoId };
-    } else {
-      console.error('❌ RPC retornou erro:', data);
-      throw new Error(data?.error || 'Erro desconhecido na RPC');
     }
+    return { success: false, error: data?.error || 'Erro desconhecido na RPC' };
   } catch (error: any) {
-    console.error('❌ Erro ao importar simulado:', error);
+    console.error('Erro ao importar simulado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 7. EXCLUIR SIMULADO (via RPC)
+// 7. EXCLUIR SIMULADO
 // ============================================================
 
 export async function excluirSimulado(
@@ -381,38 +478,41 @@ export async function excluirSimulado(
   userId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const now = nowIso();
 
-    console.log(`🗑️ Excluindo simulado via RPC - simulado: ${simuladoId}, user: ${userIdStr}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('excluir_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
+    const progs = await db.progresso_simulado.find({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+    for (const p of progs) {
+      await p.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'progresso_simulado', {
+        id: p.get('id'), isdeleted: true, updated_at: now,
       });
-
-    if (error) {
-      console.error('❌ Erro na RPC excluir_simulado:', error);
-      throw error;
     }
 
-    if (data && data.success === true) {
-      console.log('✅ Simulado excluído com sucesso!');
-      return { success: true };
-    } else {
-      const errorMsg = data?.error || 'Erro desconhecido ao excluir';
-      console.error('❌ Erro ao excluir simulado:', errorMsg);
-      return { success: false, error: errorMsg };
+    const results = await db.resultados_simulado.find({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+    for (const r of results) {
+      await r.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'resultados_simulado', {
+        id: r.get('id'), isdeleted: true, updated_at: now,
+      });
     }
+
+    const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+    if (simDoc) await simDoc.patch({ isdeleted: true, updated_at: now });
+
+    return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao excluir simulado:', error);
+    console.error('Erro ao excluir simulado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 8. ATUALIZAR SIMULADO (via RPC)
+// 8. ATUALIZAR SIMULADO
 // ============================================================
 
 export async function atualizarSimulado(
@@ -429,45 +529,24 @@ export async function atualizarSimulado(
   }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const now = nowIso();
+    const patch = { ...dados, updated_at: now };
 
-    console.log(`✏️ Atualizando simulado via RPC - simulado: ${simuladoId}, user: ${userIdStr}`);
+    const doc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+    if (!doc) return { success: false, error: 'Simulado não encontrado' };
+    await doc.patch(patch);
+    await enqueueOperation('update', 'simulados', { id: simuladoId, ...patch });
 
-    const { data, error } = await supabaseClient
-      .rpc('atualizar_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-        p_titulo: dados.titulo,
-        p_descricao: dados.descricao || null,
-        p_area: dados.area,
-        p_nivel: dados.nivel,
-        p_banca: dados.banca,
-        p_ano: dados.ano,
-        p_tempo_total: dados.tempo_total,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC atualizar_simulado:', error);
-      throw error;
-    }
-
-    if (data && data.success === true) {
-      console.log('✅ Simulado atualizado com sucesso!');
-      return { success: true };
-    } else {
-      const errorMsg = data?.error || 'Erro desconhecido ao atualizar';
-      console.error('❌ Erro ao atualizar simulado:', errorMsg);
-      return { success: false, error: errorMsg };
-    }
+    return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao atualizar simulado:', error);
+    console.error('Erro ao atualizar simulado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 9. SALVAR RESULTADO DO SIMULADO (via RPC)
+// 9. SALVAR RESULTADO
 // ============================================================
 
 export async function salvarResultadoSimulado(
@@ -483,40 +562,36 @@ export async function salvarResultadoSimulado(
   }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
-
-    console.log(`💾 Salvando resultado do simulado via RPC: ${simuladoId}, user: ${userIdStr}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('salvar_resultado_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-        p_total_questoes: resultado.totalQuestoes,
-        p_acertos: resultado.acertos,
-        p_erros: resultado.erros,
-        p_nao_respondidas: resultado.naoRespondidas,
-        p_porcentagem: resultado.porcentagem,
-        p_tempo_segundos: resultado.tempoDecorrido,
-        p_respostas: {},
-        p_areas: {},
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC salvar_resultado_simulado:', error);
-      throw error;
-    }
-
-    console.log('✅ Resultado salvo com sucesso!');
+    const db = await getDb();
+    const now = nowIso();
+    const doc = {
+      id: crypto.randomUUID(),
+      simulado_id: simuladoId,
+      user_id: userId,
+      total_questoes: resultado.totalQuestoes,
+      acertos: resultado.acertos,
+      erros: resultado.erros,
+      nao_respondidas: resultado.naoRespondidas,
+      porcentagem: resultado.porcentagem,
+      tempo_segundos: resultado.tempoDecorrido,
+      respostas: {},
+      areas: {},
+      comentarios_gerais: null,
+      created_at: now,
+      updated_at: now,
+      isdeleted: false,
+    };
+    await db.resultados_simulado.insert(doc);
+    await enqueueOperation('create', 'resultados_simulado', doc);
     return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao salvar resultado:', error);
+    console.error('Erro ao salvar resultado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 10. BUSCAR RESULTADO DO SIMULADO (via RPC)
+// 10. BUSCAR RESULTADO
 // ============================================================
 
 export async function buscarResultadoSimulado(
@@ -524,63 +599,46 @@ export async function buscarResultadoSimulado(
   userId: string
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const docs = await db.resultados_simulado.find({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+    if (docs.length === 0) return { success: true, data: undefined };
 
-    console.log(`🔍 Buscando resultado do simulado via RPC: ${simuladoId}, user: ${userIdStr}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('buscar_resultado_simulado', {
-        p_simulado_id: simuladoId,
-        p_user_id: userIdStr,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC buscar_resultado_simulado:', error);
-      throw error;
-    }
-
-    console.log('✅ Resultado encontrado:', data ? 'Sim' : 'Não');
-    return { success: true, data: data || undefined };
+    const sorted = docs
+      .map((d: any) => d.toJSON())
+      .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''));
+    return { success: true, data: sorted[0] };
   } catch (error: any) {
-    console.error('❌ Erro ao buscar resultado:', error);
+    console.error('Erro ao buscar resultado:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 11. BUSCAR TODOS OS RESULTADOS DO USUÁRIO (via RPC)
+// 11. BUSCAR TODOS OS RESULTADOS DO USUÁRIO
 // ============================================================
 
 export async function buscarResultadosDoUsuario(
   userId: string
 ): Promise<{ success: boolean; data?: any[]; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
-
-    console.log(`🔍 Buscando todos os resultados do usuário: ${userIdStr}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('buscar_resultados_do_usuario', {
-        p_user_id: userIdStr,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC buscar_resultados_do_usuario:', error);
-      throw error;
-    }
-
-    console.log(`✅ Encontrados ${data?.length || 0} resultados`);
-    return { success: true, data: data || [] };
+    const db = await getDb();
+    const docs = await db.resultados_simulado.find({
+      selector: { user_id: userId, isdeleted: false },
+    }).exec();
+    const data = docs
+      .map((d: any) => d.toJSON())
+      .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''));
+    return { success: true, data };
   } catch (error: any) {
-    console.error('❌ Erro ao buscar resultados:', error);
+    console.error('Erro ao buscar resultados:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 12. BUSCAR HISTÓRICO COMPLETO (com paginação e filtros)
+// 12. BUSCAR HISTÓRICO COMPLETO
 // ============================================================
 
 export async function buscarHistoricoCompleto(
@@ -589,33 +647,23 @@ export async function buscarHistoricoCompleto(
   offset: number = 0
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
-
-    console.log(`🔍 Buscando histórico completo - user: ${userIdStr}, limit: ${limit}, offset: ${offset}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('buscar_historico_completo', {
-        p_user_id: userIdStr,
-        p_limit: limit,
-        p_offset: offset,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC buscar_historico_completo:', error);
-      throw error;
-    }
-
-    console.log(`✅ Histórico encontrado: ${data?.total || 0} registros`);
-    return { success: true, data: data || { total: 0, resultados: [] } };
+    const db = await getDb();
+    const docs = await db.resultados_simulado.find({
+      selector: { user_id: userId, isdeleted: false },
+    }).exec();
+    const all = docs
+      .map((d: any) => d.toJSON())
+      .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''));
+    const slice = all.slice(offset, offset + limit);
+    return { success: true, data: { total: all.length, resultados: slice } };
   } catch (error: any) {
-    console.error('❌ Erro ao buscar histórico:', error);
+    console.error('Erro ao buscar histórico:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 13. SALVAR COMENTÁRIO GERAL DO SIMULADO
+// 13. SALVAR COMENTÁRIO GERAL
 // ============================================================
 
 export async function salvarComentarioGeral(
@@ -624,35 +672,21 @@ export async function salvarComentarioGeral(
   comentario: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const userIdStr = String(userId);
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.resultados_simulado.findOne({
+      selector: { id: resultadoId, user_id: userId },
+    }).exec();
+    if (!doc) return { success: false, error: 'Resultado não encontrado' };
 
-    console.log(`💾 Salvando comentário geral - resultado: ${resultadoId}`);
+    await doc.patch({ comentarios_gerais: comentario, updated_at: now });
+    await enqueueOperation('update', 'resultados_simulado', {
+      id: resultadoId, comentarios_gerais: comentario, updated_at: now,
+    });
 
-    const { data: resultado, error: checkError } = await supabaseClient
-      .from('resultados_simulado')
-      .select('user_id')
-      .eq('id', resultadoId)
-      .single();
-
-    if (checkError) throw checkError;
-    if (resultado.user_id !== userIdStr) {
-      throw new Error('Você não tem permissão para editar este resultado');
-    }
-
-    const { error } = await supabaseClient
-      .from('resultados_simulado')
-      .update({
-        comentarios_gerais: comentario,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', resultadoId);
-
-    if (error) throw error;
-    console.log('✅ Comentário geral salvo!');
     return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao salvar comentário geral:', error);
+    console.error('Erro ao salvar comentário geral:', error);
     return { success: false, error: error.message };
   }
 }
@@ -667,56 +701,53 @@ export async function salvarComentarioQuestao(
   comentario: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.resultados_simulado.findOne({
+      selector: { id: resultadoId },
+    }).exec();
+    if (!doc) return { success: false, error: 'Resultado não encontrado' };
 
-    console.log(`💾 Salvando comentário da questão ${questaoNumero} - resultado: ${resultadoId}`);
+    const respostas: any = doc.get('respostas') || {};
+    respostas[`__comentario_q_${questaoNumero}`] = comentario;
 
-    const { data, error } = await supabaseClient
-      .rpc('salvar_comentario_questao', {
-        p_resultado_id: resultadoId,
-        p_questao_numero: questaoNumero,
-        p_comentario: comentario,
-      });
+    await doc.patch({ respostas, updated_at: now });
+    await enqueueOperation('update', 'resultados_simulado', {
+      id: resultadoId, respostas, updated_at: now,
+    });
 
-    if (error) {
-      console.error('❌ Erro na RPC salvar_comentario_questao:', error);
-      throw error;
-    }
-
-    console.log('✅ Comentário da questão salvo!');
-    return { success: true, data };
+    return { success: true };
   } catch (error: any) {
-    console.error('❌ Erro ao salvar comentário da questão:', error);
+    console.error('Erro ao salvar comentário da questão:', error);
     return { success: false, error: error.message };
   }
 }
 
 // ============================================================
-// 15. BUSCAR COMENTÁRIOS DE UM RESULTADO
+// 15. BUSCAR COMENTÁRIOS
 // ============================================================
 
 export async function buscarComentariosResultado(
   resultadoId: string
 ): Promise<{ success: boolean; data?: any[]; error?: string }> {
   try {
-    const supabaseClient = await getSupabaseWithToken();
+    const db = await getDb();
+    const doc = await db.resultados_simulado.findOne({
+      selector: { id: resultadoId },
+    }).exec();
+    if (!doc) return { success: true, data: [] };
 
-    console.log(`🔍 Buscando comentários - resultado: ${resultadoId}`);
-
-    const { data, error } = await supabaseClient
-      .rpc('buscar_comentarios_resultado', {
-        p_resultado_id: resultadoId,
-      });
-
-    if (error) {
-      console.error('❌ Erro na RPC buscar_comentarios_resultado:', error);
-      throw error;
+    const respostas: any = doc.get('respostas') || {};
+    const comentarios: any[] = [];
+    for (const key of Object.keys(respostas)) {
+      if (key.startsWith('__comentario_q_')) {
+        const num = Number(key.replace('__comentario_q_', ''));
+        comentarios.push({ questao_numero: num, comentario: respostas[key] });
+      }
     }
-
-    console.log(`✅ ${data?.length || 0} comentários encontrados`);
-    return { success: true, data: data || [] };
+    return { success: true, data: comentarios };
   } catch (error: any) {
-    console.error('❌ Erro ao buscar comentários:', error);
+    console.error('Erro ao buscar comentários:', error);
     return { success: false, error: error.message };
   }
 }
@@ -736,17 +767,10 @@ export function calcularResultado(
 
   for (const q of questoes) {
     const resposta = respostas[q.numero];
-    if (!resposta) {
-      naoRespondidas++;
-      continue;
-    }
-
+    if (!resposta) { naoRespondidas++; continue; }
     const correta = q.alternativas.find(a => a.correta)?.letra;
-    if (resposta === correta) {
-      acertos++;
-    } else {
-      erros++;
-    }
+    if (resposta === correta) acertos++;
+    else erros++;
   }
 
   const respondidas = acertos + erros;

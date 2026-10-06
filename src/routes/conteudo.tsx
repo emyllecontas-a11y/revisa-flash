@@ -580,7 +580,19 @@ export default function ConteudoPage() {
             .update({ isDeleted: true, updated_at: now })
             .eq('id', tid);
         }
-
+        // 3d. Pastas, listas, questões e resultados vinculados à disciplina
+        if (userId) {
+          const { error: rpcErr } = await supabaseClient.rpc(
+            'excluir_disciplina_conteudo',
+            { p_discipline_id: id, p_user_id: userId }
+          );
+          if (rpcErr) {
+            console.warn('⚠️ Falha ao limpar conteúdo (pastas/listas):', rpcErr);
+            // não bloqueia — segue com o soft delete da disciplina
+          } else {
+            console.log('✅ [ConteudoPage] Pastas, listas, questões e resultados excluídos.');
+          }
+        }
         console.log('✅ [ConteudoPage] Disciplina, erros e tópicos excluídos no Supabase.');
       } catch (supabaseError) {
         console.warn('⚠️ [ConteudoPage] Falha ao excluir no Supabase, enfileirando.');
@@ -607,7 +619,7 @@ export default function ConteudoPage() {
       console.error("❌ Erro ao deletar disciplina:", error);
       setErrorMessage("Erro ao deletar disciplina: " + (error.message || "Erro desconhecido"));
     }
-  }, [selectedDisciplineId, loadData]);
+  }, [selectedDisciplineId, loadData, userId]);
   
   // ---------- EXCLUIR TÓPICO (SOFT DELETE) ----------
   const handleDeleteTopic = useCallback(async (id: string) => {
