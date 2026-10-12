@@ -18,17 +18,18 @@ import {
   Loader2, Trash2
 } from "lucide-react";
 import type { SimuladoPlayer, QuestaoPlayer, ProgressoPlayer, Alternativa } from "@/lib/simulados-types";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/hooks/useToast";
 
 type Fase = "resolvendo" | "resultado" | "correcao";
 
-// ============================================================
-// PÁGINA DO PLAYER
-// ============================================================
 export default function SimuladoPlayerPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAppUser();
+  const confirmDialog = useConfirm();
+  const toast = useToast();
 
   const [simulado, setSimulado] = useState<SimuladoPlayer | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,33 +50,24 @@ export default function SimuladoPlayerPage() {
   const [confirmar, setConfirmar] = useState(false);
   const [resultadoSalvo, setResultadoSalvo] = useState<any>(null);
 
-  // NOVO: bloqueia autosave até o boot terminar
   const [booted, setBooted] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Refs para acesso em listeners / intervalos (sempre o valor mais recente)
   const progressoRef = useRef(progresso);
   useEffect(() => { progressoRef.current = progresso; }, [progresso]);
 
   const faseRef = useRef(fase);
   useEffect(() => { faseRef.current = fase; }, [fase]);
 
-  // Snapshot do que já foi salvo — evita salvar o que acabou de vir do banco
   const lastSavedRef = useRef<string>('');
 
-  // ============================================================
-  // HELPERS DE PERSISTÊNCIA
-  // ============================================================
   const snapshotDe = (p: ProgressoPlayer) => JSON.stringify({
     r: p.respostas || {},
     m: p.marcadas || [],
     e: p.eliminadas || {},
   });
 
-  // ============================================================
-  // CARREGAR DADOS INICIAIS
-  // ============================================================
   useEffect(() => {
     const loadData = async () => {
       if (!id || !user?.id) {
@@ -102,7 +94,6 @@ export default function SimuladoPlayerPage() {
 
         setSimulado(simResult.data);
 
-        // 1. Buscar progresso do usuário (local-first)
         const progResult = await getProgresso(id, user.id);
         if (progResult.success && progResult.data) {
           const p: ProgressoPlayer = {
@@ -119,19 +110,16 @@ export default function SimuladoPlayerPage() {
             setFase("resultado");
           }
         } else {
-          // Sem progresso anterior — registra snapshot vazio
           lastSavedRef.current = snapshotDe({
             respostas: {}, eliminadas: {}, marcadas: [], tempo_decorrido: 0, status: 'em-andamento',
           });
         }
 
-        // 2. Buscar resultado salvo (se existir)
         const resultResult = await buscarResultadoSimulado(id, user.id);
         if (resultResult.success && resultResult.data) {
           setResultadoSalvo(resultResult.data);
         }
 
-        // 3. Verificar se veio com view=resultado
         const searchParams = new URLSearchParams(location.search);
         if (searchParams.get('view') === 'resultado') {
           setFase("resultado");
@@ -141,7 +129,6 @@ export default function SimuladoPlayerPage() {
         setError(err.message || "Erro ao carregar simulado");
       } finally {
         setLoading(false);
-        // Marca como pronto para salvar — só depois de tudo carregado
         setBooted(true);
       }
     };
@@ -149,9 +136,6 @@ export default function SimuladoPlayerPage() {
     loadData();
   }, [id, user?.id, location.search]);
 
-  // ============================================================
-  // CRONÔMETRO
-  // ============================================================
   useEffect(() => {
     if (fase !== "resolvendo" || !simulado || simulado.questoes.length === 0) return;
 
@@ -167,12 +151,9 @@ export default function SimuladoPlayerPage() {
     };
   }, [fase, simulado]);
 
-  // ============================================================
-  // AUTOSAVE — RESPOSTAS/MARCADAS/ELIMINADAS (imediato)
-  // ============================================================
   useEffect(() => {
     if (!id || !user?.id || fase !== "resolvendo" || !simulado) return;
-    if (!booted) return;   // guarda contra race no boot
+    if (!booted) return;
 
     const snap = snapshotDe(progresso);
     if (snap === lastSavedRef.current) return;
@@ -185,9 +166,6 @@ export default function SimuladoPlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progresso.respostas, progresso.marcadas, progresso.eliminadas, id, user?.id, fase, simulado, booted]);
 
-  // ============================================================
-  // AUTOSAVE — TEMPO DECORRIDO (a cada 10s)
-  // ============================================================
   useEffect(() => {
     if (!id || !user?.id || fase !== "resolvendo" || !simulado) return;
     if (!booted) return;
@@ -201,9 +179,6 @@ export default function SimuladoPlayerPage() {
     return () => clearInterval(interval);
   }, [id, user?.id, fase, simulado, booted]);
 
-  // ============================================================
-  // AUTOSAVE — BEFOREUNLOAD + VISIBILITYCHANGE
-  // ============================================================
   useEffect(() => {
     if (!id || !user?.id) return;
 
@@ -226,9 +201,6 @@ export default function SimuladoPlayerPage() {
     };
   }, [id, user?.id, booted]);
 
-  // ============================================================
-  // FUNÇÕES DE INTERAÇÃO
-  // ============================================================
   const toggleEliminada = (letra: string) => {
     if (!simulado || !simulado.questoes[idx]) return;
     const q = simulado.questoes[idx];
@@ -293,34 +265,37 @@ export default function SimuladoPlayerPage() {
       }
       setFase("resultado");
     } else {
-      alert("Erro ao finalizar simulado: " + finalResult.error);
+      toast.error("Erro ao finalizar simulado", { description: finalResult.error });
     }
   };
 
   const handleExcluirSimulado = async () => {
     if (!id || !user?.id || !simulado) return;
-    if (!confirm(`Tem certeza que deseja excluir o simulado "${simulado.titulo}"?`)) return;
-    if (!confirm(`Esta ação não pode ser desfeita. Confirmar exclusão?`)) return;
+    const ok = await confirmDialog({
+      title: `Excluir "${simulado.titulo}"?`,
+      description: "Essa ação não pode ser desfeita. O simulado e todo o histórico de tentativas serão removidos.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
 
     setExcluindo(true);
     try {
       const result = await excluirSimulado(id, user.id);
       if (result.success) {
-        alert("Simulado excluído com sucesso!");
+        toast.success("Simulado excluído com sucesso!");
         navigate("/simulados");
       } else {
-        alert("Erro ao excluir: " + result.error);
+        toast.error("Erro ao excluir", { description: result.error });
       }
     } catch (err: any) {
-      alert("Erro ao excluir: " + err.message);
+      toast.error("Erro ao excluir", { description: err.message });
     } finally {
       setExcluindo(false);
     }
   };
 
-  // ============================================================
-  // RENDER: LOADING / ERRO
-  // ============================================================
   if (loading) {
     return (
       <AppShell breadcrumb="Simulados" title="Carregando...">
@@ -338,7 +313,7 @@ export default function SimuladoPlayerPage() {
           <p className="text-accent">{error || "Simulado não encontrado"}</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
           >
             Voltar para simulados
           </button>
@@ -354,7 +329,7 @@ export default function SimuladoPlayerPage() {
           <p className="text-accent">Este simulado não possui questões.</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
           >
             Voltar para simulados
           </button>
@@ -363,9 +338,6 @@ export default function SimuladoPlayerPage() {
     );
   }
 
-  // ============================================================
-  // RENDER: FASE RESULTADO
-  // ============================================================
   if (fase === "resultado") {
     const questoes = simulado.questoes;
     const total = questoes.length;
@@ -479,9 +451,6 @@ export default function SimuladoPlayerPage() {
     );
   }
 
-  // ============================================================
-  // FASE CORREÇÃO
-  // ============================================================
   if (fase === "correcao") {
     const q = simulado.questoes[idx];
     const respostasParaExibir = resultadoSalvo?.respostas || progresso.respostas;
@@ -590,9 +559,6 @@ export default function SimuladoPlayerPage() {
     );
   }
 
-  // ============================================================
-  // RENDER: FASE RESOLVENDO
-  // ============================================================
   const q = simulado.questoes[idx];
   const elimAtual = progresso.eliminadas[q.numero] || [];
   const selecionada = progresso.respostas[q.numero];
@@ -632,7 +598,7 @@ export default function SimuladoPlayerPage() {
             <button
               onClick={handleExcluirSimulado}
               disabled={excluindo}
-              className="inline-flex items-center gap-1 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[10px] font-medium text-accent/80 hover:bg-accent/20 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[10px] font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
               title="Excluir simulado"
             >
               {excluindo ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
@@ -743,14 +709,14 @@ export default function SimuladoPlayerPage() {
             {idx === total - 1 ? (
               <button
                 onClick={() => setConfirmar(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 <Flag className="h-3.5 w-3.5" /> Finalizar simulado
               </button>
             ) : (
               <button
                 onClick={() => setIdx(i => i + 1)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 Próxima <ArrowRight className="h-3.5 w-3.5" />
               </button>
@@ -769,7 +735,7 @@ export default function SimuladoPlayerPage() {
             />
             <button
               onClick={() => setConfirmar(true)}
-              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
             >
               <Flag className="h-3.5 w-3.5" /> Finalizar simulado
             </button>
@@ -810,13 +776,13 @@ export default function SimuladoPlayerPage() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={() => setConfirmar(false)}
-                className="flex-1 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-white/5"
+                className="flex-1 rounded-full border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-white/5"
               >
                 Voltar
               </button>
               <button
                 onClick={handleFinalizar}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 Finalizar
               </button>
@@ -827,10 +793,6 @@ export default function SimuladoPlayerPage() {
     </AppShell>
   );
 }
-
-// ============================================================
-// SUBCOMPONENTES
-// ============================================================
 
 function PainelQuestoes({ total, atual, respostas, marcadas, onPick }: {
   total: number;
@@ -939,9 +901,6 @@ function Donut({ pct }: { pct: number }) {
   );
 }
 
-// ============================================================
-// AUXILIAR
-// ============================================================
 function formatarTempo(segundos: number): string {
   const mins = Math.floor(segundos / 60);
   const secs = segundos % 60;

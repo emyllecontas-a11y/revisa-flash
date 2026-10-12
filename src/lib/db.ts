@@ -3,6 +3,129 @@ import { createRxDatabase, RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { supabase, getSupabaseWithToken } from './supabaseClient';
 
+// ============================================================
+// CHAVE DE SINCRONIZAÇÃO POR USUÁRIO
+// ============================================================
+const LAST_SYNC_PREFIX = 'lastSyncTimestamp_';
+const LAST_SYNC_LEGACY = 'lastSyncTimestamp';
+
+export function getLastSyncKey(userId: string): string {
+  return `${LAST_SYNC_PREFIX}${userId}`;
+}
+
+export function readLastSync(userId: string): string {
+  try {
+    const key = getLastSyncKey(userId);
+    const own = localStorage.getItem(key);
+    if (own) return own;
+
+    const legacy = localStorage.getItem(LAST_SYNC_LEGACY);
+    if (legacy) {
+      localStorage.setItem(key, legacy);
+      localStorage.removeItem(LAST_SYNC_LEGACY);
+      return legacy;
+    }
+  } catch { /* ignore */ }
+  return '1970-01-01T00:00:00Z';
+}
+
+export function writeLastSync(userId: string, iso: string): void {
+  try {
+    localStorage.setItem(getLastSyncKey(userId), iso);
+  } catch { /* ignore */ }
+}
+
+export function clearAllLastSync(): void {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k === LAST_SYNC_LEGACY || (k && k.startsWith(LAST_SYNC_PREFIX))) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
+
+// ============================================================
+// PUSH COM VERIFICAÇÃO DE CONFLITO
+// ============================================================
+async function pushWithConflictCheck(
+  supabaseClient: any,
+  collectionName: string,
+  collection: any,
+  docsToPush: any[],
+): Promise<{ pushed: number; skipped: number }> {
+  if (docsToPush.length === 0) return { pushed: 0, skipped: 0 };
+
+  const ids = docsToPush.map(d => d.id).filter(Boolean);
+  if (ids.length === 0) return { pushed: 0, skipped: 0 };
+
+  const CHUNK_SIZE = 200;
+  const remoteMap = new Map<string, any>();
+
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const { data: remoteRows, error } = await supabaseClient
+      .from(collectionName)
+      .select('*')
+      .in('id', chunk);
+
+    if (error) {
+      console.warn(`⚠️ [Conflito] Não foi possível verificar ${collectionName} (lote ${i / CHUNK_SIZE + 1}).`, error.message);
+      return { pushed: 0, skipped: docsToPush.length };
+    }
+
+    (remoteRows || []).forEach((r: any) => {
+      if (r.id) remoteMap.set(r.id, r);
+    });
+  }
+
+  const toUpsert: any[] = [];
+  let skipped = 0;
+
+  for (const doc of docsToPush) {
+    const remote = remoteMap.get(doc.id);
+
+    if (!remote) {
+      toUpsert.push(doc);
+      continue;
+    }
+
+    const remoteTs = remote.updated_at || '1970-01-01T00:00:00Z';
+    const localTs = doc.updated_at || '1970-01-01T00:00:00Z';
+
+    if (remoteTs > localTs) {
+      try {
+        const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+        if (existing) {
+          await existing.patch(remote);
+        }
+      } catch (patchErr) {
+        console.warn(`⚠️ [Conflito] Falha ao aplicar versão remota em ${collectionName}/${doc.id}:`, patchErr);
+      }
+      skipped++;
+      console.log(`⚠️ [Conflito] ${collectionName}/${doc.id} — servidor (${remoteTs}) venceu local (${localTs}).`);
+      continue;
+    }
+
+    toUpsert.push(doc);
+  }
+
+  if (toUpsert.length > 0) {
+    const { error: upsertError } = await supabaseClient
+      .from(collectionName)
+      .upsert(toUpsert, { onConflict: 'id' });
+    if (upsertError) {
+      console.error(`❌ Push ${collectionName}:`, upsertError);
+      throw upsertError;
+    }
+  }
+
+  return { pushed: toUpsert.length, skipped };
+}
+
 const deckSchema = {
   title: 'deck schema',
   version: 0,
@@ -206,12 +329,15 @@ const pendingOperationSchema = {
   type: 'object',
   properties: {
     id: { type: 'string' },
+    user_id: { type: 'string' },
     op_type: { type: 'string' },
     table_name: { type: 'string' },
     data: { type: 'object', additionalProperties: true },
     timestamp: { type: 'string' },
     retries: { type: 'number' },
-    updated_at: { type: 'string' }
+    updated_at: { type: 'string' },
+    failed: { type: 'boolean' },
+    failed_at: { type: ['string', 'null'] }
   },
   required: ['id', 'op_type', 'table_name', 'data', 'timestamp']
 };
@@ -242,9 +368,91 @@ const userSettingsSchema = {
   required: ['id', 'user_id']
 };
 
-// ============================================================
-// LISTAS
-// ============================================================
+const fileSchema = {
+  title: 'file schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    disciplina: { type: 'string' },
+    topico_id: { type: 'string' },
+    nome: { type: 'string' },
+    tipo: { type: 'string' },
+    url: { type: 'string' },
+    storage_path: { type: 'string' },
+    descricao: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+  },
+  required: ['id', 'user_id', 'topico_id', 'nome', 'url'],
+};
+
+const pdfHighlightSchema = {
+  title: 'pdf highlight schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    file_id: { type: 'string' },
+    page_number: { type: 'number' },
+    text_snippet: { type: 'string' },
+    color: { type: 'string' },
+    rects: {
+      type: 'array',
+      items: { type: 'object', additionalProperties: true },
+    },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'file_id', 'page_number'],
+};
+
+const pdfNoteSchema = {
+  title: 'pdf note schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    file_id: { type: 'string' },
+    page_number: { type: 'number' },
+    highlight_id: { type: ['string', 'null'], default: null },
+    content: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'file_id', 'page_number', 'content'],
+};
+
+const pdfTextBoxSchema = {
+  title: 'pdf text box schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    file_id: { type: 'string' },
+    page_number: { type: 'number' },
+    x: { type: 'number' },
+    y: { type: 'number' },
+    width: { type: 'number' },
+    height: { type: 'number' },
+    content: { type: 'string' },
+    color: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'file_id', 'page_number'],
+};
 
 const listaSchema = {
   title: 'lista schema',
@@ -365,10 +573,6 @@ const resultadoListaSchema = {
   },
   required: ['id', 'lista_id', 'user_id'],
 };
-
-// ============================================================
-// SIMULADOS
-// ============================================================
 
 const simuladoSchema = {
   title: 'simulado schema',
@@ -504,20 +708,21 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v7';
+    const DB_NAME = 'revisaflash_db_v8';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v5'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v6'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v7'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v7') {
+      if (markerVersion !== 'v8') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
-        localStorage.removeItem('lastSyncTimestamp');
-        localStorage.setItem('revisaflash_db_version', 'v7');
+        clearAllLastSync();
+        localStorage.setItem('revisaflash_db_version', 'v8');
       }
     } catch (e) {}
 
@@ -551,9 +756,13 @@ export async function getDb(): Promise<RxDatabase> {
       alternativas: { schema: alternativaSchema },
       progresso_simulado: { schema: progressoSimuladoSchema },
       resultados_simulado: { schema: resultadoSimuladoSchema },
+      pdf_highlights: { schema: pdfHighlightSchema },
+      pdf_notes: { schema: pdfNoteSchema },
+      pdf_text_boxes: { schema: pdfTextBoxSchema },
+      files: { schema: fileSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v7).');
+    console.log('✅ Banco local criado com sucesso (v8).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -577,7 +786,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
   }
   isSyncing = true;
 
-  // Se qualquer pull/push falhar, este flag impede que lastSyncTimestamp avance.
   let houveErro = false;
 
   try {
@@ -589,7 +797,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     const supabaseClient = await getSupabaseWithToken();
     const userIdStr = String(userId);
 
-    const lastSyncGlobal = localStorage.getItem('lastSyncTimestamp') || '1970-01-01T00:00:00Z';
+    const lastSyncGlobal = readLastSync(userId);
     if (lastSyncGlobal === '1970-01-01T00:00:00Z') {
       console.log('🔄 Pull COMPLETO (lastSyncTimestamp zerado).');
     } else {
@@ -599,9 +807,12 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     const collectionsToCheck = [
       'decks', 'flashcards', 'disciplines', 'topics', 'errors',
       'revisoes', 'study_records', 'user_settings',
-      'listas', 'listas_pastas', 'questoes_lista', 'progresso_lista',
+      'listas_pastas', 'listas', 'questoes_lista', 'progresso_lista',
       'progresso_simulado', 'resultados_lista', 'resultados_simulado',
       'simulados',
+      'pdf_highlights', 'pdf_notes',
+      'pdf_text_boxes',
+      'files',
     ];
     const emptyCollections = new Set<string>();
     for (const name of collectionsToCheck) {
@@ -621,8 +832,10 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     const collections = [
       'decks', 'flashcards', 'disciplines', 'topics', 'errors',
       'revisoes', 'study_records', 'user_settings',
-      'listas', 'listas_pastas', 'questoes_lista',
+      'listas_pastas', 'listas', 'questoes_lista',
       'progresso_lista', 'progresso_simulado',
+      'pdf_highlights', 'pdf_notes',
+      'pdf_text_boxes',
     ];
 
     for (const name of collections) {
@@ -695,11 +908,51 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           if (rpcError) { console.error(`❌ Push ${name} via RPC:`, rpcError); houveErro = true; }
           else console.log(`✅ Push ${name} via RPC: ${docsToPush.length}`);
         } else {
-          const { error: upsertError } = await supabaseClient
-            .from(name)
-            .upsert(docsToPush, { onConflict: 'id' });
-          if (upsertError) { console.error(`❌ Push ${name}:`, upsertError); houveErro = true; }
-          else console.log(`✅ Push ${name}: ${docsToPush.length}`);
+          try {
+            const result = await pushWithConflictCheck(supabaseClient, name, collection, docsToPush);
+            if (result.pushed > 0 || result.skipped > 0) {
+              console.log(`✅ Push ${name}: ${result.pushed} enviados, ${result.skipped} em conflito (servidor venceu).`);
+            }
+          } catch (pushErr) {
+            console.error(`❌ Push ${name}:`, pushErr);
+            houveErro = true;
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // FILES (metadados dos PDFs) — somente pull
+    // ============================================================
+    {
+      const collection = database.collections.files;
+      if (collection) {
+        const pullFrom = emptyCollections.has('files')
+          ? '1970-01-01T00:00:00Z'
+          : lastSyncGlobal;
+
+        const { data, error } = await supabaseClient
+          .from('files')
+          .select('*')
+          .eq('user_id', userIdStr)
+          .gte('created_at', pullFrom);
+
+        if (error) {
+          console.error('❌ Pull files:', error);
+          houveErro = true;
+        } else if (data) {
+          let added = 0;
+          for (const doc of data) {
+            const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+            if (!existing) {
+              await collection.insert({
+                ...doc,
+                updated_at: doc.updated_at || doc.created_at,
+              });
+              added++;
+            }
+          }
+          if (added > 0) console.log(`✅ Pull files: ${added} novo(s)`);
         }
       }
     }
@@ -741,11 +994,15 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         selector: { user_id: userIdStr, updated_at: { $gt: lastSyncGlobal } }
       }).exec();
       if (localDocs.length > 0) {
-        const { error: upsertError } = await supabaseClient
-          .from('resultados_lista')
-          .upsert(localDocs.map(d => d.toJSON()), { onConflict: 'id' });
-        if (!upsertError) console.log(`✅ Push resultados_lista: ${localDocs.length}`);
-        else { console.error('❌ Push resultados_lista:', upsertError); houveErro = true; }
+        try {
+          const result = await pushWithConflictCheck(supabaseClient, 'resultados_lista', collection, localDocs.map(d => d.toJSON()));
+          if (result.pushed > 0 || result.skipped > 0) {
+            console.log(`✅ Push resultados_lista: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+          }
+        } catch (pushErr) {
+          console.error('❌ Push resultados_lista:', pushErr);
+          houveErro = true;
+        }
       }
     }
 
@@ -786,11 +1043,15 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         selector: { user_id: userIdStr, updated_at: { $gt: lastSyncGlobal } }
       }).exec();
       if (localDocs.length > 0) {
-        const { error: upsertError } = await supabaseClient
-          .from('resultados_simulado')
-          .upsert(localDocs.map(d => d.toJSON()), { onConflict: 'id' });
-        if (!upsertError) console.log(`✅ Push resultados_simulado: ${localDocs.length}`);
-        else { console.error('❌ Push resultados_simulado:', upsertError); houveErro = true; }
+        try {
+          const result = await pushWithConflictCheck(supabaseClient, 'resultados_simulado', collection, localDocs.map(d => d.toJSON()));
+          if (result.pushed > 0 || result.skipped > 0) {
+            console.log(`✅ Push resultados_simulado: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+          }
+        } catch (pushErr) {
+          console.error('❌ Push resultados_simulado:', pushErr);
+          houveErro = true;
+        }
       }
     }
 
@@ -842,11 +1103,15 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         const toPush = localLinks.map(d => d.toJSON());
 
         if (toPush.length > 0) {
-          const { error: upsertError } = await supabaseClient
-            .from('listas_questoes')
-            .upsert(toPush, { onConflict: 'id' });
-          if (!upsertError) console.log(`✅ Push listas_questoes: ${toPush.length}`);
-          else { console.error('❌ Push listas_questoes:', upsertError); houveErro = true; }
+          try {
+            const result = await pushWithConflictCheck(supabaseClient, 'listas_questoes', collection, toPush);
+            if (result.pushed > 0 || result.skipped > 0) {
+              console.log(`✅ Push listas_questoes: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+            }
+          } catch (pushErr) {
+            console.error('❌ Push listas_questoes:', pushErr);
+            houveErro = true;
+          }
         }
       }
     }
@@ -863,7 +1128,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         return chunks;
       };
 
-      // --- SIMULADOS ---
       const simuladosCollection = database.collections.simulados;
       const pullFrom = emptyCollections.has('simulados') ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
 
@@ -890,7 +1154,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         houveErro = true;
       }
 
-      // --- QUESTOES ---
       const questoesCollection = database.collections.questoes;
       const localSimsAll = await simuladosCollection.find({ selector: {} }).exec();
       const simIds = localSimsAll.map(d => d.get('id'));
@@ -923,7 +1186,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         }
         if (totalQuestoes > 0) console.log(`✅ Pull questoes: ${totalQuestoes}`);
 
-        // --- ALTERNATIVAS ---
         const altCollection = database.collections.alternativas;
         const localQ = await questoesCollection.find({ selector: {} }).exec();
         const qIds = localQ.map(d => d.get('id'));
@@ -933,7 +1195,16 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           let totalAlt = 0;
 
           for (const chunk of qIdChunks) {
-            const { data: aData, error: aErr } = await supabaseClient
+            let freshClient;
+            try {
+              freshClient = await getSupabaseWithToken();
+            } catch (tokenErr) {
+              console.error('❌ Não foi possível obter token fresco para alternativas:', tokenErr);
+              houveErro = true;
+              continue;
+            }
+
+            const { data: aData, error: aErr } = await freshClient
               .from('alternativas')
               .select('*')
               .in('questao_id', chunk)
@@ -1004,10 +1275,15 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         if (localSessions.length > 0) {
           const toPush = localSessions.map(d => d.toJSON()).filter(s => deckIds.includes(s.deckId));
           if (toPush.length > 0) {
-            const { error: upErr } = await supabaseClient
-              .from('study_sessions').upsert(toPush, { onConflict: 'id' });
-            if (!upErr) console.log(`✅ Push study_sessions: ${toPush.length}`);
-            else { console.error('❌ Push study_sessions:', upErr); houveErro = true; }
+            try {
+              const result = await pushWithConflictCheck(supabaseClient, 'study_sessions', collection, toPush);
+              if (result.pushed > 0 || result.skipped > 0) {
+                console.log(`✅ Push study_sessions: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+              }
+            } catch (pushErr) {
+              console.error('❌ Push study_sessions:', pushErr);
+              houveErro = true;
+            }
           }
         }
       }
@@ -1022,7 +1298,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     if (houveErro) {
       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
     } else {
-      localStorage.setItem('lastSyncTimestamp', new Date().toISOString());
+      writeLastSync(userId, new Date().toISOString());
       console.log('✅ Sincronização concluída.');
     }
 

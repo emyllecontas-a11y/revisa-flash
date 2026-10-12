@@ -11,6 +11,7 @@ import type { Rating } from "@/lib/fsrs/types";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { findUserByEmail, findUsersByIds } from "@/services/clerkService";
 import { useNavigate } from "react-router-dom";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 // ============================================================
 // 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO
@@ -35,6 +36,7 @@ function FormattedText({ text, className }: { text: string; className?: string }
 // ============================================================
 export default function FlashcardsPage() {
   const navigate = useNavigate();
+  const confirmDialog = useConfirm();
   const flashcardContext = useFlashcardContext();
   const { 
     decks, 
@@ -116,7 +118,7 @@ export default function FlashcardsPage() {
   const [deckName, setDeckName] = useState("");
   const [deckDescription, setDeckDescription] = useState("");
   const [deckDisciplina, setDeckDisciplina] = useState("");
-  const [deckCor, setDeckCor] = useState("#14B8A6");
+  const [deckCor, setDeckCor] = useState("#FE7802");
   const [isShared, setIsShared] = useState(false);
   const [sharedWithInput, setSharedWithInput] = useState("");
   
@@ -206,7 +208,6 @@ export default function FlashcardsPage() {
   // FILTRAR CARDS (COM PESQUISA)
   // ============================================================
   const deckCards = useMemo(() => {
-    // Primeiro filtra por status
     let filtered = allCardsInDeck;
     if (filterStatus === "para_revisar") {
       const hoje = new Date();
@@ -218,7 +219,6 @@ export default function FlashcardsPage() {
       });
     }
 
-    // 🔥 Depois filtra por termo de busca
     if (searchTerm.trim() !== "") {
       const term = searchTerm.trim().toLowerCase();
       filtered = filtered.filter(c =>
@@ -361,7 +361,7 @@ export default function FlashcardsPage() {
       setDeckName("");
       setDeckDescription("");
       setDeckDisciplina("");
-      setDeckCor("#14B8A6");
+      setDeckCor("#FE7802");
       setIsShared(false);
       setSharedWithInput("");
       setIsModalOpen(false);
@@ -449,7 +449,14 @@ export default function FlashcardsPage() {
   }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards, selectedDeckId, getAllCardsByDeck, editFromStudy]);
 
   const handleDeleteDeck = useCallback(async (deckId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este baralho e todos os seus flashcards?")) return;
+    const ok = await confirmDialog({
+      title: "Excluir este deck?",
+      description: "Todos os cards serão removidos. Essa ação não pode ser desfeita.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteDeck(deckId);
       if (selectedDeckId === deckId) {
@@ -460,10 +467,17 @@ export default function FlashcardsPage() {
       console.error("❌ Erro ao deletar baralho:", error);
       setErrorMessage("Erro ao deletar baralho: " + (error.message || "Erro desconhecido"));
     }
-  }, [selectedDeckId, deleteDeck]);
+  }, [selectedDeckId, deleteDeck, confirmDialog]);
 
-  const handleDeleteCard = useCallback(async (cardId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este flashcard?")) return;
+  const handleDeleteCard = useCallback(async (cardId: string): Promise<boolean> => {
+    const ok = await confirmDialog({
+      title: "Excluir este flashcard?",
+      description: "O card será removido do baralho. Essa ação não pode ser desfeita.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return false;
     try {
       await deleteCard(cardId);
       if (selectedDeckId) {
@@ -476,11 +490,13 @@ export default function FlashcardsPage() {
           setModo("concluido");
         }
       }
+      return true;
     } catch (error: any) {
       console.error("❌ Erro ao deletar flashcard:", error);
       setErrorMessage("Erro ao deletar flashcard: " + (error.message || "Erro desconhecido"));
+      return false;
     }
-  }, [deleteCard, selectedDeckId, getAllCardsByDeck, modo, sessaoCards.length]);
+  }, [deleteCard, selectedDeckId, getAllCardsByDeck, modo, sessaoCards.length, confirmDialog]);
 
   const handleRenameDeck = useCallback(async () => {
     if (!selectedDeckId || !renameName.trim()) {
@@ -491,7 +507,7 @@ export default function FlashcardsPage() {
       setIsRenaming(true);
       setErrorMessage("");
       const deck = decks.find(d => d.id === selectedDeckId);
-      const currentColor = deck?.color || "#14B8A6";
+      const currentColor = deck?.color || "#FE7802";
       await renameDeck(selectedDeckId, renameName.trim(), renameDescription.trim(), currentColor);
       if (deckDisciplina.trim()) {
         setDeckMeta(selectedDeckId, { disciplina: deckDisciplina.trim() });
@@ -568,7 +584,14 @@ export default function FlashcardsPage() {
 
   const handleRemoveMember = useCallback(async (userIdToRemove: string) => {
     if (!selectedDeckId) return;
-    if (!confirm(`Tem certeza que deseja remover este membro?`)) return;
+    const ok = await confirmDialog({
+      title: "Remover este membro?",
+      description: "A pessoa perderá o acesso a este baralho.",
+      confirmText: "Remover",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       setIsManagingMember(true);
       await removeMemberFromDeck(selectedDeckId, userIdToRemove);
@@ -598,7 +621,7 @@ export default function FlashcardsPage() {
     } finally {
       setIsManagingMember(false);
     }
-  }, [selectedDeckId, removeMemberFromDeck, refreshFlashcards, decks]);
+  }, [selectedDeckId, removeMemberFromDeck, refreshFlashcards, decks, confirmDialog]);
 
   // ============================================================
   // INICIAR ESTUDO
@@ -782,8 +805,12 @@ export default function FlashcardsPage() {
             
             <button
               onClick={() => setVirado((v) => !v)}
-              className="mt-2 grid min-h-[300px] w-full place-items-center rounded-2xl border border-border bg-surface p-10 text-center transition-all hover:border-primary/40 sm:min-h-[360px]"
-              style={{ boxShadow: virado ? "var(--shadow-glow)" : undefined }}
+              className="mt-2 grid min-h-[300px] w-full place-items-center rounded-3xl bg-surface p-10 text-center transition-all sm:min-h-[360px]"
+              style={{
+                boxShadow: virado
+                  ? "0 6px 0 0 var(--primary), var(--shadow-glow)"
+                  : "0 6px 0 0 var(--primary)",
+              }}
             >
               {!virado ? (
                 <div className="space-y-5">
@@ -809,10 +836,10 @@ export default function FlashcardsPage() {
             </button>
             {virado && (
               <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
-                <FsrsButton label="Errei" hint="10 min" tone="accent" onClick={() => handleRating("again")} disabled={isRating} />
-                <FsrsButton label="Difícil" hint="2 dias" onClick={() => handleRating("hard")} disabled={isRating} />
-                <FsrsButton label="Bom" hint="4 dias" primary onClick={() => handleRating("good")} disabled={isRating} />
-                <FsrsButton label="Fácil" hint="12 dias" onClick={() => handleRating("easy")} disabled={isRating} />
+                <FsrsButton label="Errei" hint="10 min" variant="again" onClick={() => handleRating("again")} disabled={isRating} />
+                <FsrsButton label="Difícil" hint="2 dias" variant="hard" onClick={() => handleRating("hard")} disabled={isRating} />
+                <FsrsButton label="Bom" hint="4 dias" variant="good" onClick={() => handleRating("good")} disabled={isRating} />
+                <FsrsButton label="Fácil" hint="12 dias" variant="easy" onClick={() => handleRating("easy")} disabled={isRating} />
               </div>
             )}
             {!virado && (
@@ -838,8 +865,8 @@ export default function FlashcardsPage() {
         <div className="mx-auto max-w-2xl text-center">
           <div className="rf-card p-8 sm:p-12">
             <div className="mb-4 flex justify-center">
-              <div className="rounded-full bg-green-500/10 p-4">
-                <CheckCircle className="h-12 w-12 text-green-400" />
+              <div className="rounded-full bg-success/10 p-4">
+                <CheckCircle className="h-12 w-12 text-success" />
               </div>
             </div>
             <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">🎉 Revisão concluída!</h2>
@@ -850,7 +877,7 @@ export default function FlashcardsPage() {
             {stats && (
               <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
                 <div className="rounded-lg bg-background/40 p-4">
-                  <div className="text-2xl font-bold text-green-400">{stats.good + stats.easy}</div>
+                  <div className="text-2xl font-bold text-success">{stats.good + stats.easy}</div>
                   <div className="text-[10px] uppercase tracking-wider text-foreground/40">Acertos (Bom/Fácil)</div>
                 </div>
                 <div className="rounded-lg bg-background/40 p-4">
@@ -870,7 +897,7 @@ export default function FlashcardsPage() {
             
             <p className="mt-6 text-xs text-foreground/40">Excelente trabalho! Continue assim.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <button onClick={voltarDaConclusao} className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">Voltar para os decks</button>
+              <button onClick={voltarDaConclusao} className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">Voltar para os decks</button>
               <button
                 onClick={async () => {
                   if (selectedDeckId) {
@@ -915,7 +942,7 @@ export default function FlashcardsPage() {
       const deckStats = getDeckStats(selectedDeckId);
       const deckMeta = getDeckMeta(selectedDeckId);
       const isErrorDeck = deck.name === "Erros";
-      const deckColor = deck.color || '#14B8A6';
+      const deckColor = deck.color || '#FE7802';
       const chartData = getStabilityOverTime(selectedDeckId);
       
       const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
@@ -980,7 +1007,7 @@ export default function FlashcardsPage() {
               ><Pencil className="h-3.5 w-3.5" /> Editar baralho</button>
               <button
                 onClick={() => { setIsAddCardModalOpen(true); setErrorMessage(''); }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               ><Plus className="h-3.5 w-3.5" /> Novo flashcard</button>
             </div>
           </header>
@@ -995,19 +1022,19 @@ export default function FlashcardsPage() {
               <div className="h-[200px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                    <XAxis dataKey="month" tick={{ fill: '#8899aa', fontSize: 10 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#503243" />
+                    <XAxis dataKey="month" tick={{ fill: '#BCA7B4', fontSize: 10 }} />
                     <YAxis 
                       domain={[0, 'auto']} 
-                      tick={{ fill: '#8899aa', fontSize: 10 }} 
-                      label={{ value: 'Estabilidade', angle: -90, position: 'insideLeft', fill: '#8899aa', fontSize: 10 }}
+                      tick={{ fill: '#BCA7B4', fontSize: 10 }} 
+                      label={{ value: 'Estabilidade', angle: -90, position: 'insideLeft', fill: '#BCA7B4', fontSize: 10 }}
                     />
                     <Tooltip 
-                      contentStyle={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: '8px' }}
-                      labelStyle={{ color: '#cccccc' }}
+                      contentStyle={{ background: '#38192B', border: '1px solid #503243', borderRadius: '8px' }}
+                      labelStyle={{ color: '#FCF4F9' }}
                       formatter={(value: any) => [`${value}`, 'Estabilidade média']}
                     />
-                    <Line type="monotone" dataKey="stability" stroke="#14B8A6" strokeWidth={2} dot={{ fill: '#14B8A6', r: 4 }} />
+                    <Line type="monotone" dataKey="stability" stroke="#FE7802" strokeWidth={2} dot={{ fill: '#FE7802', r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1102,7 +1129,7 @@ export default function FlashcardsPage() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-red-500/50 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-destructive/50 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   </article>
                 );
@@ -1131,7 +1158,7 @@ export default function FlashcardsPage() {
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
         {errorMessage && (
-          <div className={`mb-4 rounded-xl border p-3 text-sm ${errorMessage.includes("🎉") || errorMessage.includes("✅") ? "border-green-500/20 bg-green-500/20 text-green-400" : "border-red-500/20 bg-red-500/20 text-red-400"}`}>
+          <div className={`mb-4 rounded-xl border p-3 text-sm ${errorMessage.includes("🎉") || errorMessage.includes("✅") ? "border-success/20 bg-success/20 text-success" : "border-destructive/20 bg-destructive/20 text-destructive"}`}>
             {errorMessage}
           </div>
         )}
@@ -1162,7 +1189,7 @@ export default function FlashcardsPage() {
             <button
               onClick={() => iniciarEstudo()}
               disabled={isStarting || remainingToday <= 0}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity"
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity"
             >
               {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Estudar hoje
@@ -1182,43 +1209,28 @@ export default function FlashcardsPage() {
           <Mini l="Novos" v={dueCards.filter(c => c.reps === 0).length} />
         </div>
         {decks && decks.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {decks.map((deck) => {
               const stats = getDeckStats(deck.id);
               const meta = getDeckMeta(deck.id);
-              const deckColor = deck.color || '#14B8A6';
+              const deckColor = deck.color || '#FE7802';
               
               return (
                 <article
                   key={deck.id}
-                  className="rf-card rf-card-hover p-5 cursor-pointer transition-all"
-                  style={{ borderLeft: `4px solid ${deckColor}` }}
+                  className="card-lip p-5 cursor-pointer flex flex-col min-h-[220px]"
+                  style={{ '--lip': deckColor } as React.CSSProperties}
                   onClick={() => setSelectedDeckId(deck.id)}
                 >
-                  <header className="mb-3 flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="grid h-12 w-12 shrink-0 place-items-center rounded-xl text-xl"
-                        style={{
-                          backgroundColor: `${deckColor}40`,
-                          color: deckColor,
-                        }}
-                      >
-                        <Layers className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h3 className="font-display text-base font-semibold hover:text-primary">
-                          {deck.name}
-                          {deck.is_shared && (
-                            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary">
-                              <Users className="h-3 w-3" /> Compartilhado
-                            </span>
-                          )}
-                        </h3>
-                        {deck.name === "Erros" && <AlertTriangle className="h-4 w-4 text-accent inline-block ml-1" />}
-                        <p className="mt-0.5 text-xs text-foreground/45">{deck.description || "Sem descrição"}</p>
-                        {meta.disciplina && <span className="text-[10px] text-foreground/40">{meta.disciplina}</span>}
-                      </div>
+                  <header className="mb-4 flex items-start justify-between">
+                    <div
+                      className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl"
+                      style={{
+                        backgroundColor: `${deckColor}25`,
+                        color: deckColor,
+                      }}
+                    >
+                      <Layers className="h-6 w-6" />
                     </div>
                     <div className="flex gap-1">
                       <button
@@ -1236,32 +1248,37 @@ export default function FlashcardsPage() {
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteDeck(deck.id); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-red-400"
+                        className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-destructive"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </header>
-                  <div className="grid grid-cols-3 gap-2 rounded-lg bg-background/40 p-3 text-center">
-                    <Pill l="Total" v={stats.total} />
-                    <Pill l="Due" v={stats.due} accent />
-                    <Pill l="Novos" v={stats.novos} />
+
+                  <div className="flex-1 min-h-0">
+                    <h3 className="font-display text-lg font-semibold hover:text-primary">
+                      {deck.name}
+                      {deck.name === "Erros" && <AlertTriangle className="h-4 w-4 text-accent inline-block ml-1.5 -mt-0.5" />}
+                    </h3>
+                    {deck.is_shared && (
+                      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-primary">
+                        <Users className="h-3 w-3" /> Compartilhado
+                      </span>
+                    )}
+                    <p className="mt-1 text-xs text-foreground/45 line-clamp-2">{deck.description || "Sem descrição"}</p>
+                    {meta.disciplina && <span className="text-[10px] text-foreground/40">{meta.disciplina}</span>}
                   </div>
-                  <div className="mt-4 flex items-center gap-2">
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
                     <button
                       onClick={(e) => { e.stopPropagation(); iniciarEstudo(deck.id); }}
                       disabled={stats.due === 0 || isStarting || remainingToday <= 0}
-                      className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30 inline-flex items-center justify-center gap-2"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
                     >
-                      {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      {stats.due > 0 ? `Estudar ${stats.due} cards` : "Nada para hoje"}
+                      {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      {stats.due > 0 ? `${stats.due} para hoje` : "Nada para hoje"}
                     </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDeckId(deck.id); setIsAddCardModalOpen(true); setErrorMessage(""); }}
-                      className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-white/5"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
+                    <span className="text-xs text-foreground/45">{stats.total} cards</span>
                   </div>
                 </article>
               );
@@ -1291,7 +1308,7 @@ export default function FlashcardsPage() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-foreground">Criar novo baralho</h3>
               <button
-                onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
+                onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
                 className="text-foreground/50 hover:text-foreground transition-colors"
               >
                 <X className="h-5 w-5" />
@@ -1332,7 +1349,7 @@ export default function FlashcardsPage() {
                 <div>
                   <label className="text-sm font-medium text-foreground/70">Cor de destaque</label>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {["#14B8A6", "#FB7185", "#F59E0B", "#60A5FA", "#A78BFA", "#34D399", "#F472B6", "#FBBF24"].map((c) => (
+                    {["#FE7802", "#F43789", "#F59E0B", "#60A5FA", "#A78BFA", "#34D399", "#F472B6", "#FBBF24"].map((c) => (
                       <button
                         key={c}
                         onClick={() => setDeckCor(c)}
@@ -1377,7 +1394,7 @@ export default function FlashcardsPage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#14B8A6"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
+                  onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
                   className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
                   disabled={isSaving}
                 >
@@ -1386,7 +1403,7 @@ export default function FlashcardsPage() {
                 <button
                   onClick={handleCreateDeck}
                   disabled={isSaving}
-                  className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {isSaving ? "Criando..." : "Criar baralho"}
                 </button>
@@ -1480,7 +1497,7 @@ export default function FlashcardsPage() {
                 <button
                   onClick={() => handleAddCard(false)}
                   disabled={isSaving}
-                  className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {isSaving ? "Salvando..." : "Salvar cartão"}
                 </button>
@@ -1528,7 +1545,7 @@ export default function FlashcardsPage() {
                 <button
                   onClick={handleRenameDeck}
                   disabled={isRenaming}
-                  className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {isRenaming ? "Salvando..." : "Salvar"}
                 </button>
@@ -1570,9 +1587,10 @@ export default function FlashcardsPage() {
                 </span>
               </div>
               <button
-                onClick={() => {
-                  if (editCardId && confirm("Tem certeza que deseja excluir este flashcard?")) {
-                    handleDeleteCard(editCardId);
+                onClick={async () => {
+                  if (!editCardId) return;
+                  const deleted = await handleDeleteCard(editCardId);
+                  if (deleted) {
                     setIsEditModalOpen(false);
                     setEditCardId(null);
                     setEditFrente("");
@@ -1670,7 +1688,7 @@ export default function FlashcardsPage() {
                 <button
                   onClick={handleEditCard}
                   disabled={isSaving}
-                  className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {isSaving ? "Salvando..." : "Salvar alterações"}
                 </button>
@@ -1734,7 +1752,7 @@ export default function FlashcardsPage() {
                           <button
                             onClick={() => handleRemoveMember(memberId)}
                             disabled={isManagingMember}
-                            className="text-red-400/60 hover:text-red-400 transition-colors disabled:opacity-30 shrink-0 ml-2"
+                            className="text-destructive/60 hover:text-destructive transition-colors disabled:opacity-30 shrink-0 ml-2"
                           >
                             <UserMinus className="h-4 w-4" />
                           </button>
@@ -1757,7 +1775,7 @@ export default function FlashcardsPage() {
                   <button
                     onClick={handleAddMember}
                     disabled={isManagingMember || !newMemberId.trim()}
-                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity inline-flex items-center gap-1"
+                    className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity inline-flex items-center gap-1"
                   >
                     {isManagingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
                     Adicionar
@@ -1847,7 +1865,7 @@ export default function FlashcardsPage() {
             <div className="pt-3 border-t border-border/50 flex justify-end">
               <button
                 onClick={() => setIsHardestModalOpen(false)}
-                className="rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+                className="rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
               >
                 Fechar
               </button>
@@ -1863,26 +1881,34 @@ export default function FlashcardsPage() {
 // COMPONENTES VISUAIS
 // ============================================================
 
-function FsrsButton({ label, hint, tone = "default", primary, onClick, disabled }: {
+function FsrsButton({ label, hint, variant = "default", onClick, disabled }: {
   label: string;
   hint: string;
-  tone?: "default" | "accent";
-  primary?: boolean;
+  variant?: "again" | "hard" | "good" | "easy" | "default";
   onClick?: () => void;
   disabled?: boolean;
 }) {
+  const styles: Record<string, string> = {
+    again: "bg-destructive/20 text-destructive hover:bg-destructive/30",
+    hard:  "bg-accent text-white hover:brightness-110",
+    good:  "bg-[#F2C6A0] text-[#3A1F12] hover:brightness-105",
+    easy:  "bg-primary text-primary-foreground hover:brightness-105",
+    default: "bg-background/60 border border-border text-foreground/85 hover:border-primary/40",
+  };
+  const cls = styles[variant] ?? styles.default;
+
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       className={[
-        "flex flex-col items-center gap-0.5 rounded-xl border bg-background/60 px-2 py-3 transition-all hover:-translate-y-0.5",
-        primary ? "border-primary/60 ring-1 ring-primary/30" : "border-border hover:border-primary/40",
+        "flex flex-col items-center justify-center gap-0.5 rounded-full px-4 py-3 transition-all hover:-translate-y-0.5 font-semibold",
+        cls,
         disabled ? "opacity-50 cursor-not-allowed hover:-translate-y-0" : "",
       ].join(" ")}
     >
-      <span className={["text-xs font-semibold", tone === "accent" ? "text-accent" : primary ? "text-primary" : "text-foreground/85"].join(" ")}>{label}</span>
-      <span className="text-[10px] text-foreground/40">{hint}</span>
+      <span className="text-sm font-bold">{label}</span>
+      <span className="text-[10px] font-medium opacity-80">{hint}</span>
     </button>
   );
 }
@@ -1890,7 +1916,7 @@ function FsrsButton({ label, hint, tone = "default", primary, onClick, disabled 
 function Mini({ l, v, icon, tone }: { l: string; v: React.ReactNode; icon?: React.ReactNode; tone?: "accent" }) {
   return (
     <div className="rf-card p-4">
-      {icon && <div className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">{icon}</div>}
+      {icon && <div className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">{icon}</div>}
       <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{l}</div>
       <div className={["mt-1 font-display text-xl font-semibold tabular-nums", tone === "accent" ? "text-accent" : ""].join(" ")}>{v}</div>
     </div>

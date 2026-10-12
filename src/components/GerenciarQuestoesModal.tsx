@@ -145,7 +145,7 @@ export function GerenciarQuestoesModal({ lista, userId, onClose, onListaAlterada
               {error}
               <button
                 onClick={loadQuestoes}
-                className="mt-3 block mx-auto rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+                className="mt-3 block mx-auto rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
               >
                 Tentar novamente
               </button>

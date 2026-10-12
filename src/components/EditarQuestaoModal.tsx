@@ -482,7 +482,7 @@ export function EditarQuestaoModal({
                 type="button"
                 onClick={handleSalvar}
                 disabled={salvando}
-                className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {salvando ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : (modo === 'criar' ? 'Adicionar' : 'Salvar')}
               </button>

@@ -34,7 +34,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <a href="#top" className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/15 ring-1 ring-primary/30">
               <Zap className="h-5 w-5 text-primary" />
             </span>
             <span className="font-display text-lg font-semibold tracking-tight">
@@ -62,7 +62,7 @@ export default function LandingPage() {
             )}
             <Link
               to="/cadastro"
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_10px_30px_-10px_rgba(20,184,166,0.6)] hover:bg-primary/90 transition"
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_10px_30px_-10px_rgba(20,184,166,0.6)] hover:bg-primary/90 transition"
             >
               Começar teste grátis
               <ArrowRight className="h-4 w-4" />
@@ -93,7 +93,7 @@ export default function LandingPage() {
             ))}
             <div className="flex gap-2 pt-2">
               {isSignedIn ? (
-                <Link to="/" className="flex-1 rounded-md bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
+                <Link to="/" className="flex-1 rounded-full bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
                   Ir para o app
                 </Link>
               ) : (
@@ -101,7 +101,7 @@ export default function LandingPage() {
                   <Link to="/login" className="flex-1 rounded-md border border-border px-3 py-2 text-center text-sm">
                     Entrar
                   </Link>
-                  <Link to="/cadastro" className="flex-1 rounded-md bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
+                  <Link to="/cadastro" className="flex-1 rounded-full bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
                     Testar grátis
                   </Link>
                 </>
@@ -138,7 +138,7 @@ export default function LandingPage() {
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link
                   to="/cadastro"
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
+                  className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
                 >
                   Teste grátis por 30 dias
                   <ArrowRight className="h-4 w-4" />
@@ -285,7 +285,7 @@ export default function LandingPage() {
             ].map((s, i) => (
               <li key={s.t} className="rf-card rf-card-hover relative p-5">
                 <div className="flex items-center gap-3">
-                  <span className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 font-display text-sm text-primary ring-1 ring-primary/30">
+                  <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/15 font-display text-sm text-primary ring-1 ring-primary/30">
                     {i + 1}
                   </span>
                   <h3 className="font-display text-base font-semibold">{s.t}</h3>
@@ -332,7 +332,7 @@ export default function LandingPage() {
               </ul>
               <Link
                 to="/cadastro"
-                className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
+                className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
               >
                 Começar teste grátis
                 <ArrowRight className="h-4 w-4" />
@@ -396,7 +396,7 @@ export default function LandingPage() {
             <div className="relative mt-8 flex flex-wrap justify-center gap-3">
               <Link
                 to="/cadastro"
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
               >
                 Começar teste grátis
                 <ArrowRight className="h-4 w-4" />
@@ -416,7 +416,7 @@ export default function LandingPage() {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 py-8 md:flex-row">
           <div className="flex items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-primary/15 ring-1 ring-primary/30">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/15 ring-1 ring-primary/30">
               <Zap className="h-4 w-4 text-primary" />
             </span>
             <span className="font-display text-sm">
@@ -446,7 +446,7 @@ function BackgroundFX() {
         className="absolute inset-0 opacity-[0.035]"
         style={{
           backgroundImage:
-            "linear-gradient(to right, #ECFEFF 1px, transparent 1px), linear-gradient(to bottom, #ECFEFF 1px, transparent 1px)",
+            "linear-gradient(to right, #FCF4F9 1px, transparent 1px), linear-gradient(to bottom, #FCF4F9 1px, transparent 1px)",
           backgroundSize: "48px 48px",
         }}
       />
@@ -519,7 +519,7 @@ function InstallCard({
   return (
     <div className="rf-card p-6">
       <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/15 text-primary ring-1 ring-primary/30">
+        <span className="grid h-10 w-10 place-items-center rounded-full bg-primary/15 text-primary ring-1 ring-primary/30">
           {icon}
         </span>
         <h3 className="font-display text-lg font-semibold">{platform}</h3>
@@ -556,7 +556,7 @@ function HeroMockup() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Bom dia, Mariana</p>
-              <h4 className="mt-1 font-display text-lg font-semibold">ENARE 2026</h4>
+              <h4 className="mt-1 font-display text-lg font-semibold"></h4>
             </div>
             <span className="rounded-full bg-primary/15 px-3 py-1 text-xs font-medium text-primary ring-1 ring-primary/25">
               79 dias

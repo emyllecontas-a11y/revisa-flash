@@ -7,7 +7,6 @@ type User = {
   fullName: string | null;
   emailAddresses: { emailAddress: string }[];
   username: string | null;
-  // Adicione outros campos se necessário
 } | null;
 
 type UserContextType = {
@@ -46,6 +45,18 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // 🔥 Limpeza de identidade local quando o Clerk confirma que não há sessão.
+  // Cobre: logout explícito, expiração de sessão, logout em outra aba,
+  // remoção de conta, ações administrativas — qualquer caso em que o Clerk
+  // diga "ninguém está logado", a chave local é apagada.
+  useEffect(() => {
+    if (!clerkUser.isLoaded) return;
+    if (clerkUser.isSignedIn) return;
+    try {
+      localStorage.removeItem('revisaflash_user_id');
+    } catch { /* ignore */ }
+  }, [clerkUser.isLoaded, clerkUser.isSignedIn]);
 
   // Carrega usuário do localStorage quando offline
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import {
   ChevronLeft, ChevronRight, Plus, Clock, BookOpen, Brain,
-  FileText, Trash2, X, CheckCircle, Circle, Calendar as CalendarIcon, Sparkles, Loader2
+  FileText, Trash2, X, CheckCircle, Sparkles, Loader2
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useStudy } from "@/contexts/StudyContext";
@@ -10,10 +10,9 @@ import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { updateTopicStatusAndRevisions } from "@/services/topicService";
 import { enqueueOperation } from "@/services/queueService";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/hooks/useToast";
 
-// ============================================================
-// TIPOS
-// ============================================================
 interface Revisao {
   id: string;
   user_id: string;
@@ -25,33 +24,36 @@ interface Revisao {
   lastStudyDate: string;
   completedAt: string | null;
   createdAt: string;
-  updatedAt: string;
+  updated_at: string;
 }
 
-// ============================================================
-// COMPONENTE PRINCIPAL
-// ============================================================
+const REVISAO_CORES: Record<number, string> = {
+  1: "#FE7802",
+  2: "#E8A87C",
+  3: "#E0A5C0",
+  4: "#D4A88E",
+  5: "#C97FA8",
+};
+
 export default function CalendarioPage() {
+  const confirmDialog = useConfirm();
+  const toast = useToast();
   const [modo, setModo] = useState<"calendario" | "registrar">("calendario");
   const [tipo, setTipo] = useState<"teorico" | "pratico">("teorico");
   const [salvo, setSalvo] = useState(false);
 
-  // Estados do calendário
   const [anoVisivel, setAnoVisivel] = useState(new Date().getFullYear());
   const [mesVisivel, setMesVisivel] = useState(new Date().getMonth());
   const [diaSelecionado, setDiaSelecionado] = useState<number | null>(null);
 
-  // Estados das revisões
   const [revisoes, setRevisoes] = useState<Revisao[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Estados para disciplinas e tópicos
   const [disciplinas, setDisciplinas] = useState<{ id: string; name: string }[]>([]);
   const [topicos, setTopicos] = useState<{ id: string; name: string; discipline_id: string; status: string }[]>([]);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
 
-  // 🔥 NOVOS ESTADOS DE CARREGAMENTO
   const [isSaving, setIsSaving] = useState(false);
   const [concluindoRevisaoId, setConcluindoRevisaoId] = useState<string | null>(null);
 
@@ -59,9 +61,6 @@ export default function CalendarioPage() {
     ? `${anoVisivel}-${String(mesVisivel + 1).padStart(2, '0')}-${String(diaSelecionado).padStart(2, '0')}`
     : null;
 
-  // ============================================================
-  // FORMULÁRIO
-  // ============================================================
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     duration: 90,
@@ -75,29 +74,17 @@ export default function CalendarioPage() {
   const [formCorrect, setFormCorrect] = useState<number | string>(32);
   const [formWrong, setFormWrong] = useState<number | string>(6);
 
-  // Contexto de estudos
   const studyContext = useStudy();
   const { records, addRecord, deleteRecord, getRecordsForDate, getMonthStats } = studyContext;
 
-  // ============================================================
-  // CARREGAR USER ID, REVISÕES, DISCIPLINAS E TÓPICOS
-  // ============================================================
   useEffect(() => {
     const loadUserId = async () => {
       try {
         const cached = localStorage.getItem('revisaflash_user_id');
-        if (cached) {
-          setUserId(cached);
-          return;
-        }
+        if (cached) { setUserId(cached); return; }
         const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          localStorage.setItem('revisaflash_user_id', user.id);
-        }
-      } catch (e) {
-        console.warn('Não foi possível obter userId:', e);
-      }
+        if (user) { setUserId(user.id); localStorage.setItem('revisaflash_user_id', user.id); }
+      } catch (e) { console.warn('Não foi possível obter userId:', e); }
     };
     loadUserId();
   }, []);
@@ -106,14 +93,9 @@ export default function CalendarioPage() {
     if (!userId) return;
     try {
       const db = await getDb();
-      const result = await db.revisoes.find({
-        selector: { user_id: userId }
-      }).exec();
-      const data = result.map((doc: any) => doc.toJSON());
-      setRevisoes(data);
-    } catch (error) {
-      console.error('Erro ao carregar revisões:', error);
-    }
+      const result = await db.revisoes.find({ selector: { user_id: userId } }).exec();
+      setRevisoes(result.map((doc: any) => doc.toJSON()));
+    } catch (error) { console.error('Erro ao carregar revisões:', error); }
   }, [userId]);
 
   const loadContentData = useCallback(async () => {
@@ -129,102 +111,61 @@ export default function CalendarioPage() {
         selector: { user_id: userId, isDeleted: { $ne: true } }
       }).exec();
       setTopicos(topics.map(t => ({
-        id: t.id,
-        name: t.name,
-        discipline_id: t.discipline_id,
-        status: t.status
+        id: t.id, name: t.name, discipline_id: t.discipline_id, status: t.status
       })));
-    } catch (error) {
-      console.error('Erro ao carregar disciplinas/tópicos:', error);
-    }
+    } catch (error) { console.error('Erro ao carregar disciplinas/tópicos:', error); }
   }, [userId]);
 
   useEffect(() => {
-    if (userId) {
-      loadRevisoes();
-      loadContentData();
-    }
+    if (userId) { loadRevisoes(); loadContentData(); }
   }, [userId, loadRevisoes, loadContentData]);
 
-  // 🔥 LISTENER PARA RECARREGAR REVISÕES AUTOMATICAMENTE
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
     let isSubscribed = true;
-
     const subscribeToRevisoes = async () => {
       try {
         const db = await getDb();
         if (!db.collections?.revisoes) return;
-
         const subscription = db.collections.revisoes.$.subscribe(() => {
           if (timeoutId) clearTimeout(timeoutId);
           timeoutId = setTimeout(() => {
-            if (isSubscribed) {
-              console.log('🔄 Mudança detectada em revisoes, recarregando...');
-              loadRevisoes();
-            }
+            if (isSubscribed) loadRevisoes();
             timeoutId = null;
           }, 500);
         });
-
         return () => {
           isSubscribed = false;
           if (timeoutId) clearTimeout(timeoutId);
           subscription.unsubscribe();
         };
-      } catch (e) {
-        console.warn('Erro ao configurar listener de revisoes:', e);
-      }
+      } catch (e) { console.warn('Erro ao configurar listener de revisoes:', e); }
     };
-
     subscribeToRevisoes();
   }, [loadRevisoes]);
 
-  // ============================================================
-  // FUNÇÃO PARA CONCLUIR UMA REVISÃO (CORRIGIDA - PUSH DIRETO)
-  // ============================================================
   const handleConcluirRevisao = useCallback(async (revisaoId: string) => {
     if (concluindoRevisaoId === revisaoId) return;
     if (!userId) return;
-
     setConcluindoRevisaoId(revisaoId);
 
     try {
       const db = await getDb();
       const now = new Date().toISOString();
 
-      // 1. Buscar a revisão atual
       const doc = await db.revisoes.findOne({ selector: { id: revisaoId } }).exec();
-      if (!doc) {
-        console.warn('⚠️ Revisão não encontrada');
-        return;
-      }
+      if (!doc) return;
 
       const revisao = doc.toJSON() as Revisao;
       const nivelAtual = revisao.review_level || 1;
       const topicoId = revisao.topico_id;
 
-      // 2. Marcar a revisão atual como concluída (local)
-      await doc.patch({
-        completedAt: now,
-        updatedAt: now,
-      });
+      await doc.patch({ completedAt: now, updated_at: now });
+      setRevisoes(prev => prev.map(r => r.id === revisaoId ? { ...r, completedAt: now, updated_at: now } : r));
 
-      setRevisoes(prev =>
-        prev.map(r =>
-          r.id === revisaoId
-            ? { ...r, completedAt: now, updatedAt: now }
-            : r
-        )
-      );
-
-      // 3. Se não for o nível 5, preparar a próxima revisão
       const niveis = [
-        { nivel: 1, dias: 1 },
-        { nivel: 2, dias: 7 },
-        { nivel: 3, dias: 15 },
-        { nivel: 4, dias: 30 },
-        { nivel: 5, dias: 60 },
+        { nivel: 1, dias: 1 }, { nivel: 2, dias: 7 }, { nivel: 3, dias: 15 },
+        { nivel: 4, dias: 30 }, { nivel: 5, dias: 60 },
       ];
 
       let novaRevisao = null;
@@ -233,27 +174,17 @@ export default function CalendarioPage() {
         if (proximoNivel) {
           const nextDate = new Date();
           nextDate.setDate(nextDate.getDate() + proximoNivel.dias);
-
           novaRevisao = {
-            id: uid(),
-            user_id: userId,
-            topico_id: topicoId,
-            topicName: revisao.topicName,
-            discipline: revisao.discipline,
-            review_level: proximoNivel.nivel,
-            nextReviewDate: nextDate.toISOString(),
-            lastStudyDate: now,
-            completedAt: null,
-            createdAt: now,
-            updatedAt: now,
+            id: uid(), user_id: userId, topico_id: topicoId,
+            topicName: revisao.topicName, discipline: revisao.discipline,
+            review_level: proximoNivel.nivel, nextReviewDate: nextDate.toISOString(),
+            lastStudyDate: now, completedAt: null, createdAt: now, updated_at: now,
           };
-
           await db.revisoes.insert(novaRevisao);
           setRevisoes(prev => [...prev, novaRevisao]);
         }
       }
 
-      // 4. Atualizar status do tópico (local)
       let novoStatus = null;
       const topicoDoc = await db.topics.findOne({ selector: { id: topicoId } }).exec();
       if (topicoDoc) {
@@ -267,69 +198,26 @@ export default function CalendarioPage() {
         if (concluidas >= 1 && (topicoData.status === 'estudando' || topicoData.status === 'nao_estudado')) {
           novoStatusTemp = 'revisado';
         }
-        if (total === 5 && concluidas === 5) {
-          novoStatusTemp = 'dominado';
-        }
+        if (total === 5 && concluidas === 5) novoStatusTemp = 'dominado';
 
         if (novoStatusTemp !== topicoData.status) {
-          await topicoDoc.patch({
-            status: novoStatusTemp,
-            updatedAt: now,
-          });
+          await topicoDoc.patch({ status: novoStatusTemp, updated_at: now });
           novoStatus = novoStatusTemp;
         }
       }
 
-      // 🔥 5. Tenta enviar tudo diretamente para o Supabase (PUSH DIRETO)
       try {
         const supabaseClient = await getSupabaseWithToken();
-
-        // Atualiza a revisão concluída
-        await supabaseClient
-          .from('revisoes')
-          .update({ completedAt: now, updatedAt: now })
-          .eq('id', revisaoId);
-
-        // Se houver nova revisão, insere
-        if (novaRevisao) {
-          await supabaseClient.from('revisoes').insert(novaRevisao);
-        }
-
-        // Se houver atualização de status do tópico, atualiza
-        if (novoStatus) {
-          await supabaseClient
-            .from('topics')
-            .update({ status: novoStatus, updatedAt: now })
-            .eq('id', topicoId);
-        }
-
-        console.log('✅ [Calendario] Revisão sincronizada diretamente com Supabase.');
+        await supabaseClient.from('revisoes').update({ completedAt: now, updated_at: now }).eq('id', revisaoId);
+        if (novaRevisao) await supabaseClient.from('revisoes').insert(novaRevisao);
+        if (novoStatus) await supabaseClient.from('topics').update({ status: novoStatus, updated_at: now }).eq('id', topicoId);
       } catch (supabaseError) {
-        // 🔥 Se falhar, enfileira (offline)
-        console.warn('⚠️ [Calendario] Falha ao sincronizar revisão, enfileirando.');
-        
-        await enqueueOperation('update', 'revisoes', {
-          id: revisaoId,
-          completedAt: now,
-          updatedAt: now,
-        });
-
-        if (novaRevisao) {
-          await enqueueOperation('create', 'revisoes', novaRevisao);
-        }
-
-        if (novoStatus) {
-          await enqueueOperation('update', 'topics', {
-            id: topicoId,
-            status: novoStatus,
-            updatedAt: now,
-          });
-        }
+        await enqueueOperation('update', 'revisoes', { id: revisaoId, completedAt: now, updated_at: now });
+        if (novaRevisao) await enqueueOperation('create', 'revisoes', novaRevisao);
+        if (novoStatus) await enqueueOperation('update', 'topics', { id: topicoId, status: novoStatus, updated_at: now });
       }
 
       await loadRevisoes();
-      console.log('✅ Revisão concluída com sucesso');
-
     } catch (error) {
       console.error('❌ Erro ao concluir revisão:', error);
     } finally {
@@ -337,26 +225,15 @@ export default function CalendarioPage() {
     }
   }, [userId, loadRevisoes, concluindoRevisaoId]);
 
-  // ============================================================
-  // NAVEGAÇÃO
-  // ============================================================
   const mesAnterior = () => {
-    if (mesVisivel === 0) {
-      setMesVisivel(11);
-      setAnoVisivel(anoVisivel - 1);
-    } else {
-      setMesVisivel(mesVisivel - 1);
-    }
+    if (mesVisivel === 0) { setMesVisivel(11); setAnoVisivel(anoVisivel - 1); }
+    else setMesVisivel(mesVisivel - 1);
     setDiaSelecionado(null);
   };
 
   const mesSeguinte = () => {
-    if (mesVisivel === 11) {
-      setMesVisivel(0);
-      setAnoVisivel(anoVisivel + 1);
-    } else {
-      setMesVisivel(mesVisivel + 1);
-    }
+    if (mesVisivel === 11) { setMesVisivel(0); setAnoVisivel(anoVisivel + 1); }
+    else setMesVisivel(mesVisivel + 1);
     setDiaSelecionado(null);
   };
 
@@ -367,9 +244,6 @@ export default function CalendarioPage() {
     setDiaSelecionado(hoje.getDate());
   };
 
-  // ============================================================
-  // DADOS DO CALENDÁRIO
-  // ============================================================
   const hoje = new Date();
   const anoAtual = hoje.getFullYear();
   const mesAtual = hoje.getMonth();
@@ -384,7 +258,6 @@ export default function CalendarioPage() {
 
   const monthStats = getMonthStats(anoVisivel, mesVisivel);
 
-  // Dias com estudo
   const daysWithStudy: Record<number, { teorico?: boolean; pratico?: boolean }> = {};
   for (let d = 1; d <= diasNoMes; d++) {
     const dateStr = `${anoVisivel}-${String(mesVisivel + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -397,13 +270,11 @@ export default function CalendarioPage() {
     }
   }
 
-  // Registros do dia selecionado
   const registrosDoDia = dataSelecionada ? getRecordsForDate(dataSelecionada) : [];
   const dataFormatada = dataSelecionada
     ? new Date(dataSelecionada).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 
-  // Revisões do dia selecionado (buscando por nextReviewDate)
   const revisoesDoDia = dataSelecionada
     ? revisoes.filter(r => {
         if (!r.nextReviewDate || r.completedAt) return false;
@@ -413,23 +284,12 @@ export default function CalendarioPage() {
       })
     : [];
 
-  // ============================================================
-  // FUNÇÃO PARA SALVAR ESTUDO (CORRIGIDA)
-  // ============================================================
   const handleSalvar = async () => {
     if (isSaving) return;
-
-    // Verifica se há um tópico selecionado
-    if (!selectedTopicId) {
-      alert('Selecione um tópico para registrar o estudo.');
-      return;
-    }
+    if (!selectedTopicId) { toast.warning('Selecione um tópico para registrar o estudo.'); return; }
 
     const topic = topicos.find(t => t.id === selectedTopicId);
-    if (!topic) {
-      alert('Tópico não encontrado.');
-      return;
-    }
+    if (!topic) { toast.error('Tópico não encontrado.'); return; }
 
     const disciplina = disciplinas.find(d => d.id === selectedDisciplineId);
 
@@ -450,316 +310,270 @@ export default function CalendarioPage() {
       ),
     };
 
-    console.log('📝 Dados do registro de estudo:', recordData);
-
     setIsSaving(true);
-
     try {
-      // 1. Criar registro de estudo (o contexto adiciona user_id e createdAt)
       await addRecord(recordData);
-      console.log('✅ Registro de estudo criado com sucesso.');
 
-      // 2. 🔥 Atualizar status do tópico SOMENTE para registros TEÓRICOS
       if (tipo === 'teorico' && userId) {
         const currentStatus = topic.status;
         let newStatus = currentStatus;
-
-        if (currentStatus === 'nao_estudado') {
-          newStatus = 'estudando';
-        }
+        if (currentStatus === 'nao_estudado') newStatus = 'estudando';
 
         if (newStatus !== currentStatus) {
           try {
-            console.log(`🔄 Atualizando status do tópico para "${newStatus}" (apenas teoria)...`);
             await updateTopicStatusAndRevisions(selectedTopicId, newStatus, userId, formData.date);
             await loadContentData();
-            console.log('✅ Status do tópico e revisões atualizados.');
           } catch (error) {
-            console.error('⚠️ Erro ao atualizar tópico, mas o registro de estudo foi salvo:', error);
+            console.error('⚠️ Erro ao atualizar tópico, mas o registro foi salvo:', error);
           }
         }
-      } else {
-        // 🔥 Para registros práticos, NÃO atualiza status nem cria revisões
-        console.log('ℹ️ Registro prático: sem alteração de status do tópico ou revisões.');
       }
 
       setSalvo(true);
-      setTimeout(() => {
-        setSalvo(false);
-        setModo("calendario");
-      }, 1500);
+      setTimeout(() => { setSalvo(false); setModo("calendario"); }, 1500);
     } catch (error) {
       console.error('❌ Erro ao salvar estudo:', error);
-      alert('Erro ao salvar registro. Verifique o console para mais detalhes.');
+      toast.error('Erro ao salvar registro', { description: 'Verifique o console para mais detalhes.' });
     } finally {
       setIsSaving(false);
     }
   };
 
-  // ============================================================
-  // FUNÇÃO PARA EXCLUIR REGISTRO
-  // ============================================================
-  const handleDeleteRecord = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este registro?')) {
+  const handleDeleteRecord = async (id: string) => {
+    const ok = await confirmDialog({
+      title: "Excluir este registro?",
+      description: "O registro de estudo deste dia será removido.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (ok) {
       deleteRecord(id);
+      toast.success("Registro excluído");
     }
   };
 
-  // ============================================================
-  // RENDER: CALENDÁRIO
-  // ============================================================
   if (modo === "calendario") {
     const nomeMes = new Date(anoVisivel, mesVisivel).toLocaleString('pt-BR', { month: 'long' });
     const tituloMes = `${nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1)} ${anoVisivel}`;
     const isDiaSelecionadoHoje = diaSelecionado === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
+    const tituloSidebar = isDiaSelecionadoHoje
+      ? `Hoje, ${String(diaAtual).padStart(2, '0')}/${String(mesAtual + 1).padStart(2, '0')}`
+      : dataFormatada;
 
     return (
       <AppShell breadcrumb="Calendário" title="Agenda de estudos">
         <div id="calendario-header">
-        {salvo && (
-          <div className="mb-4 rounded-xl border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
-            ✅ Estudo registrado com sucesso!
+          {salvo && (
+            <div className="mb-4 rounded-xl border border-success/20 bg-success/10 p-3 text-sm text-success">
+              ✅ Estudo registrado com sucesso!
+            </div>
+          )}
+
+          <div className="mb-4 flex justify-end">
+            <button
+              onClick={() => setModo("registrar")}
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              <Plus className="h-4 w-4" /> Registrar estudo
+            </button>
           </div>
-        )}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <section className="rf-card p-5 lg:col-span-2">
-            <header className="mb-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h2 className="font-display text-lg font-semibold">{tituloMes}</h2>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={mesAnterior}
-                    className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5"
-                    aria-label="Mês anterior"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={mesSeguinte}
-                    className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5"
-                    aria-label="Próximo mês"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={irParaHoje}
-                    className="ml-1 rounded-md border border-border px-2 py-0.5 text-[10px] font-medium text-foreground/60 hover:bg-white/5"
-                  >
-                    Hoje
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={() => setModo("registrar")}
-                className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                <Plus className="h-3.5 w-3.5" /> Registrar estudo
-              </button>
-            </header>
 
-            <div className="grid grid-cols-7 gap-px overflow-hidden rounded-lg border border-border bg-border">
-              {["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"].map((d) => (
-                <div key={d} className="bg-surface px-2 py-2 text-center text-[10px] font-medium tracking-widest text-foreground/40">
-                  {d}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <section className="rf-card p-5 lg:col-span-2">
+              <header className="mb-5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h2 className="font-display text-lg font-bold">{tituloMes}</h2>
+                  <div className="flex items-center gap-1">
+                    <button onClick={mesAnterior} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Mês anterior">
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={mesSeguinte} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Próximo mês">
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={irParaHoje} className="ml-1 rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground/60 hover:bg-white/5">
+                      Hoje
+                    </button>
+                  </div>
                 </div>
-              ))}
-              {cells.map((d, i) => {
-                if (!d) return <div key={i} className="bg-surface/40 aspect-square sm:aspect-auto sm:h-20" />;
-                const e = daysWithStudy[d];
-                const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
-                const isSelecionado = d === diaSelecionado;
+              </header>
 
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setDiaSelecionado(d)}
-                    className={[
-                      "relative bg-surface p-2 transition-all aspect-square sm:aspect-auto sm:h-20 w-full text-left",
-                      isHoje ? "ring-1 ring-inset ring-primary" : "",
-                      isSelecionado ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-2",
-                    ].join(" ")}
-                  >
-                    <span
+              <div className="grid grid-cols-7 gap-2">
+                {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
+                  <div key={i} className="px-2 py-2 text-center text-[10px] font-medium tracking-widest text-foreground/40">
+                    {d}
+                  </div>
+                ))}
+                {cells.map((d, i) => {
+                  if (!d) return <div key={i} className="aspect-square sm:aspect-auto sm:h-[68px]" />;
+                  const e = daysWithStudy[d];
+                  const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
+                  const isSelecionado = d === diaSelecionado;
+
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setDiaSelecionado(d)}
                       className={[
-                        "text-xs font-medium tabular-nums",
-                        isHoje ? "text-primary" : "text-foreground/80",
+                        "relative rounded-2xl p-2 transition-all aspect-square sm:aspect-auto sm:h-[68px] w-full text-left",
+                        isSelecionado
+                          ? "bg-primary text-primary-foreground"
+                          : isHoje
+                          ? "bg-surface-2/60 ring-1 ring-inset ring-primary/50 hover:bg-accent/40 text-foreground/80"
+                          : "bg-surface-2/60 hover:bg-accent/40 text-foreground/80",
                       ].join(" ")}
                     >
-                      {d}
-                    </span>
-                    {e && (
-                      <div className="absolute bottom-1.5 left-2 flex gap-1">
-                        {e.teorico && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                        {e.pratico && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-foreground/50">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Teórico
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" /> Prático
-              </span>
-              <span className="ml-auto">
-                {diaSelecionado !== null ? (
-                  <span className="text-primary">
-                    Dia {diaSelecionado} selecionado
-                  </span>
-                ) : (
-                  <span className="text-foreground/40">Clique em um dia para ver os registros</span>
-                )}
-              </span>
-            </div>
-          </section>
-
-          {/* ============================================================
-              SIDEBAR – Registros e revisões do dia selecionado
-          ============================================================ */}
-          <aside className="space-y-4">
-            <div className="rf-card p-5">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-display text-sm font-semibold">
-                  {diaSelecionado !== null ? dataFormatada : "Selecione um dia"}
-                </h3>
-                {diaSelecionado !== null && (
-                  <button
-                    onClick={() => setDiaSelecionado(null)}
-                    className="text-foreground/40 hover:text-foreground transition-colors"
-                    aria-label="Limpar seleção"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+                      <span
+                        className={[
+                          "text-xs font-medium tabular-nums",
+                          isSelecionado ? "" : "text-foreground/80",
+                        ].join(" ")}
+                      >
+                        {d}
+                      </span>
+                      {e && (
+                        <div className="absolute bottom-1.5 left-2 flex gap-1">
+                          {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
+                          {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
-              {diaSelecionado !== null ? (
-                <>
-                  {/* ========== REGISTROS DE ESTUDO ========== */}
-                  <div className="mb-4">
-                    <p className="text-xs text-foreground/45 mb-2">
-                      📚 {registrosDoDia.length} registro{registrosDoDia.length !== 1 ? 's' : ''} de estudo
-                      {isDiaSelecionadoHoje && ' (hoje)'}
-                    </p>
-                    <ul className="space-y-3">
-                      {registrosDoDia.length > 0 ? (
-                        registrosDoDia.map((r) => (
-                          <li
-                            key={r.id}
-                            className="flex items-center gap-3 rounded-lg border border-border/60 p-3 rf-card-hover group"
-                          >
-                            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-primary/10 text-[10px] font-semibold text-primary">
-                              {r.discipline.slice(0, 2).toUpperCase()}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium">{r.discipline}</div>
-                              <div className="truncate text-[11px] text-foreground/45">
-                                {new Date(r.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                {r.questionsCount ? ` · ${r.questionsCount} questões` : ''}
-                                {r.duration ? ` · ${r.duration}min` : ''}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteRecord(r.id)}
-                              className="text-foreground/30 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100"
-                              aria-label="Excluir registro"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </li>
-                        ))
-                      ) : (
-                        <li className="text-center text-sm text-foreground/40 py-2">
-                          Nenhum estudo registrado neste dia.
-                        </li>
-                      )}
-                    </ul>
-                  </div>
+              <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-foreground/50">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Teórico
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent" /> Prático
+                </span>
+                <span className="ml-auto text-foreground/40">
+                  Clique em um dia para ver os registros
+                </span>
+              </div>
+            </section>
 
-                  {/* ========== REVISÕES PROGRAMADAS ========== */}
-                  {revisoesDoDia.length > 0 && (
-                    <div className="border-t border-border/60 pt-4 mt-2">
-                      <p className="text-xs text-foreground/45 mb-2 flex items-center gap-1.5">
-                        <Sparkles className="h-3 w-3 text-primary" />
-                        {revisoesDoDia.length} revisão{revisoesDoDia.length !== 1 ? 'ões' : ''} programada{revisoesDoDia.length !== 1 ? 's' : ''}
-                      </p>
-                      <ul className="space-y-3">
+            <aside className="space-y-4">
+              <div className="rf-card p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="font-display text-sm font-bold">
+                    {diaSelecionado !== null ? tituloSidebar : "Selecione um dia"}
+                  </h3>
+                  {diaSelecionado !== null && (
+                    <button onClick={() => setDiaSelecionado(null)} className="text-foreground/40 hover:text-foreground transition-colors" aria-label="Limpar seleção">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                {diaSelecionado !== null ? (
+                  <>
+                    {revisoesDoDia.length > 0 && (
+                      <ul className="space-y-2">
                         {revisoesDoDia.map((rev) => {
-                          const levels = ['1 dia', '7 dias', '15 dias', '30 dias', '60 dias'];
-                          const label = levels[rev.review_level - 1] || `${rev.review_level} dias`;
+                          const cor = REVISAO_CORES[rev.review_level] || "#E8A87C";
                           return (
-                            <li
-                              key={rev.id}
-                              className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3"
-                            >
-                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-primary/20 text-[10px] font-semibold text-primary">
-                                {rev.review_level}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium">{rev.topicName}</div>
-                                <div className="truncate text-[11px] text-foreground/45">
-                                  {rev.discipline} · {label}
-                                </div>
-                              </div>
+                            <li key={rev.id}>
                               <button
                                 onClick={() => handleConcluirRevisao(rev.id)}
                                 disabled={concluindoRevisaoId === rev.id}
-                                className="inline-flex items-center gap-1 rounded-lg bg-primary/20 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full flex items-center justify-between gap-3 rounded-full bg-background/40 px-4 py-2.5 hover:bg-background/60 transition-colors text-left disabled:opacity-50"
                               >
-                                {concluindoRevisaoId === rev.id ? (
-                                  <>
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    Concluindo...
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle className="h-3.5 w-3.5" />
-                                    Concluir
-                                  </>
-                                )}
+                                <span className="truncate text-sm font-medium">
+                                  {rev.topicName}
+                                </span>
+                                <span
+                                  className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
+                                  style={{
+                                    backgroundColor: cor,
+                                    color: '#290E1F',
+                                  }}
+                                >
+                                  {concluindoRevisaoId === rev.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    `Revisão D${rev.review_level}`
+                                  )}
+                                </span>
                               </button>
                             </li>
                           );
                         })}
                       </ul>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="flex min-h-[100px] items-center justify-center text-center">
-                  <p className="text-sm text-foreground/40">
-                    Clique em um dia no calendário<br />
-                    para ver os registros e revisões.
-                  </p>
-                </div>
-              )}
-            </div>
+                    )}
 
-            <div className="rf-card p-5">
-              <h3 className="mb-3 font-display text-sm font-semibold">
-                Resumo de {nomeMes}
-              </h3>
-              <dl className="grid grid-cols-2 gap-3 text-center">
-                <Stat label="Dias estudados" value={String(monthStats.totalDays)} />
-                <Stat label="Horas totais" value={`${monthStats.totalHours}h`} />
-                <Stat label="Questões" value={String(monthStats.totalQuestions)} />
-                <Stat label="Acertos" value={`${monthStats.averageCorrectRate}%`} />
-              </dl>
-            </div>
-          </aside>
+                    {registrosDoDia.length > 0 && (
+                      <div className={revisoesDoDia.length > 0 ? "border-t border-border/60 pt-4 mt-4" : ""}>
+                        <p className="text-xs text-foreground/45 mb-2 flex items-center gap-1.5">
+                          <BookOpen className="h-3 w-3" />
+                          {registrosDoDia.length} registro{registrosDoDia.length !== 1 ? 's' : ''} de estudo
+                        </p>
+                        <ul className="space-y-2">
+                          {registrosDoDia.map((r) => (
+                            <li
+                              key={r.id}
+                              className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/40 p-3 group"
+                            >
+                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                                {r.discipline.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-medium">{r.discipline}</div>
+                                <div className="truncate text-[11px] text-foreground/45">
+                                  {new Date(r.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                  {r.questionsCount ? ` · ${r.questionsCount} questões` : ''}
+                                  {r.duration ? ` · ${r.duration}min` : ''}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteRecord(r.id)}
+                                className="text-foreground/30 hover:text-destructive transition-colors md:opacity-0 md:group-hover:opacity-100"
+                                aria-label="Excluir registro"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {revisoesDoDia.length === 0 && registrosDoDia.length === 0 && (
+                      <p className="text-center text-sm text-foreground/40 py-6">
+                        Nenhum estudo ou revisão neste dia.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex min-h-[100px] items-center justify-center text-center">
+                    <p className="text-sm text-foreground/40">
+                      Clique em um dia no calendário<br />
+                      para ver os registros e revisões.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="rf-card p-5">
+                <h3 className="mb-3 font-display text-sm font-semibold">
+                  Resumo de {nomeMes}
+                </h3>
+                <dl className="grid grid-cols-2 gap-3 text-center">
+                  <Stat label="Dias estudados" value={String(monthStats.totalDays)} />
+                  <Stat label="Horas totais" value={`${monthStats.totalHours}h`} />
+                  <Stat label="Questões" value={String(monthStats.totalQuestions)} />
+                  <Stat label="Acertos" value={`${monthStats.averageCorrectRate}%`} />
+                </dl>
+              </div>
+            </aside>
+          </div>
         </div>
-      </div>     {/* <-- FECHA O id="calendario-header" */}
-    </AppShell>
-  );
-}
+      </AppShell>
+    );
+  }
 
-  // ============================================================
-  // RENDER: REGISTRAR ESTUDO (COM SELECTS DE DISCIPLINA E TÓPICO)
-  // ============================================================
   if (modo === "registrar") {
     return (
       <AppShell breadcrumb="Calendário · Registrar estudo" title="Registrar estudo">
@@ -794,33 +608,21 @@ export default function CalendarioPage() {
 
             {tipo === "teorico" ? (
               <TeoricoForm
-                formData={formData}
-                setFormData={setFormData}
-                formMaterial={formMaterial}
-                setFormMaterial={setFormMaterial}
-                disciplinas={disciplinas}
-                topicos={topicos}
-                selectedDisciplineId={selectedDisciplineId}
-                setSelectedDisciplineId={setSelectedDisciplineId}
-                selectedTopicId={selectedTopicId}
-                setSelectedTopicId={setSelectedTopicId}
+                formData={formData} setFormData={setFormData}
+                formMaterial={formMaterial} setFormMaterial={setFormMaterial}
+                disciplinas={disciplinas} topicos={topicos}
+                selectedDisciplineId={selectedDisciplineId} setSelectedDisciplineId={setSelectedDisciplineId}
+                selectedTopicId={selectedTopicId} setSelectedTopicId={setSelectedTopicId}
               />
             ) : (
               <PraticoForm
-                formData={formData}
-                setFormData={setFormData}
-                formQuestions={formQuestions}
-                setFormQuestions={setFormQuestions}
-                formCorrect={formCorrect}
-                setFormCorrect={setFormCorrect}
-                formWrong={formWrong}
-                setFormWrong={setFormWrong}
-                disciplinas={disciplinas}
-                topicos={topicos}
-                selectedDisciplineId={selectedDisciplineId}
-                setSelectedDisciplineId={setSelectedDisciplineId}
-                selectedTopicId={selectedTopicId}
-                setSelectedTopicId={setSelectedTopicId}
+                formData={formData} setFormData={setFormData}
+                formQuestions={formQuestions} setFormQuestions={setFormQuestions}
+                formCorrect={formCorrect} setFormCorrect={setFormCorrect}
+                formWrong={formWrong} setFormWrong={setFormWrong}
+                disciplinas={disciplinas} topicos={topicos}
+                selectedDisciplineId={selectedDisciplineId} setSelectedDisciplineId={setSelectedDisciplineId}
+                selectedTopicId={selectedTopicId} setSelectedTopicId={setSelectedTopicId}
               />
             )}
           </section>
@@ -855,7 +657,7 @@ export default function CalendarioPage() {
         <footer className="mt-8 flex items-center justify-end gap-2">
           <button
             onClick={() => setModo("calendario")}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/65 hover:bg-white/5"
+            className="rounded-full px-4 py-2 text-sm font-medium text-foreground/65 hover:bg-white/5"
             disabled={isSaving}
           >
             Cancelar
@@ -863,16 +665,9 @@ export default function CalendarioPage() {
           <button
             onClick={handleSalvar}
             disabled={isSaving}
-            className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
           >
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Salvando...
-              </>
-            ) : (
-              'Salvar estudo'
-            )}
+            {isSaving ? (<><Loader2 className="h-4 w-4 animate-spin" /> Salvando...</>) : ('Salvar estudo')}
           </button>
         </footer>
       </AppShell>
@@ -882,25 +677,17 @@ export default function CalendarioPage() {
   return null;
 }
 
-// ============================================================
-// COMPONENTES AUXILIARES (MANTIDOS IGUAIS)
-// ============================================================
-
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-background/40 p-3">
-      <div className="font-display text-lg font-semibold tabular-nums">{value}</div>
+      <div className="font-display text-lg font-bold tabular-nums">{value}</div>
       <div className="text-[10px] uppercase tracking-widest text-foreground/40">{label}</div>
     </div>
   );
 }
 
 function TipoCard({ icon, label, desc, active, onClick }: {
-  icon: React.ReactNode;
-  label: string;
-  desc: string;
-  active?: boolean;
-  onClick?: () => void;
+  icon: React.ReactNode; label: string; desc: string; active?: boolean; onClick?: () => void;
 }) {
   return (
     <button
@@ -923,64 +710,31 @@ function TipoCard({ icon, label, desc, active, onClick }: {
 }
 
 function TeoricoForm({
-  formData,
-  setFormData,
-  formMaterial,
-  setFormMaterial,
-  disciplinas,
-  topicos,
-  selectedDisciplineId,
-  setSelectedDisciplineId,
-  selectedTopicId,
-  setSelectedTopicId
-}: {
-  formData: any;
-  setFormData: (data: any) => void;
-  formMaterial: string;
-  setFormMaterial: (v: string) => void;
-  disciplinas: { id: string; name: string }[];
-  topicos: { id: string; name: string; discipline_id: string; status: string }[];
-  selectedDisciplineId: string;
-  setSelectedDisciplineId: (id: string) => void;
-  selectedTopicId: string;
-  setSelectedTopicId: (id: string) => void;
-}) {
+  formData, setFormData, formMaterial, setFormMaterial,
+  disciplinas, topicos,
+  selectedDisciplineId, setSelectedDisciplineId,
+  selectedTopicId, setSelectedTopicId,
+}: any) {
   return (
     <div className="rf-card p-6">
       <h3 className="mb-4 text-xs font-medium uppercase tracking-widest text-foreground/40">Detalhes</h3>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Data">
-          <input
-            type="date"
-            value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Duração (min)">
-          <input
-            type="number"
-            value={formData.duration}
-            onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="number" value={formData.duration} onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Disciplina">
           <select
             value={selectedDisciplineId}
-            onChange={(e) => {
-              setSelectedDisciplineId(e.target.value);
-              setSelectedTopicId('');
-            }}
+            onChange={(e) => { setSelectedDisciplineId(e.target.value); setSelectedTopicId(''); }}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
           >
             <option value="">Selecione uma disciplina</option>
-            {disciplinas.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
+            {disciplinas.map((d: any) => (<option key={d.id} value={d.id}>{d.name}</option>))}
           </select>
         </Field>
-
         <Field label="Tópico">
           <select
             value={selectedTopicId}
@@ -989,33 +743,20 @@ function TeoricoForm({
             disabled={!selectedDisciplineId}
           >
             <option value="">Selecione um tópico</option>
-            {topicos
-              .filter(t => t.discipline_id === selectedDisciplineId)
-              .map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
+            {topicos.filter((t: any) => t.discipline_id === selectedDisciplineId).map((t: any) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
           </select>
         </Field>
       </div>
       <div className="mt-4">
         <Field label="Material consultado">
-          <input
-            type="text"
-            value={formMaterial}
-            onChange={(e) => setFormMaterial(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="text" value={formMaterial} onChange={(e) => setFormMaterial(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
       </div>
       <div className="mt-4">
         <Field label="Observações">
-          <textarea
-            rows={3}
-            value={formData.observations}
-            onChange={(e) => setFormData({ ...formData, observations: e.target.value })}
-            placeholder="Resumo, dúvidas que ficaram, próximos passos…"
-            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <textarea rows={3} value={formData.observations} onChange={(e) => setFormData({ ...formData, observations: e.target.value })} placeholder="Resumo, dúvidas que ficaram, próximos passos…" className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
       </div>
     </div>
@@ -1023,49 +764,13 @@ function TeoricoForm({
 }
 
 function PraticoForm({
-  formData,
-  setFormData,
-  formQuestions,
-  setFormQuestions,
-  formCorrect,
-  setFormCorrect,
-  formWrong,
-  setFormWrong,
-  disciplinas,
-  topicos,
-  selectedDisciplineId,
-  setSelectedDisciplineId,
-  selectedTopicId,
-  setSelectedTopicId
-}: {
-  formData: any;
-  setFormData: (data: any) => void;
-  formQuestions: number | string;
-  setFormQuestions: (v: number | string) => void;
-  formCorrect: number | string;
-  setFormCorrect: (v: number | string) => void;
-  formWrong: number | string;
-  setFormWrong: (v: number | string) => void;
-  disciplinas: { id: string; name: string }[];
-  topicos: { id: string; name: string; discipline_id: string; status: string }[];
-  selectedDisciplineId: string;
-  setSelectedDisciplineId: (id: string) => void;
-  selectedTopicId: string;
-  setSelectedTopicId: (id: string) => void;
-}) {
-  // Função auxiliar para tratar mudanças em inputs numéricos
-  const handleNumberChange = (
-    value: string,
-    setter: (v: number | string) => void
-  ) => {
-    if (value === '') {
-      setter('');
-    } else {
-      const num = Number(value);
-      if (!isNaN(num) && num >= 0) {
-        setter(num);
-      }
-    }
+  formData, setFormData, formQuestions, setFormQuestions, formCorrect, setFormCorrect,
+  formWrong, setFormWrong, disciplinas, topicos,
+  selectedDisciplineId, setSelectedDisciplineId, selectedTopicId, setSelectedTopicId,
+}: any) {
+  const handleNumberChange = (value: string, setter: (v: number | string) => void) => {
+    if (value === '') setter('');
+    else { const num = Number(value); if (!isNaN(num) && num >= 0) setter(num); }
   };
 
   return (
@@ -1073,37 +778,21 @@ function PraticoForm({
       <h3 className="mb-4 text-xs font-medium uppercase tracking-widest text-foreground/40">Detalhes da prática</h3>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Data">
-          <input
-            type="date"
-            value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Duração (min)">
-          <input
-            type="number"
-            value={formData.duration}
-            onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="number" value={formData.duration} onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Disciplina">
           <select
             value={selectedDisciplineId}
-            onChange={(e) => {
-              setSelectedDisciplineId(e.target.value);
-              setSelectedTopicId('');
-            }}
+            onChange={(e) => { setSelectedDisciplineId(e.target.value); setSelectedTopicId(''); }}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
           >
             <option value="">Selecione uma disciplina</option>
-            {disciplinas.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
+            {disciplinas.map((d: any) => (<option key={d.id} value={d.id}>{d.name}</option>))}
           </select>
         </Field>
-
         <Field label="Tópico">
           <select
             value={selectedTopicId}
@@ -1112,57 +801,28 @@ function PraticoForm({
             disabled={!selectedDisciplineId}
           >
             <option value="">Selecione um tópico</option>
-            {topicos
-              .filter(t => t.discipline_id === selectedDisciplineId)
-              .map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
+            {topicos.filter((t: any) => t.discipline_id === selectedDisciplineId).map((t: any) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
           </select>
         </Field>
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <Field label="Questões feitas">
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={formQuestions}
-            onChange={(e) => handleNumberChange(e.target.value, setFormQuestions)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="text" inputMode="numeric" pattern="[0-9]*" value={formQuestions} onChange={(e) => handleNumberChange(e.target.value, setFormQuestions)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Acertos">
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={formCorrect}
-            onChange={(e) => handleNumberChange(e.target.value, setFormCorrect)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="text" inputMode="numeric" pattern="[0-9]*" value={formCorrect} onChange={(e) => handleNumberChange(e.target.value, setFormCorrect)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
         <Field label="Erros">
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={formWrong}
-            onChange={(e) => handleNumberChange(e.target.value, setFormWrong)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <input type="text" inputMode="numeric" pattern="[0-9]*" value={formWrong} onChange={(e) => handleNumberChange(e.target.value, setFormWrong)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
       </div>
 
       <div className="mt-4">
         <Field label="Observações">
-          <textarea
-            rows={3}
-            value={formData.observations}
-            onChange={(e) => setFormData({ ...formData, observations: e.target.value })}
-            placeholder="Tópicos errados, padrões de erro, revisões agendadas…"
-            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-          />
+          <textarea rows={3} value={formData.observations} onChange={(e) => setFormData({ ...formData, observations: e.target.value })} placeholder="Tópicos errados, padrões de erro, revisões agendadas…" className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
         </Field>
       </div>
     </div>

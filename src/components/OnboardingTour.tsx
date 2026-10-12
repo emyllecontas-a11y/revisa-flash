@@ -93,8 +93,8 @@ export function OnboardingTour() {
       }}
       styles={{
         options: {
-          primaryColor: '#14B8A6',
-          textColor: '#ECFEFF',
+          primaryColor: '#FE7802',
+          textColor: '#FCF4F9',
           zIndex: 1000,
           overlayColor: 'rgba(0,0,0,0.7)',
         },
@@ -104,11 +104,11 @@ export function OnboardingTour() {
           border: '1px solid rgba(236, 254, 255, 0.08)',
           padding: '20px',
           maxWidth: '400px',
-          color: '#ECFEFF',
+          color: '#FCF4F9',
           fontFamily: 'DM Sans, ui-sans-serif, system-ui, sans-serif',
         },
         tooltipTitle: {
-          color: '#14B8A6',
+          color: '#FE7802',
           fontFamily: 'Space Grotesk, ui-sans-serif, system-ui, sans-serif',
           fontSize: '18px',
           fontWeight: 600,
@@ -118,7 +118,7 @@ export function OnboardingTour() {
           lineHeight: '1.6',
         },
         buttonNext: {
-          backgroundColor: '#14B8A6',
+          backgroundColor: '#FE7802',
           borderRadius: '8px',
           color: '#04201D',
           fontWeight: 600,
@@ -126,11 +126,11 @@ export function OnboardingTour() {
           padding: '8px 20px',
         },
         buttonBack: {
-          color: '#8A86A8',
+          color: '#BCA7B4',
           fontSize: '13px',
         },
         buttonSkip: {
-          color: '#8A86A8',
+          color: '#BCA7B4',
           fontSize: '13px',
           fontWeight: 500,
           // 🔥 Vamos estilizar o botão "Pular" para ficar bem visível
@@ -140,10 +140,10 @@ export function OnboardingTour() {
           backgroundColor: 'rgba(255,255,255,0.05)',
         },
         buttonClose: {
-          color: '#8A86A8',
+          color: '#BCA7B4',
         },
         beacon: {
-          color: '#14B8A6',
+          color: '#FE7802',
           backgroundColor: 'rgba(20, 184, 166, 0.3)',
         },
         tooltipFooter: {

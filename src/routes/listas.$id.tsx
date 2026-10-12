@@ -419,7 +419,7 @@ export default function ListaPlayerPage() {
           <p className="text-accent">{error || "Lista não encontrada"}</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
           >
             Voltar
           </button>
@@ -524,7 +524,7 @@ export default function ListaPlayerPage() {
               {errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
                 <button
                   onClick={() => setMostrarModalErros(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
                 >
                   📥 Enviar {errosParaEnviar.length} {errosParaEnviar.length === 1 ? 'erro' : 'erros'} ao caderno
                 </button>
@@ -920,14 +920,14 @@ export default function ListaPlayerPage() {
             {idx === total - 1 ? (
               <button
                 onClick={() => setConfirmar(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 <Flag className="h-3.5 w-3.5" /> Finalizar lista
               </button>
             ) : (
               <button
                 onClick={() => setIdx(i => i + 1)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 Próxima <ArrowRight className="h-3.5 w-3.5" />
               </button>
@@ -947,7 +947,7 @@ export default function ListaPlayerPage() {
             />
             <button
               onClick={() => setConfirmar(true)}
-              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
             >
               <Flag className="h-3.5 w-3.5" /> Finalizar lista
             </button>
@@ -1011,7 +1011,7 @@ export default function ListaPlayerPage() {
               <button
                 onClick={handleFinalizar}
                 disabled={salvando}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
               >
                 {salvando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Finalizar"}
               </button>

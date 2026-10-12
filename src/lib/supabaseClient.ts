@@ -43,23 +43,21 @@ export const getClerkToken = async (): Promise<string | null> => {
     }
 
     // Obtém o token (usando o template "supabase" se existir)
-    try {
-      const token = await session.getToken({ template: 'supabase1' });
-      if (token) {
-        console.log('🔑 Token do Clerk obtido com sucesso!');
-        return token;
-      }
-    } catch (e) {
-      // Fallback: tenta sem template
-      console.warn('⚠️ Falha ao obter token com template supabase, tentando sem template...');
-    }
+  try {
+  const token = await session.getToken({ template: 'supabase1', skipCache: true });
+  if (token) {
+    console.log('🔑 Token do Clerk obtido com sucesso!');
+    return token;
+  }
+} catch (e) {
+  console.warn('⚠️ Falha ao obter token com template supabase, tentando sem template...');
+}
 
-    // Fallback: pega token sem template
-    const fallbackToken = await session.getToken();
-    if (fallbackToken) {
-      console.log('🔑 Token do Clerk obtido (fallback) com sucesso!');
-      return fallbackToken;
-    }
+const fallbackToken = await session.getToken({ skipCache: true });
+if (fallbackToken) {
+  console.log('🔑 Token do Clerk obtido (fallback) com sucesso!');
+  return fallbackToken;
+}
 
     console.warn('⚠️ Nenhum token disponível.');
     return null;

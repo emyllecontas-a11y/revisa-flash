@@ -100,7 +100,7 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             </p>
             <button
               onClick={() => onClose(true)}
-              className="mt-5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+              className="mt-5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
             >
               Fechar
             </button>
@@ -205,7 +205,7 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
               <button
                 onClick={handleEnviar}
                 disabled={enviando || selecionadas.size === 0}
-                className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 {enviando
                   ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />

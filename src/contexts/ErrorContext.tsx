@@ -73,27 +73,53 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // ============================================================
   // CARREGAR DISCIPLINAS DO SUPABASE (só as ativas)
   // ============================================================
-  const loadDisciplines = useCallback(async (uid: string) => {
-    try {
-      setDisciplinesLoading(true);
-      const client = await getSupabaseWithToken();
-      const { data, error } = await client
-        .from('disciplines')
-        .select('id, name')
-        .eq('user_id', uid)
-        .eq('isDeleted', false)
-        .order('name', { ascending: true });
+// Carrega disciplinas: primeiro do RxDB (offline), senão do Supabase
+const loadDisciplines = useCallback(async (uid: string) => {
+  try {
+    setDisciplinesLoading(true);
 
-      if (error) throw error;
-      setDisciplines((data || []) as Discipline[]);
-      console.log(`✅ [ErrorContext] ${data?.length || 0} disciplinas carregadas.`);
-    } catch (e) {
-      console.warn('⚠️ [ErrorContext] Erro ao carregar disciplinas:', e);
-      setDisciplines([]);
-    } finally {
-      setDisciplinesLoading(false);
+    // 1) Tenta do banco local primeiro (funciona offline)
+    try {
+      const db = await getDb();
+      const docs = await db.disciplines.find({
+        selector: { user_id: uid, isDeleted: { $ne: true } },
+      }).exec();
+
+      if (docs.length > 0) {
+        const locais = docs
+          .map((d: any) => {
+            const j = d.toJSON();
+            return { id: j.id, name: j.name } as Discipline;
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        setDisciplines(locais);
+        console.log(`✅ [ErrorContext] ${locais.length} disciplinas carregadas do banco local.`);
+        return;
+      }
+    } catch (localErr) {
+      console.warn('⚠️ [ErrorContext] Falha ao ler disciplinas do RxDB:', localErr);
     }
-  }, []);
+
+    // 2) Se não tem nada local, busca do Supabase (precisa de internet)
+    const client = await getSupabaseWithToken();
+    const { data, error } = await client
+      .from('disciplines')
+      .select('id, name')
+      .eq('user_id', uid)
+      .eq('isDeleted', false)
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    setDisciplines((data || []) as Discipline[]);
+    console.log(`✅ [ErrorContext] ${data?.length || 0} disciplinas carregadas do Supabase.`);
+  } catch (e) {
+    console.warn('⚠️ [ErrorContext] Erro ao carregar disciplinas:', e);
+    setDisciplines([]);
+  } finally {
+    setDisciplinesLoading(false);
+  }
+}, []);
 
   // ============================================================
   // CARREGAR ERROS (RxDB local)

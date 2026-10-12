@@ -11,11 +11,13 @@ import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider, useAppUser } from './contexts/UserContext';
+import { ConfirmProvider } from './components/ConfirmDialog';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { processPendingOperations } from '@/services/queueService';
 import { LogoIcon } from '@/components/LogoIcon';
 import './styles.css';
+import './styles/pdf.css';
 import { addRxPlugin } from 'rxdb';
 import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
 import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
@@ -25,7 +27,7 @@ addRxPlugin(RxDBUpdatePlugin);
 
 declare const __BUILD_TIMESTAMP__: string;
 
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '5';
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -41,7 +43,6 @@ function AppContent() {
   const { userId } = useAppUser();
   const userIdRef = useRef<string | null>(userId);
 
-  // 🔥 LISTENER ONLINE E SETUP DO LISTENER DA FILA
   useEffect(() => {
     const handleOnline = () => {
       console.log('📶 Conexão restaurada, processando fila de operações pendentes...');
@@ -65,7 +66,6 @@ function AppContent() {
     };
   }, [refreshUserSettings]);
 
-  // 🔥 REALTIME SUBSCRIPTION (com debounce)
   useEffect(() => {
     if (!userIdRef.current) return;
     const userId = userIdRef.current;
@@ -76,10 +76,7 @@ function AppContent() {
       .channel('realtime-sync')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-        },
+        { event: '*', schema: 'public' },
         async (payload) => {
           console.log('📡 Mudança detectada no Supabase:', payload);
           if (syncTimeout) {
@@ -118,7 +115,6 @@ function AppContent() {
     };
   }, [refreshUserSettings]);
 
-  // 🔥 LISTENER DE VISIBILIDADE DA ABA
   useEffect(() => {
     if (!userIdRef.current) return;
     const userId = userIdRef.current;
@@ -140,7 +136,6 @@ function AppContent() {
     };
   }, [refreshUserSettings]);
 
-  // 🔥 SINCRONIZAÇÃO PERIÓDICA (a cada 5 minutos)
   useEffect(() => {
     if (!userIdRef.current) return;
     const userId = userIdRef.current;
@@ -150,23 +145,26 @@ function AppContent() {
       syncWithSupabase(userId, () => {
         refreshUserSettings();
       }).catch(err => console.warn('⚠️ Falha na sincronização periódica:', err));
-    }, 5 * 60 * 1000); // 5 minutos
+    }, 5 * 60 * 1000);
 
     return () => clearInterval(intervalId);
   }, [refreshUserSettings]);
 
-  return <RouterProvider router={router} />;
+  return (
+    <ConfirmProvider>
+      <RouterProvider router={router} />
+    </ConfirmProvider>
+  );
 }
 
 // ============================================================
-// 📦 COMPONENTE ROOT (configura o banco e prove os contextos)
+// 📦 COMPONENTE ROOT
 // ============================================================
 function Root() {
   const { userId, isLoaded, isSignedIn, user } = useAppUser();
   const [ready, setReady] = useState(false);
   const userIdRef = useRef<string | null>(userId);
 
-  // 🔥 Sincroniza perfil com Supabase
   useEffect(() => {
     if (!userId || !isLoaded || !isSignedIn) return;
     const syncProfile = async () => {
@@ -199,7 +197,6 @@ function Root() {
     syncProfile();
   }, [userId, user, isLoaded, isSignedIn]);
 
-  // 🔥 INICIALIZAÇÃO DO RXDB
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn || !userId) {
@@ -235,7 +232,6 @@ function Root() {
         console.log('✅ Banco local inicializado.');
         setReady(true);
 
-        // 🔥 Sincronização inicial (sem callback, pois o FlashcardProvider ainda não montou)
         try {
           await syncWithSupabase(userId);
           console.log('✅ Sincronização RxDB concluída!');
@@ -252,7 +248,6 @@ function Root() {
     initialize();
   }, [isLoaded, isSignedIn, userId]);
 
-  // 🚀 TELA DE CARREGAMENTO
   if (!isLoaded || !ready) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -266,7 +261,6 @@ function Root() {
     );
   }
 
-  // 🔥 Quando pronto, renderiza os providers e o AppContent (que usa o contexto)
   return (
     <ThemeProvider>
       <LoadingProvider>
@@ -283,7 +277,7 @@ function Root() {
 }
 
 // ============================================================
-// 🌐 COMPONENTE PRINCIPAL – ENVOLVE COM CLERK E UserProvider
+// 🌐 COMPONENTE PRINCIPAL
 // ============================================================
 function AppWithAuth() {
   return (
@@ -304,7 +298,7 @@ function AppWithAuth() {
 }
 
 // ============================================================
-// 🔥 REGISTRO DO SERVICE WORKER
+// 🔥 SERVICE WORKER
 // ============================================================
 if ('serviceWorker' in navigator) {
   const registerSW = async () => {
@@ -328,7 +322,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ============================================================
-// 🔧 EXPORTA FUNÇÃO DE SINCRONIZAÇÃO MANUAL
+// 🔧 SINCRONIZAÇÃO MANUAL
 // ============================================================
 export const manualSync = async () => {
   const userId = localStorage.getItem('revisaflash_user_id');

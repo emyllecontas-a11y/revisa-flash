@@ -15,19 +15,19 @@ import { ListasTab } from "@/components/ListasTab";
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
-  BarChart3, ChevronDown, ChevronUp, History, Search
+  BarChart3, ChevronDown, ChevronUp, History, Search, FileStack
 } from "lucide-react";
 import type { Simulado } from "@/lib/simulados-types";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/hooks/useToast";
 
-// ============================================================
-// PÁGINA PRINCIPAL
-// ============================================================
 export default function SimuladosPage() {
   const navigate = useNavigate();
+  const confirmDialog = useConfirm();
+  const toast = useToast();
   const { user } = useAppUser();
   const { records: studyRecords } = useStudy();
 
-  // 🔥 Aba principal (Simulados / Listas)
   const [mainTab, setMainTab] = useState<'simulados' | 'listas'>('simulados');
 
   const [simulados, setSimulados] = useState<Simulado[]>([]);
@@ -36,7 +36,6 @@ export default function SimuladosPage() {
   const [resultadosUsuario, setResultadosUsuario] = useState<Record<string, any>>({});
   const [resultadosLista, setResultadosLista] = useState<any[]>([]);
 
-  // Estado para importação
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importPassword, setImportPassword] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -44,24 +43,16 @@ export default function SimuladosPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
 
-  // Estado para exclusão
   const [excluindo, setExcluindo] = useState<string | null>(null);
 
-  // Estado para modal de estatísticas
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
-  
-  // Estado para abas do modal (estatísticas / histórico)
   const [activeTab, setActiveTab] = useState<'estatisticas' | 'historico'>('estatisticas');
 
-  // Estado para histórico
   const [historicoData, setHistoricoData] = useState<any>({ resultados: [], total: 0 });
   const [historicoPage, setHistoricoPage] = useState(1);
   const [historicoLoading, setHistoricoLoading] = useState(false);
   const [historicoFilter, setHistoricoFilter] = useState('');
 
-  // ============================================================
-  // CARREGAR SIMULADOS E RESULTADOS
-  // ============================================================
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -82,7 +73,6 @@ export default function SimuladosPage() {
           });
           setResultadosUsuario(mapa);
           setResultadosLista(resultResult.data);
-          console.log('📊 Resultados do usuário carregados:', Object.keys(mapa).length);
         }
       }
     } catch (err: any) {
@@ -96,7 +86,6 @@ export default function SimuladosPage() {
     loadData();
   }, [loadData]);
 
-  // Carregar histórico quando a aba for ativada
   const loadHistorico = useCallback(async () => {
     if (!user?.id) return;
     setHistoricoLoading(true);
@@ -119,9 +108,6 @@ export default function SimuladosPage() {
     }
   }, [activeTab, user?.id, loadHistorico]);
 
-  // ============================================================
-  // CÁLCULO DE MÉTRICAS
-  // ============================================================
   const calcularMetricas = useCallback(() => {
     const total = simulados.length;
     const idsAtivos = new Set(simulados.map(s => s.id));
@@ -156,53 +142,39 @@ export default function SimuladosPage() {
 
   const metricas = calcularMetricas();
 
-  // ============================================================
-  // AÇÕES
-  // ============================================================
-  const handleStartSimulado = (id: string) => {
-    navigate(`/simulados/${id}`);
-  };
-
-  const handleVerResultado = (id: string) => {
-    navigate(`/simulados/${id}?view=resultado`);
-  };
+  const handleStartSimulado = (id: string) => navigate(`/simulados/${id}`);
+  const handleVerResultado = (id: string) => navigate(`/simulados/${id}?view=resultado`);
 
   const handleExcluirSimulado = async (id: string, titulo: string) => {
     if (!user?.id) return;
-    if (!confirm(`Tem certeza que deseja excluir o simulado "${titulo}"?`)) return;
-
+    const ok = await confirmDialog({
+      title: `Excluir "${titulo}"?`,
+      description: "O simulado e o histórico de tentativas serão removidos. Essa ação não pode ser desfeita.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
     setExcluindo(id);
     try {
       const result = await excluirSimulado(id, user.id);
       if (result.success) {
         await loadData();
-        alert("Simulado excluído com sucesso!");
+        toast.success("Simulado excluído com sucesso!");
       } else {
-        alert("Erro ao excluir: " + result.error);
+        toast.error("Erro ao excluir", { description: result.error });
       }
     } catch (err: any) {
-      alert("Erro ao excluir: " + err.message);
+      toast.error("Erro ao excluir", { description: err.message });
     } finally {
       setExcluindo(null);
     }
   };
 
-  // ============================================================
-  // IMPORTAÇÃO
-  // ============================================================
   const handleImport = async () => {
-    if (importPassword !== "admin123") {
-      setImportError("Senha incorreta");
-      return;
-    }
-    if (!importFile) {
-      setImportError("Selecione um arquivo JSON");
-      return;
-    }
-    if (!user?.id) {
-      setImportError("Usuário não autenticado");
-      return;
-    }
+    if (importPassword !== "admin123") { setImportError("Senha incorreta"); return; }
+    if (!importFile) { setImportError("Selecione um arquivo JSON"); return; }
+    if (!user?.id) { setImportError("Usuário não autenticado"); return; }
 
     setImporting(true);
     setImportError(null);
@@ -228,9 +200,6 @@ export default function SimuladosPage() {
     }
   };
 
-  // ============================================================
-  // FUNÇÕES PARA ESTATÍSTICAS
-  // ============================================================
   const estatisticasGerais = useCallback(() => {
     const totalSimulados = resultadosLista.length;
     if (totalSimulados === 0) return null;
@@ -238,47 +207,29 @@ export default function SimuladosPage() {
     const totalQuestoes = resultadosLista.reduce((acc, r) => acc + r.total_questoes, 0);
     const totalAcertos = resultadosLista.reduce((acc, r) => acc + r.acertos, 0);
     const totalErros = resultadosLista.reduce((acc, r) => acc + r.erros, 0);
-    
     const mediaGeral = totalQuestoes > 0 ? Math.round((totalAcertos / totalQuestoes) * 100) : 0;
     const melhorResultado = Math.max(...resultadosLista.map(r => r.porcentagem));
     const piorResultado = Math.min(...resultadosLista.map(r => r.porcentagem));
     const totalTempo = resultadosLista.reduce((acc, r) => acc + r.tempo_segundos, 0);
     const tempoMedio = Math.round(totalTempo / totalSimulados / 60);
 
-    return {
-      totalSimulados,
-      totalQuestoes,
-      totalAcertos,
-      totalErros,
-      mediaGeral,
-      melhorResultado,
-      piorResultado,
-      tempoMedio,
-    };
+    return { totalSimulados, totalQuestoes, totalAcertos, totalErros, mediaGeral, melhorResultado, piorResultado, tempoMedio };
   }, [resultadosLista]);
 
   const desempenhoPorArea = useCallback((): any[] => {
     const areas: Record<string, { acertos: number; total: number }> = {};
-
     resultadosLista.forEach(resultado => {
       const respostas = resultado.respostas || {};
       const areasMap = resultado.areas || {};
-
       Object.keys(respostas).forEach(numero => {
         const num = parseInt(numero);
         const area = areasMap[num] || "Não categorizada";
-
-        if (!areas[area]) {
-          areas[area] = { acertos: 0, total: 0 };
-        }
+        if (!areas[area]) areas[area] = { acertos: 0, total: 0 };
         areas[area].total++;
       });
     });
-
     return Object.keys(areas).map(area => ({
-      area,
-      acertos: areas[area].acertos,
-      total: areas[area].total,
+      area, acertos: areas[area].acertos, total: areas[area].total,
       porcentagem: areas[area].total > 0 ? Math.round((areas[area].acertos / areas[area].total) * 100) : 0,
     })).sort((a, b) => b.porcentagem - a.porcentagem);
   }, [resultadosLista]);
@@ -298,82 +249,42 @@ export default function SimuladosPage() {
   const insights = useCallback(() => {
     const stats = estatisticasGerais();
     if (!stats) return [];
-
     const items: any[] = [];
 
     if (stats.mediaGeral >= 70) {
-      items.push({
-        icon: <Award className="h-4 w-4 text-primary" />,
-        message: `Ótimo desempenho! Sua média geral é de ${stats.mediaGeral}% 🎉`,
-        type: "positive",
-      });
+      items.push({ icon: <Award className="h-4 w-4 text-primary" />, message: `Ótimo desempenho! Sua média geral é de ${stats.mediaGeral}% 🎉`, type: "positive" });
     } else if (stats.mediaGeral >= 50) {
-      items.push({
-        icon: <Target className="h-4 w-4 text-warning" />,
-        message: `Bom desempenho! Sua média geral é de ${stats.mediaGeral}%. Continue praticando! 💪`,
-        type: "neutral",
-      });
+      items.push({ icon: <Target className="h-4 w-4 text-warning" />, message: `Bom desempenho! Sua média geral é de ${stats.mediaGeral}%. Continue praticando! 💪`, type: "neutral" });
     } else {
-      items.push({
-        icon: <AlertCircle className="h-4 w-4 text-accent" />,
-        message: `Sua média geral é de ${stats.mediaGeral}%. Que tal revisar os conteúdos? 📚`,
-        type: "negative",
-      });
+      items.push({ icon: <AlertCircle className="h-4 w-4 text-accent" />, message: `Sua média geral é de ${stats.mediaGeral}%. Que tal revisar os conteúdos? 📚`, type: "negative" });
     }
 
     if (resultadosLista.length >= 3) {
       const primeiro = resultadosLista[0].porcentagem;
       const ultimo = resultadosLista[resultadosLista.length - 1].porcentagem;
       const diferenca = ultimo - primeiro;
-      if (diferenca > 5) {
-        items.push({
-          icon: <TrendingUp className="h-4 w-4 text-primary" />,
-          message: `Você melhorou ${diferenca}% desde o primeiro simulado! Continue assim! 🚀`,
-          type: "positive",
-        });
-      } else if (diferenca < -5) {
-        items.push({
-          icon: <AlertCircle className="h-4 w-4 text-accent" />,
-          message: `Seu desempenho caiu ${Math.abs(diferenca)}% desde o primeiro simulado. Vale revisar a estratégia.`,
-          type: "negative",
-        });
-      }
+      if (diferenca > 5) items.push({ icon: <TrendingUp className="h-4 w-4 text-primary" />, message: `Você melhorou ${diferenca}% desde o primeiro simulado! Continue assim! 🚀`, type: "positive" });
+      else if (diferenca < -5) items.push({ icon: <AlertCircle className="h-4 w-4 text-accent" />, message: `Seu desempenho caiu ${Math.abs(diferenca)}% desde o primeiro simulado. Vale revisar a estratégia.`, type: "negative" });
     }
 
-    items.push({
-      icon: <CheckCircle2 className="h-4 w-4 text-primary" />,
-      message: `Você já concluiu ${stats.totalSimulados} simulados! Continue assim! 💪`,
-      type: "positive",
-    });
-
+    items.push({ icon: <CheckCircle2 className="h-4 w-4 text-primary" />, message: `Você já concluiu ${stats.totalSimulados} simulados! Continue assim! 💪`, type: "positive" });
     return items;
   }, [resultadosLista, estatisticasGerais]);
 
-  // ============================================================
-  // COMPARAÇÃO DE SIMULADOS
-  // ============================================================
   const [selectedForComparison, setSelectedForComparison] = useState<string[]>([]);
   const [comparisonExpanded, setComparisonExpanded] = useState(false);
 
   const toggleComparisonSelection = (id: string) => {
     setSelectedForComparison(prev => {
-      if (prev.includes(id)) {
-        return prev.filter(s => s !== id);
-      } else {
-        if (prev.length >= 5) {
-          alert('Você pode comparar no máximo 5 simulados.');
-          return prev;
-        }
-        return [...prev, id];
-      }
+      if (prev.includes(id)) return prev.filter(s => s !== id);
+      if (prev.length >= 5) { toast.warning('Você pode comparar no máximo 5 simulados.'); return prev; }
+      return [...prev, id];
     });
   };
 
-  const getSelectedResults = () => {
-    return resultadosLista
-      .filter(r => selectedForComparison.includes(r.simulado_id))
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  };
+  const getSelectedResults = () => resultadosLista
+    .filter(r => selectedForComparison.includes(r.simulado_id))
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
   const getSimuladoTitulo = (simuladoId: string) => {
     const s = simulados.find(s => s.id === simuladoId);
@@ -384,100 +295,64 @@ export default function SimuladosPage() {
 
   const comparisonInsights = useCallback(() => {
     if (selectedResults.length < 2) return null;
-
     const melhor = selectedResults.reduce((a, b) => a.porcentagem > b.porcentagem ? a : b);
     const pior = selectedResults.reduce((a, b) => a.porcentagem < b.porcentagem ? a : b);
     const primeiro = selectedResults[0];
     const ultimo = selectedResults[selectedResults.length - 1];
     const diferenca = ultimo.porcentagem - primeiro.porcentagem;
-
     const items = [];
 
-    items.push({
-      icon: <Award className="h-4 w-4 text-primary" />,
-      message: `🏆 Melhor simulado: "${getSimuladoTitulo(melhor.simulado_id)}" com ${melhor.porcentagem}% de acertos`
-    });
-
-    if (selectedResults.length > 2) {
-      items.push({
-        icon: <Target className="h-4 w-4 text-warning" />,
-        message: `📉 Pior simulado: "${getSimuladoTitulo(pior.simulado_id)}" com ${pior.porcentagem}% de acertos`
-      });
-    }
-
+    items.push({ icon: <Award className="h-4 w-4 text-primary" />, message: `🏆 Melhor simulado: "${getSimuladoTitulo(melhor.simulado_id)}" com ${melhor.porcentagem}% de acertos` });
+    if (selectedResults.length > 2) items.push({ icon: <Target className="h-4 w-4 text-warning" />, message: `📉 Pior simulado: "${getSimuladoTitulo(pior.simulado_id)}" com ${pior.porcentagem}% de acertos` });
     if (selectedResults.length >= 2) {
       const evolucao = diferenca > 0 ? `melhorou ${Math.abs(diferenca)}%` : `piorou ${Math.abs(diferenca)}%`;
-      items.push({
-        icon: diferenca > 0 ? <TrendingUp className="h-4 w-4 text-primary" /> : <AlertCircle className="h-4 w-4 text-accent" />,
-        message: `📊 Do primeiro para o último simulado, você ${evolucao}`
-      });
+      items.push({ icon: diferenca > 0 ? <TrendingUp className="h-4 w-4 text-primary" /> : <AlertCircle className="h-4 w-4 text-accent" />, message: `📊 Do primeiro para o último simulado, você ${evolucao}` });
     }
-
     const media = Math.round(selectedResults.reduce((acc, r) => acc + r.porcentagem, 0) / selectedResults.length);
-    items.push({
-      icon: <BarChart3 className="h-4 w-4 text-primary" />,
-      message: `📊 Média dos ${selectedResults.length} simulados selecionados: ${media}%`
-    });
-
+    items.push({ icon: <BarChart3 className="h-4 w-4 text-primary" />, message: `📊 Média dos ${selectedResults.length} simulados selecionados: ${media}%` });
     return items;
   }, [selectedResults]);
 
   const comparacaoPorArea = useCallback(() => {
     if (selectedResults.length < 2) return null;
-
     const areasMap: Record<string, Record<string, { acertos: number; total: number }>> = {};
-
     selectedResults.forEach((resultado) => {
       const simuladoTitulo = getSimuladoTitulo(resultado.simulado_id);
       const respostas = resultado.respostas || {};
       const areas = resultado.areas || {};
-
       areasMap[simuladoTitulo] = {};
-
       Object.keys(respostas).forEach(numero => {
         const num = parseInt(numero);
         const area = areas[num] || "Não categorizada";
-        
-        if (!areasMap[simuladoTitulo][area]) {
-          areasMap[simuladoTitulo][area] = { acertos: 0, total: 0 };
-        }
+        if (!areasMap[simuladoTitulo][area]) areasMap[simuladoTitulo][area] = { acertos: 0, total: 0 };
         areasMap[simuladoTitulo][area].total++;
       });
     });
 
     const result: { area: string; simulados: Record<string, number> }[] = [];
     const todasAreas = new Set<string>();
-
-    Object.values(areasMap).forEach(sim => {
-      Object.keys(sim).forEach(area => todasAreas.add(area));
-    });
+    Object.values(areasMap).forEach(sim => Object.keys(sim).forEach(area => todasAreas.add(area)));
 
     todasAreas.forEach(area => {
-      const simulados: Record<string, number> = {};
+      const simuladosMap: Record<string, number> = {};
       Object.keys(areasMap).forEach(simNome => {
         const data = areasMap[simNome][area];
-        simulados[simNome] = data ? Math.round((data.acertos / data.total) * 100) : 0;
+        simuladosMap[simNome] = data ? Math.round((data.acertos / data.total) * 100) : 0;
       });
-      result.push({ area, simulados });
+      result.push({ area, simulados: simuladosMap });
     });
-
     return result.sort((a, b) => a.area.localeCompare(b.area));
   }, [selectedResults]);
 
   const comparacaoAreaData = comparacaoPorArea();
   const comparisonData = comparisonInsights();
-
   const stats = estatisticasGerais();
   const areas = desempenhoPorArea();
   const evolucaoData = evolucao();
   const insightsData = insights();
 
-  // ============================================================
-  // RENDER
-  // ============================================================
   return (
     <AppShell breadcrumb="Simulados" title="Simulados">
-      {/* 🔥 ABAS PRINCIPAIS (Simulados / Listas) */}
       <div className="mb-6 flex gap-1 border-b border-border">
         <button
           onClick={() => setMainTab('simulados')}
@@ -501,9 +376,6 @@ export default function SimuladosPage() {
         </button>
       </div>
 
-      {/* ============================================================ */}
-      {/* CONTEÚDO DA ABA SIMULADOS */}
-      {/* ============================================================ */}
       {mainTab === 'simulados' ? (
         loading ? (
           <div className="flex items-center justify-center min-h-[400px]">
@@ -512,74 +384,133 @@ export default function SimuladosPage() {
         ) : error ? (
           <div className="rf-card p-6 text-center">
             <p className="text-accent">{error}</p>
-            <button
-              onClick={loadData}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-            >
+            <button onClick={loadData} className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground">
               Tentar novamente
             </button>
           </div>
         ) : (
           <>
-            {/* KPIs */}
-            <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Kpi label="Disponíveis" value={metricas.total} icon={<Layers className="h-3.5 w-3.5" />} />
-              <Kpi label="Em andamento" value={metricas.emAndamento} icon={<Clock className="h-3.5 w-3.5" />} accent />
-              <Kpi label="Concluídos" value={metricas.concluidos} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
-              <Kpi label="Média geral" value={`${metricas.mediaGeral}%`} icon={<ListChecks className="h-3.5 w-3.5" />} accent />
-            </div>
-
-            {/* Botão Estatísticas */}
-            {resultadosLista.length > 0 && (
-              <button
-                onClick={() => setIsStatsModalOpen(true)}
-                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
-              >
-                <TrendingUp className="h-4 w-4" />
-                Ver estatísticas completas ({resultadosLista.length} simulados)
-              </button>
-            )}
-
-            {/* Lista de simulados */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              {simulados.map((s) => (
-                <SimuladoCard
-                  key={s.id}
-                  simulado={s}
-                  onStart={handleStartSimulado}
-                  onVerResultado={handleVerResultado}
-                  onExcluir={handleExcluirSimulado}
-                  excluindo={excluindo === s.id}
-                  resultado={resultadosUsuario[s.id] || null}
-                />
-              ))}
-
-              <article className="grid place-items-center rounded-2xl border border-dashed border-border/80 bg-surface/25 p-8 text-center">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Upload className="h-5 w-5" />
-                </div>
-                <h3 className="mt-3 font-display text-sm font-semibold">Adicionar novo simulado</h3>
-                <p className="mt-1 max-w-xs text-xs text-foreground/45">
-                  Envie um arquivo JSON com a estrutura do simulado.
-                </p>
+            <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
+              {resultadosLista.length > 0 && (
                 <button
-                  onClick={() => setIsImportModalOpen(true)}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+                  onClick={() => setIsStatsModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
                 >
-                  <FileText className="h-3.5 w-3.5" /> Importar JSON
+                  <TrendingUp className="h-4 w-4" /> Estatísticas
                 </button>
-              </article>
+              )}
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                <Upload className="h-4 w-4" /> Novo simulado
+              </button>
             </div>
+
+            {simulados.length > 0 ? (
+              <div className="rf-card p-2 sm:p-3">
+                <ul className="divide-y divide-border">
+                  {simulados.map((s) => {
+                    const resultado = resultadosUsuario[s.id] || null;
+                    const temResultado = !!resultado;
+                    const pct = temResultado ? resultado.porcentagem || 0 : 0;
+                    return (
+                      <li key={s.id}>
+                        <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:gap-4">
+                          <div
+                            className="grid h-11 w-11 shrink-0 place-items-center rounded-full"
+                            style={{ backgroundColor: 'color-mix(in oklab, var(--accent) 25%, transparent)', color: 'var(--accent)' }}
+                          >
+                            <FileStack className="h-5 w-5" />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <button onClick={() => handleStartSimulado(s.id)} className="block w-full text-left">
+                              <h3 className="font-display text-base font-bold tracking-tight truncate">
+                                {s.titulo}
+                              </h3>
+                              <p className="text-xs text-foreground/45 mt-0.5">
+                                {s.questoes_count || 0} questões
+                                {s.tempo_total ? ` · ${s.tempo_total}min` : ''}
+                                {s.area ? ` · ${s.area}` : ''}
+                                {s.ano ? ` · ${s.ano}` : ''}
+                              </p>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-4 sm:w-auto w-full">
+                            {temResultado && (
+                              <div className="flex-1 sm:w-48 sm:flex-initial">
+                                <div className="flex items-baseline justify-between gap-2 mb-1">
+                                  <span className="text-[10px] font-medium uppercase tracking-widest text-foreground/45">Acertos</span>
+                                  <span className="text-sm font-bold tabular-nums">{pct}%</span>
+                                </div>
+                                <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(pct, 100)}%` }} />
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-1.5">
+                              {temResultado ? (
+                                <>
+                                  <button
+                                    onClick={() => handleVerResultado(s.id)}
+                                    className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
+                                  >
+                                    Ver detalhes
+                                  </button>
+                                  <button
+                                    onClick={() => handleStartSimulado(s.id)}
+                                    className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                                    title="Refazer"
+                                  >
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleStartSimulado(s.id)}
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+                                >
+                                  <Play className="h-3.5 w-3.5" /> Iniciar
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleExcluirSimulado(s.id, s.titulo)}
+                                disabled={excluindo === s.id}
+                                className="grid h-8 w-8 place-items-center rounded-full text-foreground/30 hover:text-destructive transition-colors disabled:opacity-50"
+                                title="Excluir simulado"
+                              >
+                                {excluindo === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : (
+              <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
+                <div className="text-center">
+                  <p className="text-sm text-foreground/40">Nenhum simulado cadastrado ainda.</p>
+                  <button
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+                  >
+                    <Upload className="h-3.5 w-3.5" /> Importar simulado
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )
       ) : (
-        /* ============================================================ */
-        /* CONTEÚDO DA ABA LISTAS */
-        /* ============================================================ */
         <ListasTab />
       )}
 
-      {/* MODAL DE IMPORTAÇÃO (só de simulados) */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
@@ -599,7 +530,7 @@ export default function SimuladosPage() {
                 <p className="mt-2 text-sm font-medium text-foreground">Simulado importado com sucesso!</p>
                 <button
                   onClick={() => { setIsImportModalOpen(false); setImportSuccess(false); }}
-                  className="mt-4 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+                  className="mt-4 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
                 >
                   Fechar
                 </button>
@@ -622,18 +553,14 @@ export default function SimuladosPage() {
                   <input
                     type="file"
                     accept=".json"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
-                      setImportFile(file);
-                      setImportError(null);
-                    }}
+                    onChange={(e) => { const file = e.target.files?.[0] || null; setImportFile(file); setImportError(null); }}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
                   />
                   <p className="mt-1 text-xs text-foreground/40">O JSON deve seguir o schema definido em `simulados-types.ts`.</p>
                 </div>
 
                 {importError && (
-                  <div className="rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent">
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
                     {importError}
                   </div>
                 )}
@@ -641,7 +568,7 @@ export default function SimuladosPage() {
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={() => { setIsImportModalOpen(false); setImportError(null); }}
-                    className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
+                    className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
                     disabled={importing}
                   >
                     Cancelar
@@ -649,13 +576,9 @@ export default function SimuladosPage() {
                   <button
                     onClick={handleImport}
                     disabled={importing}
-                    className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                   >
-                    {importing ? (
-                      <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                    ) : (
-                      "Importar"
-                    )}
+                    {importing ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Importar"}
                   </button>
                 </div>
               </div>
@@ -664,13 +587,12 @@ export default function SimuladosPage() {
         </div>
       )}
 
-      {/* MODAL DE ESTATÍSTICAS COM HISTÓRICO */}
       {isStatsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-elevated">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="font-display text-xl font-semibold">📊 Estatísticas de Simulados</h2>
+                <h2 className="font-display text-xl font-bold">📊 Estatísticas de Simulados</h2>
                 <p className="text-sm text-foreground/50">Análise completa do seu desempenho</p>
               </div>
               <button
@@ -681,14 +603,11 @@ export default function SimuladosPage() {
               </button>
             </div>
 
-            {/* Abas */}
             <div className="flex gap-1 mb-6 border-b border-border">
               <button
                 onClick={() => setActiveTab('estatisticas')}
                 className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                  activeTab === 'estatisticas'
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-foreground/50 hover:text-foreground'
+                  activeTab === 'estatisticas' ? 'border-primary text-primary' : 'border-transparent text-foreground/50 hover:text-foreground'
                 }`}
               >
                 📊 Estatísticas
@@ -696,19 +615,15 @@ export default function SimuladosPage() {
               <button
                 onClick={() => setActiveTab('historico')}
                 className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                  activeTab === 'historico'
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-foreground/50 hover:text-foreground'
+                  activeTab === 'historico' ? 'border-primary text-primary' : 'border-transparent text-foreground/50 hover:text-foreground'
                 }`}
               >
                 📋 Histórico ({resultadosLista.length})
               </button>
             </div>
 
-            {/* Conteúdo da aba Estatísticas */}
             {activeTab === 'estatisticas' && stats && (
               <>
-                {/* KPIs */}
                 <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <KpiStats label="Simulados" value={stats.totalSimulados} icon={<Target className="h-3.5 w-3.5" />} />
                   <KpiStats label="Média geral" value={`${stats.mediaGeral}%`} icon={<TrendingUp className="h-3.5 w-3.5" />} accent />
@@ -716,31 +631,18 @@ export default function SimuladosPage() {
                   <KpiStats label="Tempo médio" value={`${stats.tempoMedio}min`} icon={<Clock className="h-3.5 w-3.5" />} />
                 </div>
 
-                {/* Comparação */}
                 {resultadosLista.length >= 2 && (
                   <section className="mb-4 rf-card p-4">
                     <div className="flex items-center justify-between">
-                      <button
-                        onClick={() => setComparisonExpanded(!comparisonExpanded)}
-                        className="flex items-center gap-2"
-                      >
+                      <button onClick={() => setComparisonExpanded(!comparisonExpanded)} className="flex items-center gap-2">
                         <BarChart3 className="h-5 w-5 text-primary" />
                         <h3 className="font-display text-sm font-semibold">Comparar simulados</h3>
                         <span className="text-xs text-foreground/40">
-                          {selectedForComparison.length > 0 
-                            ? `(${selectedForComparison.length} selecionados)` 
-                            : '(selecione 2-5 simulados)'}
+                          {selectedForComparison.length > 0 ? `(${selectedForComparison.length} selecionados)` : '(selecione 2-5 simulados)'}
                         </span>
                       </button>
-                      <button
-                        onClick={() => setComparisonExpanded(!comparisonExpanded)}
-                        className="text-foreground/40 hover:text-foreground transition-colors"
-                      >
-                        {comparisonExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
+                      <button onClick={() => setComparisonExpanded(!comparisonExpanded)} className="text-foreground/40 hover:text-foreground transition-colors">
+                        {comparisonExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
                     </div>
 
@@ -768,14 +670,6 @@ export default function SimuladosPage() {
                               );
                             })}
                         </div>
-
-                        {selectedForComparison.length > 0 && (
-                          <div className="text-xs text-foreground/40 mb-3">
-                            {selectedForComparison.length < 2 
-                              ? 'Selecione pelo menos 2 simulados para comparar' 
-                              : `${selectedForComparison.length} simulados selecionados para comparação`}
-                          </div>
-                        )}
 
                         {selectedResults.length >= 2 && (
                           <>
@@ -844,31 +738,6 @@ export default function SimuladosPage() {
                               </table>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-1 gap-1">
-                              <div className="flex items-center gap-2 text-xs text-foreground/40">
-                                <span className="w-16">0%</span>
-                                <div className="flex-1 flex h-6 overflow-hidden rounded-md">
-                                  {selectedResults.map((r, index) => {
-                                    const colors = ['bg-primary', 'bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500'];
-                                    return (
-                                      <div
-                                        key={r.simulado_id}
-                                        className={`h-full ${colors[index % colors.length]} transition-all`}
-                                        style={{ width: `${r.porcentagem}%` }}
-                                        title={`${getSimuladoTitulo(r.simulado_id)}: ${r.porcentagem}%`}
-                                      />
-                                    );
-                                  })}
-                                </div>
-                                <span className="w-12 text-right">100%</span>
-                              </div>
-                              <div className="flex justify-between text-[10px] text-foreground/30">
-                                {selectedResults.map((r, index) => (
-                                  <span key={r.simulado_id}>{getSimuladoTitulo(r.simulado_id).slice(0, 12)}</span>
-                                ))}
-                              </div>
-                            </div>
-
                             {comparisonData && (
                               <div className="mt-4 space-y-1.5">
                                 {comparisonData.map((item, index) => (
@@ -933,28 +802,16 @@ export default function SimuladosPage() {
                           <div key={index} className="flex items-center gap-3">
                             <span className="text-xs font-medium text-foreground/50 w-12">{item.nome}</span>
                             <div className="flex-1 h-6 relative">
-                              <div
-                                className="h-full rounded-md bg-primary/20 relative overflow-hidden"
-                                style={{ width: `${item.porcentagem}%` }}
-                              >
-                                <div
-                                  className={`h-full rounded-md ${item.porcentagem >= 70 ? 'bg-primary' : item.porcentagem >= 50 ? 'bg-warning' : 'bg-accent'}`}
-                                  style={{ width: `${item.porcentagem}%` }}
-                                />
+                              <div className="h-full rounded-full bg-primary/20 relative overflow-hidden" style={{ width: `${item.porcentagem}%` }}>
+                                <div className={`h-full rounded-md ${item.porcentagem >= 70 ? 'bg-primary' : item.porcentagem >= 50 ? 'bg-warning' : 'bg-accent'}`} style={{ width: `${item.porcentagem}%` }} />
                               </div>
-                              <span className="absolute right-0 top-0 text-xs font-medium tabular-nums">
-                                {item.porcentagem}%
-                              </span>
+                              <span className="absolute right-0 top-0 text-xs font-medium tabular-nums">{item.porcentagem}%</span>
                             </div>
-                            <span className="text-[10px] text-foreground/40 whitespace-nowrap">
-                              {item.data}
-                            </span>
+                            <span className="text-[10px] text-foreground/40 whitespace-nowrap">{item.data}</span>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-sm text-foreground/40 text-center">Sem dados suficientes</p>
-                    )}
+                    ) : (<p className="text-sm text-foreground/40 text-center">Sem dados suficientes</p>)}
                   </section>
 
                   <section className="rf-card p-4">
@@ -968,24 +825,13 @@ export default function SimuladosPage() {
                               <span className="text-foreground/50">{area.porcentagem}%</span>
                             </div>
                             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/5">
-                              <div
-                                className={`h-full rounded-full ${area.porcentagem >= 70 ? 'bg-primary' : area.porcentagem >= 50 ? 'bg-warning' : 'bg-accent'}`}
-                                style={{ width: `${area.porcentagem}%` }}
-                              />
+                              <div className={`h-full rounded-full ${area.porcentagem >= 70 ? 'bg-primary' : area.porcentagem >= 50 ? 'bg-warning' : 'bg-accent'}`} style={{ width: `${area.porcentagem}%` }} />
                             </div>
                           </div>
                         ))}
-                        {areas.length > 5 && (
-                          <p className="text-center text-[10px] text-foreground/40 pt-2">
-                            +{areas.length - 5} outras áreas
-                          </p>
-                        )}
+                        {areas.length > 5 && (<p className="text-center text-[10px] text-foreground/40 pt-2">+{areas.length - 5} outras áreas</p>)}
                       </div>
-                    ) : (
-                      <p className="text-sm text-foreground/40 text-center">
-                        Finalize simulados para ver este gráfico
-                      </p>
-                    )}
+                    ) : (<p className="text-sm text-foreground/40 text-center">Finalize simulados para ver este gráfico</p>)}
                   </section>
                 </div>
 
@@ -1010,7 +856,6 @@ export default function SimuladosPage() {
               </>
             )}
 
-            {/* Conteúdo da aba Histórico */}
             {activeTab === 'historico' && (
               <div>
                 <div className="mb-4">
@@ -1027,9 +872,7 @@ export default function SimuladosPage() {
                 </div>
 
                 {historicoLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                  </div>
+                  <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
                 ) : historicoData.total === 0 ? (
                   <div className="text-center py-8">
                     <History className="mx-auto h-12 w-12 text-foreground/20" />
@@ -1047,10 +890,7 @@ export default function SimuladosPage() {
                           <HistoricoCardMini
                             key={r.id}
                             resultado={r}
-                            onVerResultado={() => {
-                              setIsStatsModalOpen(false);
-                              navigate(`/simulados/${r.simulado_id}?view=resultado`);
-                            }}
+                            onVerResultado={() => { setIsStatsModalOpen(false); navigate(`/simulados/${r.simulado_id}?view=resultado`); }}
                           />
                         ))}
                     </div>
@@ -1089,151 +929,28 @@ export default function SimuladosPage() {
   );
 }
 
-// ============================================================
-// SUBCOMPONENTES
-// ============================================================
-
-function SimuladoCard({ simulado, onStart, onVerResultado, onExcluir, excluindo, resultado }: {
-  simulado: Simulado;
-  onStart: (id: string) => void;
-  onVerResultado: (id: string) => void;
-  onExcluir: (id: string, titulo: string) => void;
-  excluindo: boolean;
-  resultado: any | null;
-}) {
-  const temResultado = !!resultado;
-  const pct = temResultado ? resultado.porcentagem || 0 : 0;
-
-  return (
-    <article className="rf-card rf-card-hover flex flex-col p-5 relative">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{simulado.area}</span>
-            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-foreground/50">{simulado.nivel}</span>
-            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-foreground/50">
-              {simulado.banca} · {simulado.ano}
-            </span>
-          </div>
-          <h3 className="mt-2 font-display text-base font-semibold tracking-tight">{simulado.titulo}</h3>
-          <p className="mt-1 text-xs text-foreground/50">{simulado.descricao}</p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span
-            className={[
-              "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-              temResultado ? "bg-primary/15 text-primary" : "bg-white/5 text-foreground/45",
-            ].join(" ")}
-          >
-            {temResultado ? "Concluído" : "Não iniciado"}
-          </span>
-          <button
-            onClick={() => onExcluir(simulado.id, simulado.titulo)}
-            disabled={excluindo}
-            className="inline-flex items-center gap-1 text-[10px] text-foreground/30 hover:text-accent transition-colors disabled:opacity-50"
-            title="Excluir simulado"
-          >
-            {excluindo ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Trash2 className="h-3 w-3" />
-            )}
-            <span>Excluir</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center gap-4 text-xs text-foreground/55">
-        <span className="inline-flex items-center gap-1.5">
-          <ListChecks className="h-3.5 w-3.5" /> {simulado.questoes_count || 0} questões
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Clock className="h-3.5 w-3.5" /> {simulado.tempo_total}min
-        </span>
-        {temResultado && (
-          <span className="inline-flex items-center gap-1.5 text-primary">
-            <CheckCircle2 className="h-3.5 w-3.5" /> {resultado.acertos}/{resultado.total_questoes}
-          </span>
-        )}
-      </div>
-
-      {temResultado && (
-        <div className="mt-4">
-          <div className="mb-1.5 flex items-center justify-between text-[11px] text-foreground/45">
-            <span>Aproveitamento</span>
-            <span className="tabular-nums">{pct}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${Math.min(pct, 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="mt-5 flex items-center gap-2">
-        <button
-          onClick={() => onStart(simulado.id)}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          {temResultado ? <RotateCcw className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          {temResultado ? "Refazer" : "Iniciar"}
-        </button>
-        {temResultado && (
-          <button
-            onClick={() => onVerResultado(simulado.id)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
-          >
-            <Eye className="h-3.5 w-3.5" /> Ver resultado
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function Kpi({ label, value, icon, accent }: { label: string; value: string | number; icon: React.ReactNode; accent?: boolean }) {
-  return (
-    <div className="rf-card p-4">
-      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-foreground/40">
-        {icon} {label}
-      </div>
-      <div className={["mt-1.5 font-display text-2xl font-semibold tabular-nums", accent ? "text-accent" : "text-foreground"].join(" ")}>{value}</div>
-    </div>
-  );
-}
-
 function KpiStats({ label, value, icon, accent }: { label: string; value: string | number; icon: React.ReactNode; accent?: boolean }) {
   return (
     <div className="rf-card p-3 text-center">
       <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-foreground/40">
         {icon} {label}
       </div>
-      <div className={["mt-1 font-display text-xl font-semibold tabular-nums", accent ? "text-accent" : "text-foreground"].join(" ")}>{value}</div>
+      <div className={["mt-1 font-display text-xl font-bold tabular-nums", accent ? "text-accent" : "text-foreground"].join(" ")}>{value}</div>
     </div>
   );
 }
 
-// ============================================================
-// MINI CARD DO HISTÓRICO
-// ============================================================
 function HistoricoCardMini({ resultado, onVerResultado }: { resultado: any; onVerResultado: () => void }) {
   const data = new Date(resultado.created_at);
   const pct = resultado.porcentagem || 0;
   const tempoMin = Math.floor(resultado.tempo_segundos / 60);
 
   return (
-    <button
-      onClick={onVerResultado}
-      className="w-full rf-card hover:bg-surface/50 transition-colors p-3 text-left"
-    >
+    <button onClick={onVerResultado} className="w-full rf-card hover:bg-surface/50 transition-colors p-3 text-left">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-sm truncate">
-              {resultado.simulado_titulo || 'Simulado'}
-            </span>
+            <span className="font-medium text-sm truncate">{resultado.simulado_titulo || 'Simulado'}</span>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
               pct >= 70 ? 'bg-primary/15 text-primary' :
               pct >= 50 ? 'bg-warning/15 text-warning' :
@@ -1248,12 +965,7 @@ function HistoricoCardMini({ resultado, onVerResultado }: { resultado: any; onVe
             <span>{resultado.acertos}/{resultado.total_questoes} acertos</span>
             <span>•</span>
             <span>{tempoMin}min</span>
-            {resultado.simulado_area && (
-              <>
-                <span>•</span>
-                <span className="text-primary/60">{resultado.simulado_area}</span>
-              </>
-            )}
+            {resultado.simulado_area && (<><span>•</span><span className="text-primary/60">{resultado.simulado_area}</span></>)}
           </div>
         </div>
         <Eye className="h-4 w-4 text-foreground/30 shrink-0" />

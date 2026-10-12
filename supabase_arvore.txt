@@ -1,0 +1,14 @@
+C:\Users\vande\revisa-flash\supabase\.temp
+C:\Users\vande\revisa-flash\supabase\config.toml
+C:\Users\vande\revisa-flash\supabase\functions
+C:\Users\vande\revisa-flash\supabase\.temp\linked-project.json
+C:\Users\vande\revisa-flash\supabase\functions\clerk-search-user
+C:\Users\vande\revisa-flash\supabase\functions\clerk-users-batch
+C:\Users\vande\revisa-flash\supabase\functions\clerk-webhook
+C:\Users\vande\revisa-flash\supabase\functions\clerk-search-user\.npmrc
+C:\Users\vande\revisa-flash\supabase\functions\clerk-search-user\deno.json
+C:\Users\vande\revisa-flash\supabase\functions\clerk-search-user\index.ts
+C:\Users\vande\revisa-flash\supabase\functions\clerk-users-batch\index.ts
+C:\Users\vande\revisa-flash\supabase\functions\clerk-webhook\.npmrc
+C:\Users\vande\revisa-flash\supabase\functions\clerk-webhook\deno.json
+C:\Users\vande\revisa-flash\supabase\functions\clerk-webhook\index.ts

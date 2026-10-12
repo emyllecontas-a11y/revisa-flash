@@ -1,17 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const pdfWorkerSrc = resolve(
+  __dirname,
+  'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'
+).replace(/\\/g, '/');
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    // VitePWA removido para teste
+    viteStaticCopy({
+      targets: [
+        {
+          src: pdfWorkerSrc,
+          dest: '',
+        },
+      ],
+    }),
   ],
   resolve: {
     alias: {
@@ -22,6 +35,7 @@ export default defineConfig({
   builder: 'rollup',
   optimizeDeps: {
     exclude: ['broadcast-channel'],
+    include: ['pdfjs-dist'],
   },
   ssr: false,
   build: {

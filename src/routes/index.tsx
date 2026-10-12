@@ -2,19 +2,16 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
-  Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X, RefreshCw, Loader2
+  Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X, RefreshCw, Loader2, Calendar, Layers, ChevronRight
 } from "lucide-react";
 import { useStudy } from "@/contexts/StudyContext";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useAppUser } from "@/contexts/UserContext";
-import { getDb, syncWithSupabase } from "@/lib/db";
+import { getDb, syncWithSupabase, readLastSync } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { OnboardingTour } from "@/components/OnboardingTour";
 
-// ============================================================
-// TIPOS
-// ============================================================
 interface ChecklistItem {
   id: string;
   titulo: string;
@@ -30,9 +27,6 @@ interface ProximaRevisao {
   date: Date;
 }
 
-// ============================================================
-// COMPONENTE PRINCIPAL
-// ============================================================
 export default function DashboardPage() {
   const { user, isLoaded } = useAppUser();
   const [userId, setUserId] = useState<string | null>(null);
@@ -46,13 +40,11 @@ export default function DashboardPage() {
   const [diasAteProva, setDiasAteProva] = useState(0);
   const [loading, setLoading] = useState(true);
   const [proximasRevisoes, setProximasRevisoes] = useState<ProximaRevisao[]>([]);
-  // 🔥 NOVO ESTADO PARA REVISÕES ATRASADAS
   const [revisoesAtrasadas, setRevisoesAtrasadas] = useState<ProximaRevisao[]>([]);
 
   const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
   const [provaData, setProvaData] = useState<Date | null>(null);
 
-  // 🔥 NOVOS ESTADOS PARA SINCRONIZAÇÃO
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
 
@@ -63,9 +55,6 @@ export default function DashboardPage() {
   const flashcardContext = useFlashcardContext();
   const { dueCards, decks } = flashcardContext;
 
-  // ============================================================
-  // SAUDAÇÃO DINÂMICA
-  // ============================================================
   const getSaudacao = () => {
     const hora = new Date().getHours();
     if (hora >= 5 && hora < 12) return "Bom dia";
@@ -73,9 +62,13 @@ export default function DashboardPage() {
     return "Boa noite";
   };
 
-  // ============================================================
-  // CARREGAR DADOS
-  // ============================================================
+  const getDataPorExtenso = () => {
+    const hoje = new Date();
+    const diaSemana = hoje.toLocaleDateString('pt-BR', { weekday: 'long' });
+    const diaMes = hoje.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' });
+    return `${diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1)}, ${diaMes}`;
+  };
+
   useEffect(() => {
     const loadAllData = async () => {
       try {
@@ -187,9 +180,6 @@ export default function DashboardPage() {
 
         setTotalErros(getTotalErrors());
 
-        // ============================================================
-        // 🔥 CARREGAR REVISÕES – COM SEPARAÇÃO DE ATRASADAS E FUTURAS
-        // ============================================================
         try {
           const db = await getDb();
           const hojeStr = new Date().toISOString().split('T')[0];
@@ -232,26 +222,24 @@ export default function DashboardPage() {
             } else if (dateStr > hojeStr) {
               futuras.push(item);
             }
-            // Revisões com dateStr === hojeStr não entram em nenhuma lista (já são hoje)
           });
 
-          // Ordena atrasadas: da mais antiga para a mais recente
           atrasadas.sort((a, b) => a.date.getTime() - b.date.getTime());
-          // Ordena futuras: da mais próxima para a mais distante
           futuras.sort((a, b) => a.date.getTime() - b.date.getTime());
 
           setRevisoesAtrasadas(atrasadas);
-          setProximasRevisoes(futuras.slice(0, 5)); // limita a 5
+          setProximasRevisoes(futuras.slice(0, 5));
 
         } catch (error) {
           console.error('Erro ao carregar próximas revisões:', error);
         }
 
-        // 🔥 CARREGAR ÚLTIMA SINCRONIZAÇÃO
-        const syncTime = localStorage.getItem('lastSyncTimestamp');
-        if (syncTime) {
+        const syncTime = readLastSync(clerkUserId);
+        if (syncTime && syncTime !== '1970-01-01T00:00:00Z') {
           const date = new Date(syncTime);
           setLastSync(date.toLocaleTimeString());
+        } else {
+          setLastSync(null);
         }
 
       } catch (error) {
@@ -266,9 +254,6 @@ export default function DashboardPage() {
     }
   }, [studyRecords, getTotalErrors, user, isLoaded]);
 
-  // ============================================================
-  // 🔥 FUNÇÃO DE SINCORNIZAÇÃO MANUAL
-  // ============================================================
   const handleSync = useCallback(async () => {
     if (!userId) {
       alert('Usuário não autenticado');
@@ -280,10 +265,12 @@ export default function DashboardPage() {
     try {
       console.log('🔄 Sincronização manual iniciada...');
       await syncWithSupabase(userId);
-      const syncTime = localStorage.getItem('lastSyncTimestamp');
-      if (syncTime) {
+      const syncTime = readLastSync(userId);
+      if (syncTime && syncTime !== '1970-01-01T00:00:00Z') {
         const date = new Date(syncTime);
         setLastSync(date.toLocaleTimeString());
+      } else {
+        setLastSync(null);
       }
       alert('✅ Sincronização concluída com sucesso!');
     } catch (error) {
@@ -294,9 +281,6 @@ export default function DashboardPage() {
     }
   }, [userId, isSyncing]);
 
-  // ============================================================
-  // CHECKLIST – INICIA SEMPRE VAZIO
-  // ============================================================
   useEffect(() => {
     const saved = localStorage.getItem('dashboard_checklist');
     const initialized = localStorage.getItem('dashboard_checklist_initialized');
@@ -313,7 +297,6 @@ export default function DashboardPage() {
       }
     }
 
-    // 🔥 INICIA COM ARRAY VAZIO, SEM ITENS PADRÃO
     if (!initialized) {
       setChecklist([]);
       localStorage.setItem('dashboard_checklist', JSON.stringify([]));
@@ -324,12 +307,10 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Salva checklist sempre que mudar
   useEffect(() => {
     localStorage.setItem('dashboard_checklist', JSON.stringify(checklist));
   }, [checklist]);
 
-  // Listener para mudanças de storage
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'dashboard_checklist' && e.newValue) {
@@ -373,12 +354,14 @@ export default function DashboardPage() {
     });
   }, []);
 
-  // ============================================================
-  // RENDER
-  // ============================================================
+  const tarefasRestantes = checklist.filter(c => !c.feito).length;
+  const novos = dueCards.filter(c => c.reps === 0).length;
+  const revisar = dueCards.filter(c => c.reps > 0).length;
+  const atrasados = revisoesAtrasadas.length;
+
   if (loading || !isLoaded) {
     return (
-      <AppShell breadcrumb="Início" title="Carregando...">
+      <AppShell breadcrumb="Início">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
         </div>
@@ -387,272 +370,284 @@ export default function DashboardPage() {
   }
 
   return (
-    <AppShell breadcrumb="Início" title={`${getSaudacao()}, ${userName.split(" ")[0]}.`}>
+    <AppShell breadcrumb="Início">
       <OnboardingTour />
 
-      <p className="-mt-4 mb-8 max-w-2xl text-sm text-foreground/55">
-        Você tem <span className="font-medium text-primary">{dueCards.length} flashcards</span> para revisar hoje
-        e <span className="font-medium text-accent">{diasAteProva} dias</span> até a <span className="font-medium text-foreground">{provaNome}</span>.
-      </p>
-
-      {/* 🔥 ALERTA DE REVISÕES ATRASADAS */}
-      {revisoesAtrasadas.length > 0 && (
-        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-semibold text-red-400">
-              Você tem {revisoesAtrasadas.length} revisão{revisoesAtrasadas.length > 1 ? 'ões' : ''} atrasada{revisoesAtrasadas.length > 1 ? 's' : ''}!
-            </p>
-            <p className="text-sm text-red-300/80">
-              A mais antiga está atrasada há {Math.ceil((new Date().getTime() - revisoesAtrasadas[0].date.getTime()) / (1000 * 60 * 60 * 24))} dias.
-              Acesse o <Link to="/calendario" className="font-medium text-red-400 underline hover:text-red-300">calendário</Link> para concluí-las.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* 🔥 BOTÃO DE SINCORNIZAÇÃO */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4 text-sm text-foreground/55">
-          <span>Última sincronização: {lastSync || 'Nunca'}</span>
-          {isSyncing && (
-            <span className="inline-flex items-center gap-1 text-primary">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Sincronizando...
-            </span>
-          )}
-        </div>
-        <button
-          onClick={handleSync}
-          disabled={isSyncing}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+      {/* CABEÇALHO: TÍTULO + BOTÃO REGISTRAR ESTUDO (sem card) */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Início</h1>
+        <Link
+          to="/calendario"
+          className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity self-start sm:self-auto"
         >
-          {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Sincronizar
-        </button>
+          <Calendar className="h-4 w-4" /> Registrar estudo
+        </Link>
       </div>
 
-      <div className="grid grid-cols-12 gap-4">
-        <div id="dashboard-stats" className="col-span-12 grid grid-cols-12 gap-4">
-          <StatCard icon={<Flame className="h-4 w-4" />} label="Sequência" value={`${streak} dias`} tone="accent" />
-          <StatCard icon={<BookOpen className="h-4 w-4" />} label="Flashcards hoje" value={dueCards.length} hint={`${decks.length} decks`} />
-          <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Erros ativos" value={totalErros} hint="banco de erros" tone="accent" />
-          <StatCard icon={<Target className="h-4 w-4" />} label="Dias até a prova" value={diasAteProva} hint={provaNome} />
-        </div>
+      {/* CARD PRINCIPAL: DATA + SAUDAÇÃO + TAREFAS + PÍLULAS */}
+      <div className="card-lip mb-6 p-6 sm:p-7">
+        <p className="text-sm font-medium text-muted-foreground">{getDataPorExtenso()}</p>
+        <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl text-foreground">
+          {getSaudacao()}, {userName.split(" ")[0]}.
+        </h1>
+        {tarefasRestantes > 0 && (
+          <p className="mt-3 font-display text-xl font-semibold tracking-tight sm:text-2xl text-foreground">
+            {tarefasRestantes === 1 ? (
+              <>Falta <span className="highlight">1 tarefa</span> para fechar o seu dia.</>
+            ) : (
+              <>Faltam <span className="highlight">{tarefasRestantes} tarefas</span> para fechar o seu dia.</>
+            )}
+          </p>
+        )}
 
-        <section id="dashboard-checklist" className="col-span-12 rf-card p-5 lg:col-span-5">
+        <div className="mt-6 flex flex-wrap items-center gap-2.5">
+          <MiniStat icon={<Flame className="h-5 w-5" />} label="Sequência" value={`${streak} dias`} />
+          <MiniStat icon={<BookOpen className="h-5 w-5" />} label="Flashcards hoje" value={dueCards.length} />
+          <MiniStat icon={<Target className="h-5 w-5" />} label="Dias até a prova" value={diasAteProva} />
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+
+        <section className="card-lip p-5" style={{ '--lip': 'var(--primary)' } as React.CSSProperties}>
           <header className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="font-display text-base font-semibold">Checklist de hoje</h2>
-              <p className="text-xs text-foreground/45">{checklist.filter(c => c.feito).length}/{checklist.length} concluídos</p>
+              <h2 className="font-display text-base font-semibold text-foreground">Checklist de hoje</h2>
+              <p className="text-xs text-muted-foreground">{checklist.filter(c => c.feito).length}/{checklist.length} concluídos</p>
             </div>
             <button
               onClick={() => setIsAddingChecklist(true)}
-              className="grid h-7 w-7 place-items-center rounded-md border border-border text-foreground/60 hover:bg-white/5 transition-colors"
+              className="grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              aria-label="Adicionar"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-4 w-4" />
             </button>
           </header>
-          <ul className="space-y-2.5">
-            {checklist.map((c) => (
-              <li key={c.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/3">
-                <button
-                  onClick={() => toggleChecklist(c.id)}
-                  className={[
-                    "grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors",
-                    c.feito ? "border-primary bg-primary" : "border-foreground/25 group-hover:border-primary/60",
-                  ].join(" ")}
-                >
-                  {c.feito && <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3} />}
-                </button>
-                <span className={["text-sm flex-1", c.feito ? "text-foreground/40 line-through decoration-foreground/20" : "text-foreground/90"].join(" ")}>
-                  {c.titulo}
-                </span>
-                <button
-                  onClick={() => removeChecklistItem(c.id)}
-                  className="text-foreground/20 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/5">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${checklist.length > 0 ? (checklist.filter(c => c.feito).length / checklist.length) * 100 : 0}%` }} />
+
+          {checklist.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nenhuma tarefa por aqui. Clique em + para adicionar.
+            </p>
+          ) : (
+            <ul className="space-y-2.5">
+              {checklist.map((c) => (
+                <li key={c.id} className="group flex items-center gap-3 rounded-xl bg-background/60 px-3 py-2.5">
+                  <button
+                    onClick={() => toggleChecklist(c.id)}
+                    className={[
+                      "grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors",
+                      c.feito ? "border-primary bg-primary" : "border-foreground/30 group-hover:border-primary/60",
+                    ].join(" ")}
+                  >
+                    {c.feito && <Check className="h-3 w-3 text-primary-foreground" strokeWidth={3} />}
+                  </button>
+                  <span className={["text-sm flex-1 text-foreground", c.feito ? "opacity-40 line-through" : ""].join(" ")}>
+                    {c.titulo}
+                  </span>
+                  <button
+                    onClick={() => removeChecklistItem(c.id)}
+                    className="text-foreground/30 hover:text-destructive transition-colors md:opacity-0 md:group-hover:opacity-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-4 h-1 overflow-hidden rounded-full bg-foreground/10">
+            <div className="h-full rounded-full bg-progress transition-all" style={{ width: `${checklist.length > 0 ? (checklist.filter(c => c.feito).length / checklist.length) * 100 : 0}%` }} />
+          </div>
+        </section>
+
+        <section className="card-lip p-5 flex flex-col" style={{ '--lip': 'var(--primary)' } as React.CSSProperties}>
+          <header className="mb-4">
+            <h2 className="font-display text-base font-semibold text-foreground">Flashcards hoje</h2>
+          </header>
+
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            <FlashStat label="Novos" value={novos} tone="success" />
+            <FlashStat label="Revisar" value={revisar} tone="default" />
+            <FlashStat label="Atrasados" value={atrasados} tone="destructive" />
           </div>
 
-          {isAddingChecklist && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
-                <h3 className="text-lg font-semibold mb-4">Adicionar item ao checklist</h3>
-                <input
-                  type="text"
-                  placeholder="Digite o item..."
-                  value={newChecklistText}
-                  onChange={(e) => setNewChecklistText(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mb-4"
-                  onKeyDown={(e) => { if (e.key === 'Enter') addChecklistItem(); }}
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => { setIsAddingChecklist(false); setNewChecklistText(""); }}
-                    className="flex-1 rounded-lg border border-border bg-background py-2 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={addChecklistItem}
-                    className="flex-1 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-colors"
-                  >
-                    Adicionar
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <Link
+            to="/flashcards"
+            className="mt-auto inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <Layers className="h-4 w-4" /> Começar revisão
+          </Link>
         </section>
 
-        <section id="dashboard-flashcards" className="col-span-12 rf-card p-5 lg:col-span-7">
+        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties}>
           <header className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="font-display text-base font-semibold">Flashcards hoje</h2>
-              <p className="text-xs text-foreground/45">Os próximos cards que você precisa revisar</p>
-            </div>
-            <Link to="/flashcards" className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-              Estudar agora <ArrowUpRight className="h-3 w-3" />
-            </Link>
-          </header>
-          {dueCards.slice(0, 10).length > 0 ? (
-            <ul className="divide-y divide-border">
-              {dueCards.slice(0, 10).map((card) => {
-                const deckName = decks.find(d => d.id === card.deck_id)?.name || 'Sem deck';
-                return (
-                  <li key={card.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/10 font-display text-xs font-semibold text-primary">
-                      {deckName.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{card.front}</div>
-                      <div className="truncate text-xs text-foreground/45">{deckName}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-foreground/50">
-                        {new Date(card.dueDate).toLocaleDateString('pt-BR')}
-                      </div>
-                      <div className="text-xs font-medium text-foreground">{card.reps} reps</div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="text-sm text-foreground/40 text-center py-6">Nenhum flashcard devido hoje. 🎉</p>
-          )}
-          {dueCards.length > 10 && (
-            <div className="mt-3 text-center text-xs text-foreground/40">
-              + {dueCards.length - 10} cards a mais
-            </div>
-          )}
-        </section>
-
-        <section id="dashboard-progress" className="col-span-12 rf-card p-5 lg:col-span-7">
-          <header className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="font-display text-base font-semibold">Progresso por disciplina</h2>
-              <p className="text-xs text-foreground/45">Top 4 com base no plano de estudos</p>
+              <h2 className="font-display text-base font-semibold text-foreground">Progresso por disciplina</h2>
+              <p className="text-xs text-muted-foreground">Top 4 com base no plano de estudos</p>
             </div>
             <Link to="/conteudo" className="text-xs font-medium text-primary hover:underline">Ver todas</Link>
           </header>
+
           {disciplinasProgresso.length > 0 ? (
-            <ul className="space-y-3">
+            <ul className="space-y-3.5">
               {disciplinasProgresso.map((d) => (
                 <li key={d.nome}>
                   <div className="mb-1.5 flex items-baseline justify-between gap-3">
-                    <span className="truncate text-sm">{d.nome}</span>
-                    <span className="text-xs font-medium tabular-nums text-foreground/70">{d.progresso}%</span>
+                    <span className="truncate text-sm text-foreground">{d.nome}</span>
+                    <span className="text-xs font-medium tabular-nums text-muted-foreground">{d.progresso}%</span>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                  <div className="h-2 overflow-hidden rounded-full bg-foreground/10">
                     <div
-                      className={["h-full rounded-full transition-all", d.progresso >= 80 ? "bg-primary" : d.progresso >= 40 ? "bg-primary/70" : "bg-accent/70"].join(" ")}
-                      style={{ width: `${d.progresso}%` }}
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${d.progresso}%`,
+                        background: d.progresso >= 80
+                          ? "var(--primary)"
+                          : d.progresso >= 40
+                          ? "linear-gradient(90deg, var(--primary), color-mix(in oklab, var(--primary) 70%, var(--accent)))"
+                          : "var(--accent)",
+                      }}
                     />
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-foreground/40 text-center py-4">Nenhuma disciplina cadastrada.</p>
+            <p className="text-sm text-muted-foreground text-center py-4">Nenhuma disciplina cadastrada.</p>
           )}
         </section>
 
-        <section id="dashboard-reviews" className="col-span-12 rf-card p-5 lg:col-span-5">
+        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties}>
           <header className="mb-4 flex items-center justify-between">
-            <h2 className="font-display text-base font-semibold">Próximas revisões</h2>
+            <h2 className="font-display text-base font-semibold text-foreground">Próximas revisões</h2>
             <Link to="/calendario" className="text-xs font-medium text-primary hover:underline">Ver agenda</Link>
           </header>
+
           {proximasRevisoes.length > 0 ? (
-            <ul className="space-y-3">
+            <ul className="space-y-2">
               {proximasRevisoes.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 p-3 rf-card-hover">
-                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent/10 text-[10px] font-semibold text-accent">
-                    {p.area.slice(0, 2).toUpperCase()}
-                  </div>
+                <li key={p.id} className="flex items-center justify-between gap-3 rounded-xl bg-background/60 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{p.area}</div>
-                    <div className="truncate text-[11px] text-foreground/45">{p.topico}</div>
+                    <div className="truncate text-sm font-medium text-foreground">{p.topico}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">{p.area}</div>
                   </div>
-                  <div className="text-right text-xs">
-                    <div className="font-medium text-foreground/80">{p.quando}</div>
-                    <div className="text-foreground/40">{p.cards} card</div>
-                  </div>
+                  <span className={[
+                    "shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold",
+                    p.quando === "Hoje"
+                      ? "bg-primary text-primary-foreground"
+                      : p.quando === "Amanhã"
+                      ? "bg-[#F2C6A0] text-[#3A1F12]"
+                      : "bg-foreground/10 text-foreground/70",
+                  ].join(" ")}>
+                    {p.quando}
+                  </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-foreground/40 text-center py-4">Nenhuma revisão futura agendada.</p>
+            <p className="text-sm text-muted-foreground text-center py-4">Nenhuma revisão futura agendada.</p>
           )}
         </section>
-
-        {/* 🔥 SEÇÃO DE REVISÕES ATRASADAS (OPCIONAL) */}
-        {revisoesAtrasadas.length > 0 && (
-          <section className="col-span-12 rf-card p-5 border-red-500/20 bg-red-500/5">
-            <h3 className="font-display text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              Revisões atrasadas ({revisoesAtrasadas.length})
-            </h3>
-            <ul className="space-y-2">
-              {revisoesAtrasadas.slice(0, 5).map((r) => (
-                <li key={r.id} className="flex items-center justify-between text-sm border-b border-red-500/10 pb-2 last:border-0 last:pb-0">
-                  <span className="text-foreground/80">{r.area} – {r.topico}</span>
-                  <span className="text-red-400/80 text-xs font-medium">{r.quando}</span>
-                </li>
-              ))}
-              {revisoesAtrasadas.length > 5 && (
-                <li className="text-xs text-red-400/60 text-center pt-1">
-                  + {revisoesAtrasadas.length - 5} outras revisões atrasadas
-                </li>
-              )}
-            </ul>
-          </section>
-        )}
       </div>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="inline-flex items-center gap-1.5">
+            <Clock className="h-3 w-3" />
+            Última sincronização: {lastSync || 'Nunca'}
+          </span>
+
+          {revisoesAtrasadas.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-foreground/70">
+              <AlertTriangle className="h-3 w-3 text-warning" />
+              {revisoesAtrasadas.length} revisão{revisoesAtrasadas.length > 1 ? 'ões' : ''} atrasada{revisoesAtrasadas.length > 1 ? 's' : ''}
+              <span className="text-foreground/30">·</span>
+              <Link to="/calendario" className="text-primary hover:underline">
+                ver no calendário
+              </Link>
+            </span>
+          )}
+        </div>
+
+        <button
+          onClick={handleSync}
+          disabled={isSyncing}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors disabled:opacity-50"
+        >
+          {isSyncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Sincronizar agora
+        </button>
+      </div>
+
+      {isAddingChecklist && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
+            <h3 className="text-lg font-semibold mb-4 text-foreground">Adicionar item ao checklist</h3>
+            <input
+              type="text"
+              placeholder="Digite o item..."
+              value={newChecklistText}
+              onChange={(e) => setNewChecklistText(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground mb-4"
+              onKeyDown={(e) => { if (e.key === 'Enter') addChecklistItem(); }}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setIsAddingChecklist(false); setNewChecklistText(""); }}
+                className="flex-1 rounded-full border border-border bg-background py-2 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={addChecklistItem}
+                className="flex-1 rounded-full bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-colors"
+              >
+                Adicionar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }
 
-// ============================================================
-// COMPONENTE STATCARD
-// ============================================================
-function StatCard({ icon, label, value, hint, tone = "primary" }: { icon: React.ReactNode; label: string; value: React.ReactNode; hint?: string; tone?: "primary" | "accent" }) {
+function MiniStat({ icon, label, value }: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
-    <div className="col-span-6 rf-card p-4 sm:col-span-3 rf-card-hover">
-      <div className={["mb-3 inline-flex h-7 w-7 items-center justify-center rounded-md", tone === "accent" ? "bg-accent/10 text-accent" : "bg-primary/10 text-primary"].join(" ")}>
+    <div className="inline-flex items-center gap-3 rounded-full border border-border bg-card px-4 py-2.5">
+      <div className="shrink-0 text-primary">
         {icon}
       </div>
-      <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{label}</div>
-      <div className="mt-1 font-display text-2xl font-semibold tabular-nums">{value}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-foreground/40">{hint}</div>}
+      <div className="min-w-0 leading-tight">
+        <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
+        <div className="font-display text-base font-bold tabular-nums text-foreground">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function FlashStat({ label, value, tone = "default" }: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "default" | "success" | "destructive";
+}) {
+  const color = tone === "success"
+    ? "text-success"
+    : tone === "destructive"
+    ? "text-destructive"
+    : "text-foreground";
+
+  return (
+    <div className="rounded-2xl bg-background px-3 py-3 text-center">
+      <div className={`font-display text-2xl font-bold tabular-nums ${color}`}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[10px] font-medium text-muted-foreground">{label}</div>
     </div>
   );
 }

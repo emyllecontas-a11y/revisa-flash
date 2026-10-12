@@ -19,7 +19,7 @@ export function AccessExpired() {
         <div className="flex flex-col gap-3">
           <Link
             to="/landing#planos"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
           >
             Renovar acesso
             <ArrowRight className="h-4 w-4" />

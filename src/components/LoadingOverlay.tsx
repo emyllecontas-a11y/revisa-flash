@@ -15,7 +15,7 @@ export function LoadingOverlay() {
             className="text-accent drop-shadow-[0_0_30px_rgba(251,113,133,0.8)]"
             size={64}
             strokeWidth={2.5}
-            fill="#FB7185"
+            fill="#F43789"
             fillOpacity={0.2}
           />
         </div>

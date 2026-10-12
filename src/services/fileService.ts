@@ -13,13 +13,17 @@ export interface FileRecord {
   nome: string;
   tipo: string;
   url: string;
+  storage_path?: string;
   descricao?: string;
   created_at: string;
 }
 
 /**
- * Faz upload de um arquivo para o Supabase Storage e salva os metadados na tabela files
- * Agora usando cliente autenticado com token do Clerk
+ * Faz upload de um arquivo para o Supabase Storage e salva os metadados
+ * na tabela `files`.
+ *
+ * Guardamos também o `storage_path` (o caminho no bucket), para que a
+ * remoção posterior não dependa de reconstruir o caminho a partir da URL.
  */
 export async function uploadFile(
   file: File,
@@ -29,16 +33,13 @@ export async function uploadFile(
   descricao?: string
 ): Promise<FileRecord | null> {
   try {
-    // 1. Obter cliente autenticado
     const supabase = await getSupabaseWithToken();
 
-    // 2. Gerar nome único para o arquivo no storage
     const fileExt = file.name.split('.').pop();
     const fileName = `${uid()}.${fileExt}`;
     const filePath = `${userId}/${topicoId}/${fileName}`;
 
-    // 3. Upload para o Supabase Storage
-    const { error: uploadError, data } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -50,14 +51,12 @@ export async function uploadFile(
       throw uploadError;
     }
 
-    // 4. Obter URL pública do arquivo
     const { data: publicUrlData } = supabase.storage
       .from(BUCKET_NAME)
       .getPublicUrl(filePath);
 
     const publicUrl = publicUrlData.publicUrl;
 
-    // 5. Salvar metadados na tabela files
     const now = new Date().toISOString();
     const fileRecord: FileRecord = {
       id: uid(),
@@ -67,6 +66,7 @@ export async function uploadFile(
       nome: file.name,
       tipo: file.type || 'application/octet-stream',
       url: publicUrl,
+      storage_path: filePath,
       descricao: descricao || '',
       created_at: now,
     };
@@ -77,7 +77,7 @@ export async function uploadFile(
 
     if (dbError) {
       console.error('❌ Erro ao salvar metadados no Supabase:', dbError);
-      // Tentar remover o arquivo do storage em caso de falha no banco
+      // Rollback: remove o arquivo do storage se o insert falhou
       await supabase.storage.from(BUCKET_NAME).remove([filePath]);
       throw dbError;
     }
@@ -92,7 +92,7 @@ export async function uploadFile(
 }
 
 /**
- * Lista os arquivos de um tópico
+ * Lista os arquivos de um tópico.
  */
 export async function listFilesByTopic(topicId: string, userId: string): Promise<FileRecord[]> {
   try {
@@ -117,13 +117,37 @@ export async function listFilesByTopic(topicId: string, userId: string): Promise
 }
 
 /**
- * Remove um arquivo (storage + banco)
+ * Busca um arquivo específico pelo ID.
+ */
+export async function getFileById(fileId: string, userId: string): Promise<FileRecord | null> {
+  try {
+    const supabase = await getSupabaseWithToken();
+    const { data, error } = await supabase
+      .from('files')
+      .select('*')
+      .eq('id', fileId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ Erro ao buscar arquivo:', error);
+      return null;
+    }
+
+    return data as FileRecord | null;
+  } catch (error) {
+    console.error('❌ Erro ao buscar arquivo:', error);
+    return null;
+  }
+}
+
+/**
+ * Remove um arquivo (storage + banco).
  */
 export async function deleteFile(fileId: string, filePath: string): Promise<void> {
   try {
     const supabase = await getSupabaseWithToken();
 
-    // 1. Remover do storage
     const { error: storageError } = await supabase.storage
       .from(BUCKET_NAME)
       .remove([filePath]);
@@ -133,7 +157,6 @@ export async function deleteFile(fileId: string, filePath: string): Promise<void
       throw storageError;
     }
 
-    // 2. Remover da tabela files
     const { error: dbError } = await supabase
       .from('files')
       .delete()
@@ -149,4 +172,18 @@ export async function deleteFile(fileId: string, filePath: string): Promise<void
     console.error('❌ Erro ao remover arquivo:', error);
     throw error;
   }
+}
+
+/**
+ * Reconstrói o `storage_path` a partir de um FileRecord.
+ * Prioriza o campo `storage_path` (novo). Se não existir — porque o
+ * arquivo foi enviado antes desta correção —, tenta extrair da URL.
+ */
+export function resolveStoragePath(file: FileRecord): string {
+  if (file.storage_path) return file.storage_path;
+  try {
+    const match = file.url.match(/\/topic-files\/([^?]+)/);
+    if (match) return decodeURIComponent(match[1]);
+  } catch { /* ignore */ }
+  return '';
 }

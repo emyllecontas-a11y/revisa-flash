@@ -8,7 +8,7 @@ export const USER = {
 };
 
 export const PROVA = {
-  nome: "ENARE 2026",
+  nome: "",
   data: new Date(2026, 8, 13), // 13/09/2026
 };
 

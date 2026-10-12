@@ -13,16 +13,14 @@ import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
-import { syncWithSupabase } from "@/lib/db";
+import { syncWithSupabase, readLastSync, writeLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
 import { Toaster } from "@/components/ui/sonner";
-import { ConfirmProvider, useConfirm } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 
-// ============================================================
-// COMPONENTE DE LOADING (estilo raio)
-// ============================================================
+
 function LoadingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
@@ -40,9 +38,6 @@ function LoadingScreen() {
   );
 }
 
-// ============================================================
-// ROTAS (SEM ESTATISTICAS)
-// ============================================================
 const ROTAS = [
   { to: "/", label: "Início", icon: "home" },
   { to: "/conteudo", label: "Conteúdo", icon: "book" },
@@ -65,25 +60,19 @@ const ICONS = {
 
 type RouteIcon = keyof typeof ICONS;
 
-// ============================================================
-// COMPONENTE PRINCIPAL (wrapper com providers + Toaster)
-// ============================================================
 export function AppShell(props: {
   children: ReactNode;
   title?: string;
   breadcrumb?: string;
 }) {
   return (
-    <ConfirmProvider>
+    <>
       <AppShellInner {...props} />
-      <Toaster position="top-right" richColors closeButton />
-    </ConfirmProvider>
+      <Toaster position="top-right" closeButton theme="dark" />
+    </>
   );
 }
 
-// ============================================================
-// COMPONENTE INTERNO
-// ============================================================
 function AppShellInner({
   children,
   title,
@@ -100,25 +89,19 @@ function AppShellInner({
   const toast = useToast();
   const confirmDialog = useConfirm();
 
-  // Contextos
   const { user, isLoaded } = useAppUser();
   const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
   const { refresh: refreshErrors } = useErrors();
   const { records: studyRecords, refresh: refreshStudy } = useStudy();
 
-  // Estados
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
-  // Ref para evitar múltiplas sincronizações simultâneas
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ============================================================
-  // CARREGA PERFIL DO SUPABASE
-  // ============================================================
   useEffect(() => {
     const loadProfile = async () => {
       if (!user?.id) return;
@@ -142,9 +125,6 @@ function AppShellInner({
     }
   }, [user, isLoaded]);
 
-  // ============================================================
-  // STREAK
-  // ============================================================
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
       setStreak(0);
@@ -175,26 +155,28 @@ function AppShellInner({
     setStreak(streakCount);
   }, [studyRecords]);
 
-  // ============================================================
-  // FUNÇÃO DE SINCRONIZAÇÃO
-  // ============================================================
+  useEffect(() => {
+    if (!user?.id) return;
+    const syncTime = readLastSync(user.id);
+    if (syncTime && syncTime !== '1970-01-01T00:00:00Z') {
+      const date = new Date(syncTime);
+      setLastSyncTime(date.toLocaleTimeString());
+    } else {
+      setLastSyncTime(null);
+    }
+  }, [user?.id]);
+
   const performSync = useCallback(async (showFeedback: boolean = false) => {
-    console.log('🔁 [performSync] Chamado!');
-    const userId = localStorage.getItem('revisaflash_user_id');
+    const userId = user?.id;
     if (!userId) {
       console.warn('⚠️ [AppShell] Nenhum userId encontrado para sincronizar.');
       return;
     }
 
-    if (isSyncing) {
-      console.log('⏳ [AppShell] Sincronização já em andamento.');
-      return;
-    }
+    if (isSyncing) return;
 
     setIsSyncing(true);
     try {
-      console.log('🔄 [AppShell] Iniciando sincronização...');
-      console.log('📦 [AppShell] Processando fila de operações...');
       await processPendingOperations();
       await syncWithSupabase(userId);
 
@@ -204,9 +186,8 @@ function AppShellInner({
 
       const now = new Date();
       setLastSyncTime(now.toLocaleTimeString());
-      localStorage.setItem('lastSyncTimestamp', now.toISOString());
+      writeLastSync(userId, now.toISOString());
 
-      console.log('✅ [AppShell] Sincronização concluída com sucesso!');
       if (showFeedback) {
         toast.success('Sincronização concluída');
       }
@@ -220,62 +201,24 @@ function AppShellInner({
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy, toast]);
+  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy, toast, user?.id]);
 
-  // ============================================================
-  // SINCRONIZAÇÃO AUTOMÁTICA (com debounce)
-  // ============================================================
-  useEffect(() => {
-    if (!isLoaded || flashcardsLoading) return;
+// Sync inicial ao montar o AppShell (ex.: após login ou reload).
+// Os outros gatilhos (online, visibility, tempo real, intervalo periódico)
+// ficam centralizados no client.tsx, para não competirem.
+useEffect(() => {
+  if (!isLoaded || flashcardsLoading) return;
 
-    const scheduleSync = () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
-      syncTimeoutRef.current = setTimeout(() => {
-        performSync();
-        syncTimeoutRef.current = null;
-      }, 1000);
-    };
+  const initialSync = setTimeout(() => {
+    performSync();
+  }, 2000);
 
-    const initialSync = setTimeout(() => {
-      performSync();
-    }, 2000);
+  return () => {
+    clearTimeout(initialSync);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isLoaded, flashcardsLoading]);
 
-    const syncInterval = setInterval(() => {
-      performSync();
-    }, 60000);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('🔄 [AppShell] Aba focada, agendando sincronização...');
-        scheduleSync();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    const handleOnline = () => {
-      console.log('📶 [AppShell] Conexão restaurada, agendando sincronização...');
-      scheduleSync();
-    };
-    window.addEventListener('online', handleOnline);
-
-    return () => {
-      clearTimeout(initialSync);
-      clearInterval(syncInterval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-        syncTimeoutRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, flashcardsLoading]);
-
-  // ============================================================
-  // HANDLE LOGOUT
-  // ============================================================
   const handleLogout = async () => {
     const ok = await confirmDialog({
       title: "Sair da conta?",
@@ -297,28 +240,27 @@ function AppShellInner({
     }
   };
 
-  // ============================================================
-  // RENDER
-  // ============================================================
   if (!isLoaded || flashcardsLoading) {
     return <LoadingScreen />;
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--sidebar)' }}>
       <OnboardingTour />
 
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-sidebar-border bg-sidebar lg:flex">
-        <div className="flex items-center gap-2 px-6 py-5">
-          <LogoIcon className="h-10 w-10" size={40} />
-          <div>
-            <div className="font-display text-base font-semibold tracking-tight">RevisaFlash</div>
-            <div className="text-[10px] uppercase tracking-widest text-foreground/40">ENARE 2026</div>
-          </div>
-        </div>
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col lg:flex" style={{ backgroundColor: 'var(--sidebar)' }}>
+      <div className="flex items-center gap-2.5 px-5 py-5">
+  <LogoIcon size={40} />
+  <div>
+    <div className="font-display text-base font-bold tracking-tight text-white">
+      Revisa<span className="text-primary">Flash</span>
+    </div>
+    <div className="text-[10px] uppercase tracking-widest text-white/50">ENARE 2026</div>
+  </div>
+</div>
 
-        <nav className="mt-5 flex-1 space-y-0.5 px-3">
-          <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-foreground/30">Principal</div>
+        <nav className="mt-2 flex-1 space-y-1 px-3">
+          <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/50">Principal</div>
           {ROTAS.map((r) => (
             <NavItem
               key={r.to}
@@ -330,26 +272,39 @@ function AppShellInner({
           ))}
         </nav>
 
-        <div className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/5">
+        <div className="space-y-3 p-3">
+          {streak > 0 && (
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs">
+              <Flame className="h-3.5 w-3.5 text-primary" />
+              <span className="font-semibold text-white">{streak} dias</span>
+              <span className="text-white/60">de sequência</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-[10px] text-white/50">
+            <RefreshCw className="h-3 w-3" />
+            {lastSyncTime ? `Sincronizado às ${lastSyncTime}` : "Nunca sincronizado"}
+          </div>
+
+          <div className="flex items-center gap-3 rounded-full bg-white/5 p-2">
             {avatarFromSupabase ? (
               <img
                 src={avatarFromSupabase}
                 alt={profileName}
-                className="h-9 w-9 rounded-full object-cover border border-border"
+                className="h-9 w-9 rounded-full object-cover border border-white/20"
               />
             ) : (
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-accent/15 font-display text-xs font-semibold text-accent">
-                {profileName.slice(0, 2).toUpperCase()}
+              <div className="grid h-9 w-9 place-items-center rounded-full bg-primary font-display text-sm font-bold text-primary-foreground">
+                {profileName.slice(0, 1).toUpperCase()}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-medium">{profileName}</div>
-              <div className="truncate text-[10px] text-foreground/40">Estudante</div>
+              <div className="truncate text-xs font-semibold text-white">{profileName}</div>
+              <div className="truncate text-[10px] text-white/50">Estudante</div>
             </div>
             <button
               onClick={handleLogout}
-              className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground transition-colors"
+              className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/10 hover:text-white transition-colors"
               aria-label="Sair"
             >
               <LogOut className="h-3.5 w-3.5" />
@@ -359,68 +314,71 @@ function AppShellInner({
       </aside>
 
       <div className="lg:pl-[248px]">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link to="/" className="flex items-center gap-2 lg:hidden">
-              <LogoIcon className="h-8 w-8" size={32} />
-              <span className="font-display text-sm font-semibold">RevisaFlash</span>
-            </Link>
-            <div className="hidden items-center gap-2 text-xs lg:flex">
-              <span className="text-foreground/40">RevisaFlash</span>
-              {breadcrumb && (
-                <>
-                  <ChevronRight className="h-3 w-3 text-foreground/30" />
-                  <span className="text-foreground/70">{breadcrumb}</span>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={() => performSync(true)}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors disabled:opacity-50"
-              title="Sincronizar dados com o servidor"
-            >
-              {isSyncing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              <span className="hidden sm:inline">Sincronizar</span>
-            </button>
-
-            <div className="hidden items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 sm:flex">
-              <span className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">Prova</span>
-              <span className="text-xs font-medium text-foreground">13 set 2026</span>
-              <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                {diasAteProva()}d
-              </span>
-            </div>
-            {streak > 0 && (
-              <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary rf-pulse" />
-                <span className="text-xs font-medium text-primary">{streak}d</span>
+        <div
+          className="p-2 lg:p-3"
+          style={{ backgroundColor: 'var(--sidebar)' }}
+        >
+          <div
+            className="flex flex-col overflow-hidden"
+            style={{
+              backgroundColor: 'var(--background)',
+              borderRadius: '1.75rem',
+              boxShadow: '0 6px 0 0 var(--accent)',
+              minHeight: 'calc(100vh - 16px)',
+            }}
+          >
+            <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
+              <div className="flex min-w-0 items-center gap-3">
+              <Link to="/" className="flex items-center gap-2 lg:hidden">
+  <LogoIcon size={32} />
+  <span className="font-display text-sm font-semibold">RevisaFlash</span>
+</Link>
+                <div className="hidden items-center gap-2 text-xs lg:flex">
+                  <span className="text-foreground/40">RevisaFlash</span>
+                  {breadcrumb && (
+                    <>
+                      <ChevronRight className="h-3 w-3 text-foreground/30" />
+                      <span className="text-foreground/70">{breadcrumb}</span>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-            {lastSyncTime && (
-              <span className="hidden text-[10px] text-foreground/30 lg:inline">
-                Última sync: {lastSyncTime}
-              </span>
-            )}
-          </div>
-        </header>
 
-        <main className="rf-fade-in mx-auto w-full max-w-7xl px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
-          {title && (
-            <div id={`${breadcrumb?.toLowerCase() || 'page'}-header`} className="mb-6 flex flex-col gap-1">
-              {breadcrumb && <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">{breadcrumb}</span>}
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{title}</h1>
-            </div>
-          )}
-          {children}
-        </main>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button
+                  onClick={() => performSync(true)}
+                  disabled={isSyncing}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors disabled:opacity-50"
+                  title="Sincronizar dados com o servidor"
+                >
+                  {isSyncing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  <span className="hidden sm:inline">Sincronizar</span>
+                </button>
+
+                {streak > 0 && (
+                  <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary rf-pulse" />
+                    <span className="text-xs font-medium text-primary">{streak}d</span>
+                  </div>
+                )}
+              </div>
+            </header>
+
+            <main className="rf-fade-in mx-auto w-full max-w-7xl flex-1 px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-10">
+              {title && (
+                <div id={`${breadcrumb?.toLowerCase() || 'page'}-header`} className="mb-6 flex flex-col gap-1">
+                  {breadcrumb && <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">{breadcrumb}</span>}
+                  <h1 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">{title}</h1>
+                </div>
+              )}
+              {children}
+            </main>
+          </div>
+        </div>
       </div>
 
       <BottomNav pathname={pathname} />
@@ -428,9 +386,6 @@ function AppShellInner({
   );
 }
 
-// ============================================================
-// NAV ITEM
-// ============================================================
 function NavItem({
   to,
   label,
@@ -447,10 +402,10 @@ function NavItem({
     <Link
       to={to}
       className={[
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-3 rounded-full px-3 py-2.5 text-sm font-medium transition-colors",
         active
-          ? "bg-primary/10 text-primary"
-          : "text-foreground/60 hover:bg-white/5 hover:text-foreground",
+          ? "bg-[#1a0512] text-primary"
+          : "text-white/80 hover:bg-white/10 hover:text-white",
       ].join(" ")}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -460,16 +415,20 @@ function NavItem({
   );
 }
 
-// ============================================================
-// BOTTOM NAV (MOBILE)
-// ============================================================
 function BottomNav({ pathname }: { pathname: string }) {
-  const items = ROTAS;
-
   return (
     <nav className="fixed inset-x-3 bottom-3 z-40 lg:hidden">
-      <div className="mx-auto flex max-w-sm items-center justify-between rounded-2xl border border-white/10 bg-surface/85 px-1 py-1.5 backdrop-blur-xl shadow-elevated overflow-x-auto">
-        {items.map((r) => {
+      <div
+        className="mx-auto flex w-full max-w-3xl items-center justify-around gap-1 rounded-3xl px-2 py-2"
+        style={{
+          backgroundColor: 'color-mix(in oklab, var(--sidebar) 92%, transparent)',
+          border: '1px solid color-mix(in oklab, var(--foreground) 12%, transparent)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          boxShadow: '0 12px 32px -12px rgba(0,0,0,0.6)',
+        }}
+      >
+        {ROTAS.map((r) => {
           const Icon = ICONS[r.icon as RouteIcon];
           const active = pathname === r.to;
           return (
@@ -477,32 +436,18 @@ function BottomNav({ pathname }: { pathname: string }) {
               key={r.to}
               to={r.to}
               className={[
-                "flex flex-col items-center gap-0 rounded-md px-1.5 py-1 transition-colors min-w-[40px]",
-                active ? "text-primary" : "text-foreground/45",
+                "flex flex-1 flex-col items-center gap-0.5 rounded-2xl px-2 py-1.5 transition-colors",
+                active ? "text-primary" : "text-foreground/55 hover:text-foreground/80",
               ].join(" ")}
             >
-              <Icon className="h-4 w-4" />
-              <span className="text-[9px] font-medium leading-tight">{r.label}</span>
-              <span
-                className={[
-                  "h-0.5 w-3 rounded-full transition-colors",
-                  active ? "bg-primary" : "bg-transparent",
-                ].join(" ")}
-              />
+              <Icon className="h-4.5 w-4.5" strokeWidth={active ? 2.4 : 2} />
+              <span className={["text-[10px] leading-tight truncate", active ? "font-bold" : "font-medium"].join(" ")}>
+                {r.label}
+              </span>
             </Link>
           );
         })}
       </div>
     </nav>
   );
-}
-
-// ============================================================
-// FUNÇÃO AUXILIAR: DIAS ATÉ A PROVA
-// ============================================================
-function diasAteProva(): number {
-  const dataProva = new Date(2026, 8, 13);
-  const hoje = new Date();
-  const diff = Math.ceil((dataProva.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.max(0, diff);
 }

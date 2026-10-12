@@ -232,14 +232,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         await db.user_settings.insert(newSettings);
         setUserSettings(newSettings);
         console.log('📋 Configurações padrão criadas:', newSettings);
-
-        try {
-          const supabaseClient = await getSupabaseWithToken();
-          // 🔥 USAR user_settings_text
-          await supabaseClient.from('user_settings_text').insert(newSettings);
-        } catch (e) {
-          console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
-        }
       }
     } catch (error) {
       console.error('❌ Erro ao carregar configurações:', error);
@@ -442,19 +434,11 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     await db.user_settings.insert(newSettings);
     setUserSettings(newSettings);
 
-    try {
-      const supabaseClient = await getSupabaseWithToken();
-      // 🔥 USAR user_settings_text
-      await supabaseClient.from('user_settings_text').insert(newSettings);
-    } catch (e) {
-      console.warn('⚠️ Falha ao criar configurações no Supabase (offline?)');
-    }
-
     return newSettings;
   }, [userId, userSettings]);
 
   // ============================================================
-  // 🔥 FUNÇÃO updateUserSettings CORRIGIDA (AQUI ESTÁ A CORREÇÃO)
+  // 🔥 FUNÇÃO updateUserSettings CORRIGIDA
   // ============================================================
   const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
     if (!userId) throw new Error('Usuário não autenticado');
@@ -503,19 +487,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     console.log('✅ [updateUserSettings] Configurações atualizadas localmente:', updatedSettings);
 
-    // 2. Tenta sincronizar com Supabase (user_settings_text)
-    try {
-      const supabaseClient = await getSupabaseWithToken();
-      await supabaseClient.from('user_settings_text').upsert(updatedSettings, { onConflict: 'id' });
-      console.log('✅ [updateUserSettings] Configurações sincronizadas com Supabase.');
-    } catch (e) {
-      console.warn('⚠️ [updateUserSettings] Falha ao sincronizar (offline), enfileirando.');
-      await enqueueOperation('update', 'user_settings', updatedSettings);
-    }
-
-    // 3. 🔥 FORÇA RECARGA COMPLETA para garantir que tudo esteja consistente
-    await refreshUserSettings(); // Recarrega o estado local do contexto
-    await syncWithSupabase(userId); // Força pull/push completo
+    await refreshUserSettings();
+    await syncWithSupabase(userId);
 
     console.log('✅ [updateUserSettings] Processo concluído com recarga forçada.');
   }, [userId, refreshUserSettings]);
@@ -747,7 +720,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       name: name.trim(),
       description: description.trim() || '',
       createdAt: now,
-      color: color || '#14B8A6',
+      color: color || '#FE7802',
       isDeleted: false,
       is_shared: isShared,
       shared_with: isShared ? sharedWith : []
@@ -796,7 +769,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       name: 'Erros',
       description: 'Flashcards gerados a partir do banco de erros',
       createdAt: now,
-      color: '#FB7185',
+      color: '#F43789',
       isDeleted: false,
       is_shared: false,
       shared_with: []

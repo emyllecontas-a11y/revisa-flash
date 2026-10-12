@@ -1,29 +1,25 @@
-import { Zap } from "lucide-react";
+// src/components/LogoIcon.tsx
+// Logo do RevisaFlash embutido como SVG em base64.
+// Não depende de pasta, arquivo, service worker nem cache do navegador.
+
+const LOGO_RF_SVG =
+  'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOmMycGE9Imh0dHA6Ly9jMnBhLm9yZy9tYW5pZmVzdCIgdmlld0JveD0iMCAwIDUxMiA1MTIiIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIj4KICA8bWV0YWRhdGE+PC9tZXRhZGF0YT4KICA8ZyB0cmFuc2Zvcm09InJvdGF0ZSg4LjUgMzI2IDIxOCkiPgogICAgPHJlY3QgeD0iMjI2IiB5PSIxMTgiIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiByeD0iMjIiIGZpbGw9IiNFODE4NUYiPjwvcmVjdD4KICAgIDxyZWN0IHg9IjI0MCIgeT0iMTMyIiB3aWR0aD0iMTcyIiBoZWlnaHQ9IjE3MiIgcng9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMyQjBGMjMiIHN0cm9rZS13aWR0aD0iNCI+PC9yZWN0PgogICAgPHBhdGggZD0iTTI1OCAxNDAgVjEyMiBIMjcxIE0yNTggMTMxIEgyNjkiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzJCMEYyMyIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0zMjIgMjgyIFYxNjYgSDM5NCBNMzIyIDIyMCBIMzgyIiBmaWxsPSJub25lIiBzdHJva2U9IiMyQjBGMjMiIHN0cm9rZS13aWR0aD0iMjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PC9wYXRoPgogIDwvZz4KICA8ZyB0cmFuc2Zvcm09InJvdGF0ZSgtOC41IDE4NyAyOTYpIj4KICAgIDxyZWN0IHg9Ijg3IiB5PSIxOTYiIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiByeD0iMjIiIGZpbGw9IiNGNzdGMDAiIHN0cm9rZT0iIzJCMEYyMyIgc3Ryb2tlLXdpZHRoPSI4IiBwYWludC1vcmRlcj0ic3Ryb2tlIj48L3JlY3Q+CiAgICA8cmVjdCB4PSIxMDEiIHk9IjIxMCIgd2lkdGg9IjE3MiIgaGVpZ2h0PSIxNzIiIHJ4PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMkIwRjIzIiBzdHJva2Utd2lkdGg9IjQiPjwvcmVjdD4KICAgIDxwYXRoIGQ9Ik0yMzYgMjA2IFYxOTEgSDI0NCBhNS41IDUuNSAwIDAgMSAwIDExIEgyMzYgTTI0NCAyMDIgTDI1MCAyMDciIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzJCMEYyMyIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0xNDggMzQ4IFYyNTYgSDE5MyBhMjggMjggMCAwIDEgMCA1OCBIMTQ4IE0xOTAgMzE0IEwyMjggMzQ4IiBmaWxsPSJub25lIiBzdHJva2U9IiMyQjBGMjMiIHN0cm9rZS13aWR0aD0iMjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PC9wYXRoPgogIDwvZz4KICA8cGF0aCBkPSJNMjk2IDIwMCBMMjYyIDI1MiBIMjgwIEwyNTkgMzE2IEwzMDYgMjQ0IEgyODcgWiIgZmlsbD0iIzJCMEYyMyIgc3Ryb2tlPSIjMkIwRjIzIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjwvcGF0aD4KPC9zdmc+Cg==';
 
 interface LogoIconProps {
-  className?: string;
   size?: number;
+  className?: string;
 }
 
-export function LogoIcon({ className = "", size = 40 }: LogoIconProps) {
+export function LogoIcon({ size = 40, className = "" }: LogoIconProps) {
   return (
-    <div
-      className={`relative inline-flex items-center justify-center ${className}`}
-      style={{ width: size, height: size }}
-    >
-      <div
-        className="absolute inset-0 rounded-full bg-accent/40 blur-2xl animate-pulse"
-        style={{ animationDuration: "2s" }}
-      />
-      <div className="relative z-10 grid h-full w-full place-items-center rounded-full bg-accent/10 backdrop-blur-sm border border-accent/30 shadow-[0_0_30px_rgba(251,113,133,0.5)]">
-        <Zap
-          className="text-accent drop-shadow-[0_0_20px_rgba(251,113,133,0.9)]"
-          size={size * 0.6}
-          strokeWidth={2.5}
-          fill="#FB7185"
-          fillOpacity={0.2}
-        />
-      </div>
-    </div>
+    <img
+      src={LOGO_RF_SVG}
+      alt="RevisaFlash"
+      width={size}
+      height={size}
+      className={`shrink-0 ${className}`}
+      style={{ width: size, height: size, objectFit: 'contain' }}
+      draggable={false}
+    />
   );
 }
