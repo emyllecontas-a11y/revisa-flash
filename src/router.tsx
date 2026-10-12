@@ -23,6 +23,8 @@ import ListaPlayer from './routes/listas.$id';
 import TestePdf from './routes/teste-pdf';
 // 🔥 LEITOR DE PDF (aberto por fileId)
 import PdfPage from './routes/pdf.$fileId';
+// 🔥 NOVO — Sessões
+import Sessoes from './routes/sessoes';
 
 // Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
@@ -174,6 +176,15 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <Calendario />
+      </ClerkProtectedRoute>
+    ),
+  },
+    // 🔥 NOVA ROTA — Sessões
+  {
+    path: '/sessoes',
+    element: (
+      <ClerkProtectedRoute>
+        <Sessoes />
       </ClerkProtectedRoute>
     ),
   },

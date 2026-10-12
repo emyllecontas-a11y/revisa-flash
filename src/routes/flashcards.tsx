@@ -1,10 +1,12 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit, 
   CheckCircle, Search, Filter, Pencil, X, Bold, Italic, List,
-  History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart,
-  Users, UserPlus, UserMinus, UserCheck, Settings, Flame, Calendar
+  History, AlertTriangle, Loader2, Clock, TrendingUp, BarChart, BarChart3,
+  Users, UserPlus, UserMinus, UserCheck, Settings, Flame, Calendar,
+  ChevronDown, ChevronUp, Zap, Droplet, CalendarDays, Library,
+  Tag, FolderTree, ArrowRightLeft
 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import type { Rating } from "@/lib/fsrs/types";
@@ -12,6 +14,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { findUserByEmail, findUsersByIds } from "@/services/clerkService";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { DeckPile } from "@/components/flashcards/DeckPile";
+import { StudyCard } from "@/components/flashcards/StudyCard";
+import { RfModal, StatTile } from "@/components/flashcards/RfModal";
 
 // ============================================================
 // 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO
@@ -146,6 +151,16 @@ export default function FlashcardsPage() {
   // 🔥 ESTADO PARA PESQUISA
   const [searchTerm, setSearchTerm] = useState("");
 
+  // 🔥 ESTADO PARA MOSTRAR/OCULTAR O GRÁFICO
+  const [showChart, setShowChart] = useState(false);
+
+  // 🔥 ESTADOS DOS SUB-BARALHOS
+  const [filtroTopico, setFiltroTopico] = useState<string | null>(null);
+  const [isSubBaralhosModalOpen, setIsSubBaralhosModalOpen] = useState(false);
+  const [editandoSub, setEditandoSub] = useState<string | null>(null);
+  const [nomeNovoSub, setNomeNovoSub] = useState("");
+  const [topicoEstudoAtivo, setTopicoEstudoAtivo] = useState<string | null>(null);
+
   // Refs
   const editFrenteRef = useRef<HTMLTextAreaElement>(null);
   const editVersoRef = useRef<HTMLTextAreaElement>(null);
@@ -205,7 +220,7 @@ export default function FlashcardsPage() {
   }, [isMembersModalOpen, selectedDeckId, decks]);
 
   // ============================================================
-  // FILTRAR CARDS (COM PESQUISA)
+  // FILTRAR CARDS (STATUS + SUB-BARALHO + PESQUISA)
   // ============================================================
   const deckCards = useMemo(() => {
     let filtered = allCardsInDeck;
@@ -219,6 +234,14 @@ export default function FlashcardsPage() {
       });
     }
 
+    if (filtroTopico !== null) {
+      if (filtroTopico === "__sem_topico__") {
+        filtered = filtered.filter(c => !c.topico || !c.topico.trim());
+      } else {
+        filtered = filtered.filter(c => (c.topico || "").trim() === filtroTopico);
+      }
+    }
+
     if (searchTerm.trim() !== "") {
       const term = searchTerm.trim().toLowerCase();
       filtered = filtered.filter(c =>
@@ -228,7 +251,24 @@ export default function FlashcardsPage() {
     }
 
     return filtered;
-  }, [allCardsInDeck, filterStatus, searchTerm]);
+  }, [allCardsInDeck, filterStatus, searchTerm, filtroTopico]);
+
+  // ============================================================
+  // 🔥 LISTA DE SUB-BARALHOS DO BARALHO ABERTO
+  // ============================================================
+  const subBaralhosDoDeck = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const c of allCardsInDeck) {
+      const t = (c.topico || "").trim();
+      if (!t) continue;
+      mapa.set(t, (mapa.get(t) || 0) + 1);
+    }
+    const semTopico = allCardsInDeck.filter(c => !c.topico || !c.topico.trim()).length;
+    const lista = Array.from(mapa.entries())
+      .map(([nome, count]) => ({ nome, count }))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+    return { lista, semTopico };
+  }, [allCardsInDeck]);
 
   // ============================================================
   // ESTATÍSTICAS DOS DECKS
@@ -385,12 +425,8 @@ export default function FlashcardsPage() {
     }
     try {
       setIsSaving(true);
-      await addCard(selectedDeckId, newCardFrente.trim(), newCardVerso.trim());
-      const allCards = await getAllCardsByDeck(selectedDeckId);
-      const newCard = allCards.find(c => c.front === newCardFrente.trim() && c.deck_id === selectedDeckId);
-      if (newCard && newCardTopico.trim()) {
-        setCardMeta(newCard.id, { topico: newCardTopico.trim() });
-      }
+      const meta = newCardTopico.trim() ? { topico: newCardTopico.trim() } : undefined;
+      await addCard(selectedDeckId, newCardFrente.trim(), newCardVerso.trim(), meta);
       setNewCardFrente("");
       setNewCardVerso("");
       setNewCardTopico("");
@@ -407,7 +443,7 @@ export default function FlashcardsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [selectedDeckId, newCardFrente, newCardVerso, newCardTopico, addCard, setCardMeta, refreshFlashcards, getAllCardsByDeck]);
+  }, [selectedDeckId, newCardFrente, newCardVerso, newCardTopico, addCard, refreshFlashcards, getAllCardsByDeck]);
 
   const handleEditCard = useCallback(async () => {
     if (!editCardId) return;
@@ -417,14 +453,12 @@ export default function FlashcardsPage() {
     }
     try {
       setIsSaving(true);
-      await editCard(editCardId, editFrente.trim(), editVerso.trim());
-      if (editTopico.trim()) {
-        setCardMeta(editCardId, { topico: editTopico.trim() });
-      }
+      const meta = { topico: editTopico.trim() };
+      await editCard(editCardId, editFrente.trim(), editVerso.trim(), meta);
       if (editFromStudy) {
         setSessaoCards(prev => prev.map(card => 
           card.id === editCardId 
-            ? { ...card, front: editFrente.trim(), back: editVerso.trim() }
+            ? { ...card, front: editFrente.trim(), back: editVerso.trim(), topico: editTopico.trim() || undefined }
             : card
         ));
         setEditFromStudy(false);
@@ -446,7 +480,7 @@ export default function FlashcardsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [editCardId, editFrente, editVerso, editTopico, editCard, setCardMeta, refreshFlashcards, selectedDeckId, getAllCardsByDeck, editFromStudy]);
+  }, [editCardId, editFrente, editVerso, editTopico, editCard, refreshFlashcards, selectedDeckId, getAllCardsByDeck, editFromStudy]);
 
   const handleDeleteDeck = useCallback(async (deckId: string) => {
     const ok = await confirmDialog({
@@ -624,14 +658,14 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, removeMemberFromDeck, refreshFlashcards, decks, confirmDialog]);
 
   // ============================================================
-  // INICIAR ESTUDO
+  // INICIAR ESTUDO (agora aceita sub-baralho)
   // ============================================================
-  const iniciarEstudo = useCallback(async (deckId?: string) => {
+  const iniciarEstudo = useCallback(async (deckId?: string, topico?: string) => {
     if (isStarting) return;
     setIsStarting(true);
     setErrorMessage("");
     try {
-      const cards = await getDailyStudyCards(deckId);
+      const cards = await getDailyStudyCards(deckId, topico);
       
       if (cards.length === 0) {
         const reviewedToday = getCardsReviewedToday();
@@ -661,6 +695,7 @@ export default function FlashcardsPage() {
         setSelectedDeckId(null);
       }
       setCurrentCardIndex(0);
+      setTopicoEstudoAtivo(topico || null);
       setVirado(false);
       setModo("estudo");
     } catch (error) {
@@ -719,6 +754,7 @@ export default function FlashcardsPage() {
     setSessaoCards([]);
     setSessionStats(null);
     setSessionStartTime(null);
+    setTopicoEstudoAtivo(null);
     refreshFlashcards();
   }, [refreshFlashcards]);
 
@@ -729,6 +765,9 @@ export default function FlashcardsPage() {
     setSessionStats(null);
     setSessionStartTime(null);
     setSearchTerm("");
+    setShowChart(false);
+    setFiltroTopico(null);
+    setTopicoEstudoAtivo(null);
   }, []);
 
   const openEditFromStudy = useCallback((card: any) => {
@@ -736,7 +775,7 @@ export default function FlashcardsPage() {
     setEditCardId(card.id);
     setEditFrente(card.front);
     setEditVerso(card.back);
-    setEditTopico(meta.topico || "");
+    setEditTopico(card.topico || meta.topico || "");
     setEditFromStudy(true);
     setIsEditModalOpen(true);
   }, [getCardMeta]);
@@ -746,7 +785,7 @@ export default function FlashcardsPage() {
     setEditCardId(card.id);
     setEditFrente(card.front);
     setEditVerso(card.back);
-    setEditTopico(meta.topico || "");
+    setEditTopico(card.topico || meta.topico || "");
     setEditFromStudy(false);
     setIsEditModalOpen(true);
   }, [getCardMeta]);
@@ -777,6 +816,7 @@ export default function FlashcardsPage() {
               setSessaoCards([]);
               setSessionStats(null);
               setSessionStartTime(null);
+              setTopicoEstudoAtivo(null);
             }}
             className="mb-6 inline-flex items-center gap-1 text-xs font-medium text-foreground/55 hover:text-foreground"
           >
@@ -786,6 +826,12 @@ export default function FlashcardsPage() {
             <div className="mb-4 flex items-center justify-between text-xs">
               <span className="font-medium uppercase tracking-widest text-primary">
                 {selectedDeckId ? deck?.name || "Estudo" : "Estudo de Hoje"}
+                {topicoEstudoAtivo && topicoEstudoAtivo !== "__sem_topico__" && (
+                  <span className="ml-2 text-foreground/60">· {topicoEstudoAtivo}</span>
+                )}
+                {topicoEstudoAtivo === "__sem_topico__" && (
+                  <span className="ml-2 text-foreground/60">· Sem sub-baralho</span>
+                )}
                 {isLeech && <span className="ml-2 text-accent">🩸 Sanguessuga</span>}
               </span>
               <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {sessaoCards.length}</span>
@@ -797,43 +843,29 @@ export default function FlashcardsPage() {
             <div className="flex justify-end mb-2 gap-2">
               <button
                 onClick={() => openEditFromStudy(currentCard)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-surface-2 transition-colors"
+                className="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 <Edit className="h-3.5 w-3.5" /> Editar card
               </button>
             </div>
-            
-            <button
-              onClick={() => setVirado((v) => !v)}
-              className="mt-2 grid min-h-[300px] w-full place-items-center rounded-3xl bg-surface p-10 text-center transition-all sm:min-h-[360px]"
-              style={{
-                boxShadow: virado
-                  ? "0 6px 0 0 var(--primary), var(--shadow-glow)"
-                  : "0 6px 0 0 var(--primary)",
-              }}
-            >
-              {!virado ? (
-                <div className="space-y-5">
-                  <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Pergunta</div>
-                  <p className="font-display text-balance text-xl font-medium leading-snug sm:text-2xl">
-                    <FormattedText text={currentCard.front} />
-                  </p>
-                  <p className="text-xs text-foreground/40">Clique para revelar a resposta</p>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  <div className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary">Resposta</div>
-                  <p className="text-balance text-lg font-medium leading-snug text-primary sm:text-xl">
-                    <FormattedText text={currentCard.back} />
-                  </p>
+            <StudyCard
+              front={<FormattedText text={currentCard.front} />}
+              back={
+                <>
+                  <FormattedText text={currentCard.back} />
                   {nextReviewTime && (
-                    <p className="text-xs text-foreground/40">
+                    <p className="mt-4 text-xs text-muted-foreground">
                       ⏳ Próxima revisão: {nextReviewTime}
                     </p>
                   )}
-                </div>
-              )}
-            </button>
+                </>
+              }
+              flipped={virado}
+              onFlip={() => setVirado((v) => !v)}
+              deckName={selectedDeckId ? deck?.name || "Estudo" : "Estudo de Hoje"}
+              color={deck?.color || 'var(--primary)'}
+              position={`${currentCardIndex + 1}/${sessaoCards.length}`}
+            />
             {virado && (
               <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
                 <FsrsButton label="Errei" hint="10 min" variant="again" onClick={() => handleRating("again")} disabled={isRating} />
@@ -897,13 +929,13 @@ export default function FlashcardsPage() {
             
             <p className="mt-6 text-xs text-foreground/40">Excelente trabalho! Continue assim.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <button onClick={voltarDaConclusao} className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">Voltar para os decks</button>
+              <button onClick={voltarDaConclusao} className="btn-sun px-6 py-2.5 text-sm">Voltar para os decks</button>
               <button
                 onClick={async () => {
                   if (selectedDeckId) {
                     setIsRestarting(true);
                     try {
-                      await iniciarEstudo(selectedDeckId);
+                      await iniciarEstudo(selectedDeckId, topicoEstudoAtivo || undefined);
                     } catch (error) {
                       console.error(error);
                     } finally {
@@ -921,7 +953,7 @@ export default function FlashcardsPage() {
                   }
                 }}
                 disabled={isRestarting}
-                className="rounded-lg border border-border bg-surface-2 px-6 py-2.5 text-sm font-medium text-foreground/70 transition-colors hover:bg-white/5 disabled:opacity-50 inline-flex items-center gap-2"
+                className="btn-ghost inline-flex items-center gap-2 px-6 py-2.5 text-sm disabled:opacity-50"
               >
                 {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Estudar novamente
@@ -991,9 +1023,10 @@ export default function FlashcardsPage() {
                     setIsMembersModalOpen(true);
                     setErrorMessage("");
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                  className="rfm-btn rfm-btn--outline"
+                  style={{ "--tone": "var(--primary)" } as CSSProperties}
                 >
-                  <Users className="h-3.5 w-3.5" /> Gerenciar membros
+                  <Users className="h-4 w-4" /> Gerenciar membros
                 </button>
               )}
               <button
@@ -1003,147 +1036,227 @@ export default function FlashcardsPage() {
                   setDeckDisciplina(deckMeta.disciplina || '');
                   setIsRenameModalOpen(true); 
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2"
+                className="btn-ghost inline-flex items-center gap-1.5 px-3 py-2 text-xs"
               ><Pencil className="h-3.5 w-3.5" /> Editar baralho</button>
               <button
                 onClick={() => { setIsAddCardModalOpen(true); setErrorMessage(''); }}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="btn-sun inline-flex items-center gap-1.5 px-3 py-2 text-xs"
               ><Plus className="h-3.5 w-3.5" /> Novo flashcard</button>
             </div>
           </header>
           
           {chartData.length > 0 && (
-            <div className="mb-6 rf-card p-4">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-semibold text-foreground">Evolução da Estabilidade Média</h3>
-                <span className="text-xs text-foreground/40">(por mês)</span>
-              </div>
-              <div className="h-[200px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#503243" />
-                    <XAxis dataKey="month" tick={{ fill: '#BCA7B4', fontSize: 10 }} />
-                    <YAxis 
-                      domain={[0, 'auto']} 
-                      tick={{ fill: '#BCA7B4', fontSize: 10 }} 
-                      label={{ value: 'Estabilidade', angle: -90, position: 'insideLeft', fill: '#BCA7B4', fontSize: 10 }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ background: '#38192B', border: '1px solid #503243', borderRadius: '8px' }}
-                      labelStyle={{ color: '#FCF4F9' }}
-                      formatter={(value: any) => [`${value}`, 'Estabilidade média']}
-                    />
-                    <Line type="monotone" dataKey="stability" stroke="#FE7802" strokeWidth={2} dot={{ fill: '#FE7802', r: 4 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="mt-2 text-center text-[10px] text-foreground/30">
-                {chartData.length} meses de dados · Média geral: {(chartData.reduce((acc, d) => acc + d.stability, 0) / chartData.length).toFixed(1)}
-              </div>
+            <div className="mb-6 rfm-stat">
+              <button
+                type="button"
+                onClick={() => setShowChart(v => !v)}
+                className="flex w-full items-center justify-between gap-2 text-left"
+              >
+                <span className="flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  <span className="font-display text-sm font-bold text-foreground">Evolução da Estabilidade Média</span>
+                  <span className="text-xs text-foreground/40">(por mês)</span>
+                </span>
+                <span className="rfm-meta shrink-0">
+                  {showChart ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  {showChart ? "Ocultar" : "Mostrar"}
+                </span>
+              </button>
+              {showChart && (
+                <div className="mt-4 h-[200px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="month" tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }} />
+                      <YAxis 
+                        domain={[0, 'auto']} 
+                        tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }} 
+                        label={{ value: 'Estabilidade', angle: -90, position: 'insideLeft', fill: 'var(--muted-foreground)', fontSize: 10 }}
+                      />
+                      <Tooltip 
+                        contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px' }}
+                        labelStyle={{ color: 'var(--foreground)' }}
+                        formatter={(value: any) => [`${value}`, 'Estabilidade média']}
+                      />
+                      <Line type="monotone" dataKey="stability" stroke="var(--primary)" strokeWidth={2} dot={{ fill: 'var(--primary)', r: 4 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <p className="mt-2 text-[10px] text-foreground/30">
+                {chartData.length} {chartData.length === 1 ? "mês" : "meses"} de dados · Média geral: {(chartData.reduce((acc, d) => acc + d.stability, 0) / chartData.length).toFixed(1)}
+              </p>
             </div>
           )}
           
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Mini l="Cards" v={deckStats.total} />
-            <Mini l="Para revisar" v={deckStats.due} tone="accent" />
-            <Mini l="Novos" v={deckStats.novos} />
-            <Mini l="Maturidade" v={deckStats.total > 0 ? `${Math.round((deckStats.total - deckStats.novos) / deckStats.total * 100)}%` : '0%'} />
+            <StatTile label="Cards" value={deckStats.total} />
+            <StatTile label="Para revisar" value={deckStats.due} tone="var(--accent)" />
+            <StatTile label="Novos" value={deckStats.novos} />
+            <StatTile label="Maturidade" value={deckStats.total > 0 ? `${Math.round((deckStats.total - deckStats.novos) / deckStats.total * 100)}%` : '0%'} tone="var(--primary)" />
           </div>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Filter className="h-3.5 w-3.5 text-foreground/40" />
+
+          {/* ===== FILTROS: status + sub-baralho + buscar ===== */}
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <div role="tablist" className="rfm-tabs">
+                <button
+                  role="tab"
+                  aria-selected={filterStatus === "todos"}
+                  className="rfm-tab"
+                  onClick={() => setFilterStatus("todos")}
+                >
+                  Todos
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={filterStatus === "para_revisar"}
+                  className="rfm-tab"
+                  onClick={() => setFilterStatus("para_revisar")}
+                >
+                  Para revisar
+                </button>
+              </div>
+
+              {/* Filtro de sub-baralho */}
+              <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
+                <Tag className="h-3.5 w-3.5 text-primary" />
+                <select
+                  value={filtroTopico ?? ""}
+                  onChange={(e) => setFiltroTopico(e.target.value === "" ? null : e.target.value)}
+                  className="bg-transparent text-xs font-medium outline-none text-foreground"
+                >
+                  <option value="">Todos os sub-baralhos</option>
+                  {subBaralhosDoDeck.lista.map((s) => (
+                    <option key={s.nome} value={s.nome}>
+                      {s.nome} ({s.count})
+                    </option>
+                  ))}
+                  {subBaralhosDoDeck.semTopico > 0 && (
+                    <option value="__sem_topico__">
+                      Sem sub-baralho ({subBaralhosDoDeck.semTopico})
+                    </option>
+                  )}
+                </select>
+              </div>
+
+              {/* Botão gerenciar sub-baralhos */}
               <button
-                onClick={() => setFilterStatus("todos")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  filterStatus === "todos"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"
-                }`}
+                type="button"
+                onClick={() => setIsSubBaralhosModalOpen(true)}
+                className="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                title="Gerenciar sub-baralhos deste baralho"
               >
-                Todos
+                <FolderTree className="h-3.5 w-3.5" /> Gerenciar sub-baralhos
               </button>
-              <button
-                onClick={() => setFilterStatus("para_revisar")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  filterStatus === "para_revisar"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"
-                }`}
-              >
-                Para revisar
-              </button>
-              <span className="text-xs text-foreground/40 ml-1">
+
+              {/* Botão estudar só o sub-baralho atual */}
+              {filtroTopico !== null && deckCards.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => iniciarEstudo(selectedDeckId, filtroTopico)}
+                  disabled={isStarting}
+                  className="btn-sun inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-40"
+                >
+                  {isStarting
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Sparkles className="h-3.5 w-3.5" />}
+                  Estudar só {filtroTopico === "__sem_topico__" ? "Sem sub-baralho" : `"${filtroTopico}"`}
+                </button>
+              )}
+
+              <span className="text-xs text-muted-foreground">
                 {loadingCards ? "(carregando...)" : `${deckCards.length} cards`}
               </span>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
-              <Search className="h-3.5 w-3.5 text-foreground/40" />
+
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 placeholder="Buscar nesse baralho…"
-                className="flex-1 bg-transparent text-xs outline-none placeholder:text-foreground/35"
+                className="rfm-input w-full py-2 pl-9 sm:w-64"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-              {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm("")}
-                  className="text-foreground/40 hover:text-foreground transition-colors"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            </label>
           </div>
-          <div className="grid gap-3">
-            {loadingCards ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : deckCards.length > 0 ? (
-              deckCards.map((card, index) => {
+
+          {/* ===== GRADE DE CARDS ===== */}
+          {loadingCards ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : deckCards.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {deckCards.map((card, index) => {
                 const status = getStatusBadge(card.reps, card.dueDate);
                 const meta = getCardMeta(card.id);
                 const isLeech = getIsLeech(card);
-                const priority = calculatePriority(card);
+                const tone = isErrorDeck ? "var(--accent)" : deckColor;
                 return (
-                  <article key={card.id} className="rf-card rf-card-hover group flex items-start gap-3 sm:gap-4 p-4 sm:p-5 w-full max-w-full overflow-hidden">
-                    <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-md bg-background/60 font-display text-xs font-semibold text-foreground/60 tabular-nums">{index + 1}</div> 
-                    {isErrorDeck && <AlertTriangle className="h-3 w-3 text-accent ml-0.5" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
+                  <article
+                    key={card.id}
+                    className="rfm-fcard"
+                    style={{ "--tone": tone } as CSSProperties}
+                  >
+                    <div className="rfm-fcard__head">
+                      <span className="rfm-fcard__num">{index + 1}</span>
+                      <div className="flex items-center gap-1.5">
+                        {isLeech && <Droplet className="h-3 w-3 text-accent" />}
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
-                        {meta.topico && <span className="text-[11px] text-foreground/45">{meta.topico}</span>}
-                        {isLeech && <span className="text-[10px] text-accent font-medium">🩸 Sanguessuga</span>}
-                      </div>
-                      <p className="mt-1.5 text-sm font-medium text-foreground break-words whitespace-normal">
-                        <FormattedText text={card.front} />
-                      </p>
-                      <p className="mt-1 text-xs text-foreground/50 break-words whitespace-normal">
-                        <FormattedText text={card.back} />
-                      </p>
-                      <div className="mt-1 flex gap-2 text-[10px] text-foreground/30">
-                        <span>Erros: {card.lapses || 0}</span>
-                        <span>Dificuldade: {card.difficulty?.toFixed(1) || 0}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => openEditModal(card)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-primary/50 hover:text-primary"><Edit className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDeleteCard(card.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-foreground/60 transition-colors hover:border-destructive/50 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <div className="rfm-fcard__body">
+                      <p className="rfm-fcard__q">
+                        <FormattedText text={card.front} />
+                      </p>
+                      <p className="rfm-fcard__a">
+                        <FormattedText text={card.back} />
+                      </p>
+                    </div>
+                    <div className="rfm-fcard__foot">
+                      <div className="flex min-w-0 flex-col gap-0.5 text-[10px] text-muted-foreground">
+                        {(card.topico || meta.topico) && (
+                          <span className="truncate text-primary">🏷 {card.topico || meta.topico}</span>
+                        )}
+                        <span className="flex gap-2">
+                          <span>Erros: {card.lapses || 0}</span>
+                          <span>Dif: {card.difficulty?.toFixed(1) || 0}</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => openEditModal(card)}
+                          className="rfm-icon-btn"
+                          aria-label="Editar card"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCard(card.id)}
+                          className="rfm-icon-btn rfm-icon-btn--danger"
+                          aria-label="Excluir card"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </article>
                 );
-              })
-            ) : (
-              <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
-                <p className="text-sm text-foreground/40">
-                  {filterStatus === "todos" 
+              })}
+            </div>
+          ) : (
+            <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
+              <p className="text-sm text-foreground/40">
+                {filtroTopico !== null
+                  ? "Nenhum card neste sub-baralho."
+                  : filterStatus === "todos" 
                     ? "Nenhum flashcard neste baralho." 
                     : "Nenhum flashcard para revisar agora. Volte mais tarde!"}
-                </p>
-              </div>
-            )}
-          </div>
+              </p>
+            </div>
+          )}
         </AppShell>
       );
     }
@@ -1182,31 +1295,32 @@ export default function FlashcardsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setIsHardestModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs font-medium text-accent hover:bg-accent/20 transition-colors"
+              className="rfm-btn rfm-btn--outline"
+              style={{ "--tone": "var(--accent)" } as CSSProperties}
             >
-              <Flame className="h-3.5 w-3.5" /> Cards difíceis
+              <Flame className="h-4 w-4" /> Cards difíceis
             </button>
             <button
               onClick={() => iniciarEstudo()}
               disabled={isStarting || remainingToday <= 0}
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity"
+              className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-sm disabled:opacity-30"
             >
               {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Estudar hoje
             </button>
             <button
               onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
+              className="btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
             >
               <Plus className="h-3.5 w-3.5" /> Novo baralho
             </button>
           </div>
         </div>
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Mini icon={<Layers className="h-4 w-4" />} l="Decks" v={decks?.length || 0} />
-          <Mini icon={<Sparkles className="h-4 w-4" />} l="Cards totais" v={stats.totalCards} />
-          <Mini l="Para revisar" v={stats.dueCards} tone="accent" />
-          <Mini l="Novos" v={dueCards.filter(c => c.reps === 0).length} />
+          <StatTile label="Decks" value={decks?.length || 0} icon={<Layers className="h-4 w-4" />} />
+          <StatTile label="Cards totais" value={stats.totalCards} icon={<Sparkles className="h-4 w-4" />} />
+          <StatTile label="Para revisar" value={stats.dueCards} tone="var(--accent)" />
+          <StatTile label="Novos" value={dueCards.filter(c => c.reps === 0).length} tone="var(--primary)" />
         </div>
         {decks && decks.length > 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1214,25 +1328,27 @@ export default function FlashcardsPage() {
               const stats = getDeckStats(deck.id);
               const meta = getDeckMeta(deck.id);
               const deckColor = deck.color || '#FE7802';
-              
+
               return (
-                <article
+                <DeckPile
                   key={deck.id}
-                  className="card-lip p-5 cursor-pointer flex flex-col min-h-[220px]"
-                  style={{ '--lip': deckColor } as React.CSSProperties}
-                  onClick={() => setSelectedDeckId(deck.id)}
-                >
-                  <header className="mb-4 flex items-start justify-between">
-                    <div
-                      className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl"
-                      style={{
-                        backgroundColor: `${deckColor}25`,
-                        color: deckColor,
-                      }}
-                    >
-                      <Layers className="h-6 w-6" />
-                    </div>
-                    <div className="flex gap-1">
+                  name={deck.name}
+                  description={
+                    meta.disciplina
+                      ? `${meta.disciplina}${deck.description ? ' · ' + deck.description : ''}`
+                      : deck.description || "Sem descrição"
+                  }
+                  total={stats.total}
+                  due={stats.due}
+                  color={deckColor}
+                  shared={deck.is_shared}
+                  badge={deck.name === "Erros" ? <AlertTriangle className="h-4 w-4 text-accent" /> : undefined}
+                  onOpen={() => setSelectedDeckId(deck.id)}
+                  onStudy={() => iniciarEstudo(deck.id)}
+                  studyDisabled={stats.due === 0 || isStarting || remainingToday <= 0}
+                  studyLabel={isStarting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando…</> : undefined}
+                  actions={
+                    <>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1242,49 +1358,25 @@ export default function FlashcardsPage() {
                           setDeckDisciplina(meta.disciplina || '');
                           setIsRenameModalOpen(true);
                         }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground"
+                        className="rfm-icon-btn"
+                        aria-label="Editar baralho"
                       >
-                        <Edit className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteDeck(deck.id); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-destructive"
+                        className="rfm-icon-btn rfm-icon-btn--danger"
+                        aria-label="Excluir baralho"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                    </div>
-                  </header>
-
-                  <div className="flex-1 min-h-0">
-                    <h3 className="font-display text-lg font-semibold hover:text-primary">
-                      {deck.name}
-                      {deck.name === "Erros" && <AlertTriangle className="h-4 w-4 text-accent inline-block ml-1.5 -mt-0.5" />}
-                    </h3>
-                    {deck.is_shared && (
-                      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-primary">
-                        <Users className="h-3 w-3" /> Compartilhado
-                      </span>
-                    )}
-                    <p className="mt-1 text-xs text-foreground/45 line-clamp-2">{deck.description || "Sem descrição"}</p>
-                    {meta.disciplina && <span className="text-[10px] text-foreground/40">{meta.disciplina}</span>}
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); iniciarEstudo(deck.id); }}
-                      disabled={stats.due === 0 || isStarting || remainingToday <= 0}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
-                    >
-                      {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                      {stats.due > 0 ? `${stats.due} para hoje` : "Nada para hoje"}
-                    </button>
-                    <span className="text-xs text-foreground/45">{stats.total} cards</span>
-                  </div>
-                </article>
+                    </>
+                  }
+                />
               );
             })}
           </div>
-           ) : (
+        ) : (
           <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
             <p className="text-sm text-foreground/40">Nenhum baralho criado. Clique em "Novo baralho" para começar.</p>
           </div>
@@ -1302,583 +1394,706 @@ export default function FlashcardsPage() {
       {conteudo}
 
       {/* MODAL: CRIAR BARALHO */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">Criar novo baralho</h3>
-              <button
-                onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
-                className="text-foreground/50 hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-foreground/70">Nome do baralho *</label>
-                <input
-                  type="text"
-                  placeholder="Digite o nome do baralho"
-                  value={deckName}
-                  onChange={(e) => setDeckName(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground/70">Descrição</label>
-                <textarea
-                  rows={2}
-                  placeholder="Descreva o conteúdo do baralho"
-                  value={deckDescription}
-                  onChange={(e) => setDeckDescription(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1 resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-foreground/70">Disciplina</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Patologia Oral"
-                    value={deckDisciplina}
-                    onChange={(e) => setDeckDisciplina(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-foreground/70">Cor de destaque</label>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {["#FE7802", "#F43789", "#F59E0B", "#60A5FA", "#A78BFA", "#34D399", "#F472B6", "#FBBF24"].map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setDeckCor(c)}
-                        className={`h-8 w-8 rounded-full border-2 transition-all ${deckCor === c ? 'border-white scale-110' : 'border-transparent'}`}
-                        style={{ background: c }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="border-t border-border/50 pt-4 mt-2">
-                <div className="flex items-center gap-3 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsShared(!isShared)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isShared ? 'bg-primary' : 'bg-white/10'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isShared ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                  <span className="text-sm font-medium text-foreground/80 flex items-center gap-2">
-                    <Users className="h-4 w-4 text-primary" />
-                    Compartilhar este baralho com amigas
-                  </span>
-                </div>
-                {isShared && (
-                  <div className="animate-fadeIn">
-                    <label className="text-sm font-medium text-foreground/70">
-                      IDs das convidadas (separados por vírgula)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ex: user_abc123, user_def456"
-                      value={sharedWithInput}
-                      onChange={(e) => setSharedWithInput(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                    />
-                    <p className="mt-1 text-[10px] text-foreground/40">
-                      💡 Digite o user_id de cada amiga. Elas verão os cards, mas com estatísticas próprias.
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
-                  className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
-                  disabled={isSaving}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleCreateDeck}
-                  disabled={isSaving}
-                  className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                >
-                  {isSaving ? "Criando..." : "Criar baralho"}
-                </button>
-              </div>
-            </div>
+      <RfModal
+        open={isModalOpen}
+        onClose={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
+        title="Criar novo baralho"
+        icon={<Layers className="h-4 w-4" />}
+        tone={deckCor}
+        width="40rem"
+        footer={
+          <>
+            <button
+              className="rfm-btn rfm-btn--ghost"
+              onClick={() => { setIsModalOpen(false); setDeckName(""); setDeckDescription(""); setDeckDisciplina(""); setDeckCor("#FE7802"); setIsShared(false); setSharedWithInput(""); setErrorMessage(""); }}
+              disabled={isSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleCreateDeck}
+              disabled={isSaving}
+              className="btn-sun px-6 py-2.5 text-sm disabled:opacity-40"
+            >
+              {isSaving ? "Criando..." : "Criar baralho"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="rfm-label">Nome do baralho *</label>
+            <input
+              type="text"
+              placeholder="Digite o nome do baralho"
+              value={deckName}
+              onChange={(e) => setDeckName(e.target.value)}
+              className="rfm-input"
+            />
           </div>
-        </div>
-      )}
-
-      {/* MODAL: ADICIONAR FLASHCARD */}
-      {isAddCardModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">Adicionar flashcard</h3>
-              <button
-                onClick={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
-                className="text-foreground/50 hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div className="rf-card p-5 border border-border">
-                <header className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-primary">Pergunta</span>
-                    <span className="text-xs text-foreground/45">Frente do cartão</span>
-                  </div>
-                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/60 p-0.5 text-foreground/55">
-                    <button type="button" onClick={() => applyFormatting(newFrenteRef, 'bold', setNewCardFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Bold className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(newFrenteRef, 'italic', setNewCardFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Italic className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(newFrenteRef, 'list', setNewCardFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><List className="h-3 w-3" /></button>
-                  </div>
-                </header>
-                <textarea
-                  ref={newFrenteRef}
-                  rows={4}
-                  placeholder="Digite a pergunta"
-                  value={newCardFrente}
-                  onChange={(e) => setNewCardFrente(e.target.value)}
-                  className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 font-display text-base text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-                />
-              </div>
-              <div className="rf-card p-5 border border-border">
-                <header className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-accent">Resposta</span>
-                    <span className="text-xs text-foreground/45">Verso do cartão</span>
-                  </div>
-                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/60 p-0.5 text-foreground/55">
-                    <button type="button" onClick={() => applyFormatting(newVersoRef, 'bold', setNewCardVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Bold className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(newVersoRef, 'italic', setNewCardVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Italic className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(newVersoRef, 'list', setNewCardVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><List className="h-3 w-3" /></button>
-                  </div>
-                </header>
-                <textarea
-                  ref={newVersoRef}
-                  rows={5}
-                  placeholder="Digite a resposta"
-                  value={newCardVerso}
-                  onChange={(e) => setNewCardVerso(e.target.value)}
-                  className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 text-sm leading-relaxed text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground/70">Tópico</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Lesões ósseas"
-                  value={newCardTopico}
-                  onChange={(e) => setNewCardTopico(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                />
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-                <button
-                  onClick={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/65 hover:bg-white/5 transition-colors"
-                  disabled={isSaving}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => handleAddCard(true)}
-                  disabled={isSaving}
-                  className="rounded-lg border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-foreground/80 hover:bg-white/5 transition-colors disabled:opacity-50"
-                >
-                  {isSaving ? "Salvando..." : "Salvar e criar outro"}
-                </button>
-                <button
-                  onClick={() => handleAddCard(false)}
-                  disabled={isSaving}
-                  className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                >
-                  {isSaving ? "Salvando..." : "Salvar cartão"}
-                </button>
-              </div>
-            </div>
+          <div>
+            <label className="rfm-label">Descrição</label>
+            <textarea
+              rows={2}
+              placeholder="Descreva o conteúdo do baralho"
+              value={deckDescription}
+              onChange={(e) => setDeckDescription(e.target.value)}
+              className="rfm-input"
+            />
           </div>
-        </div>
-      )}
-
-      {/* MODAL: RENOMEAR BARALHO */}
-      {isRenameModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
-            <h3 className="mb-4 text-lg font-semibold text-foreground">✏️ Renomear Baralho</h3>
-            <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="rfm-label">Disciplina</label>
               <input
                 type="text"
-                placeholder="Novo nome do baralho"
-                value={renameName}
-                onChange={(e) => setRenameName(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-              />
-              <input
-                type="text"
-                placeholder="Nova descrição (opcional)"
-                value={renameDescription}
-                onChange={(e) => setRenameDescription(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-              />
-              <input
-                type="text"
-                placeholder="Disciplina (opcional)"
+                placeholder="Ex: Patologia Oral"
                 value={deckDisciplina}
                 onChange={(e) => setDeckDisciplina(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
+                className="rfm-input"
               />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setIsRenameModalOpen(false); setRenameName(""); setRenameDescription(""); setDeckDisciplina(""); setErrorMessage(""); }}
-                  className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
-                  disabled={isRenaming}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleRenameDeck}
-                  disabled={isRenaming}
-                  className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                >
-                  {isRenaming ? "Salvando..." : "Salvar"}
-                </button>
+            </div>
+            <div>
+              <label className="rfm-label">Cor de destaque</label>
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                {["#FE7802", "#F43789", "#F59E0B", "#60A5FA", "#A78BFA", "#34D399", "#F472B6", "#FBBF24"].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-pressed={deckCor === c}
+                    aria-label={`Cor ${c}`}
+                    onClick={() => setDeckCor(c)}
+                    className="rfm-swatch"
+                    style={{ "--sw": c } as CSSProperties}
+                  />
+                ))}
               </div>
             </div>
           </div>
+          <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-border bg-surface p-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isShared}
+              className="rfm-switch"
+              onClick={() => setIsShared(!isShared)}
+            />
+            <Users className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold">Compartilhar este baralho com amigas</span>
+          </label>
+          {isShared && (
+            <div>
+              <label className="rfm-label">IDs das convidadas (separados por vírgula)</label>
+              <input
+                type="text"
+                placeholder="Ex: user_abc123, user_def456"
+                value={sharedWithInput}
+                onChange={(e) => setSharedWithInput(e.target.value)}
+                className="rfm-input"
+              />
+              <p className="mt-1 text-[10px] text-foreground/40">
+                💡 Digite o user_id de cada amiga. Elas verão os cards, mas com estatísticas próprias.
+              </p>
+            </div>
+          )}
         </div>
-      )}
+      </RfModal>
+
+      {/* MODAL: ADICIONAR FLASHCARD */}
+      <RfModal
+        open={isAddCardModalOpen}
+        onClose={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
+        title="Adicionar flashcard"
+        icon={<Plus className="h-4 w-4" />}
+        width="36rem"
+        footer={
+          <>
+            <button
+              className="rfm-btn rfm-btn--ghost"
+              onClick={() => { setIsAddCardModalOpen(false); setNewCardFrente(""); setNewCardVerso(""); setNewCardTopico(""); setErrorMessage(""); }}
+              disabled={isSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => handleAddCard(true)}
+              disabled={isSaving}
+              className="rfm-btn rfm-btn--outline"
+              style={{ "--tone": "var(--primary)" } as CSSProperties}
+            >
+              {isSaving ? "Salvando..." : "Salvar e criar outro"}
+            </button>
+            <button
+              onClick={() => handleAddCard(false)}
+              disabled={isSaving}
+              className="btn-sun px-5 py-2.5 text-sm disabled:opacity-40"
+            >
+              {isSaving ? "Salvando..." : "Salvar cartão"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rfm-face" style={{ "--tone": "var(--primary)" } as CSSProperties}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rfm-tag">Pergunta</span>
+                <span className="text-xs text-foreground/45">Frente do cartão</span>
+              </div>
+              <div className="rfm-toolbar">
+                <button type="button" onClick={() => applyFormatting(newFrenteRef, 'bold', setNewCardFrente)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newFrenteRef, 'italic', setNewCardFrente)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newFrenteRef, 'list', setNewCardFrente)} aria-label="Lista"><List className="h-3 w-3" /></button>
+              </div>
+            </div>
+            <textarea
+              ref={newFrenteRef}
+              rows={4}
+              placeholder="Digite a pergunta"
+              value={newCardFrente}
+              onChange={(e) => setNewCardFrente(e.target.value)}
+              className="rfm-input font-display text-base"
+            />
+          </div>
+          <div className="rfm-face" style={{ "--tone": "var(--accent)" } as CSSProperties}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rfm-tag">Resposta</span>
+                <span className="text-xs text-foreground/45">Verso do cartão</span>
+              </div>
+              <div className="rfm-toolbar">
+                <button type="button" onClick={() => applyFormatting(newVersoRef, 'bold', setNewCardVerso)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newVersoRef, 'italic', setNewCardVerso)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newVersoRef, 'list', setNewCardVerso)} aria-label="Lista"><List className="h-3 w-3" /></button>
+              </div>
+            </div>
+            <textarea
+              ref={newVersoRef}
+              rows={5}
+              placeholder="Digite a resposta"
+              value={newCardVerso}
+              onChange={(e) => setNewCardVerso(e.target.value)}
+              className="rfm-input text-sm leading-relaxed"
+            />
+          </div>
+          <div>
+            <label className="rfm-label">Sub-baralho (Tópico)</label>
+            <input
+              type="text"
+              placeholder="Ex: Osteologia, Arritmias..."
+              value={newCardTopico}
+              onChange={(e) => setNewCardTopico(e.target.value)}
+              className="rfm-input"
+              list="sub-baralhos-existentes"
+            />
+            <datalist id="sub-baralhos-existentes">
+              {subBaralhosDoDeck.lista.map((s) => (
+                <option key={s.nome} value={s.nome} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[10px] text-foreground/40">
+              💡 Digite o nome do sub-baralho. Se já existir, ele é reaproveitado.
+            </p>
+          </div>
+        </div>
+      </RfModal>
+
+      {/* MODAL: RENOMEAR BARALHO */}
+      <RfModal
+        open={isRenameModalOpen}
+        onClose={() => { setIsRenameModalOpen(false); setRenameName(""); setRenameDescription(""); setDeckDisciplina(""); setErrorMessage(""); }}
+        title="Renomear baralho"
+        icon={<Pencil className="h-4 w-4" />}
+        width="26rem"
+        footer={
+          <>
+            <button
+              className="rfm-btn rfm-btn--ghost"
+              onClick={() => { setIsRenameModalOpen(false); setRenameName(""); setRenameDescription(""); setDeckDisciplina(""); setErrorMessage(""); }}
+              disabled={isRenaming}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleRenameDeck}
+              disabled={isRenaming}
+              className="btn-sun px-8 py-2.5 text-sm disabled:opacity-40"
+            >
+              {isRenaming ? "Salvando..." : "Salvar"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="rfm-label">Nome</label>
+            <input
+              type="text"
+              placeholder="Novo nome do baralho"
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              className="rfm-input"
+            />
+          </div>
+          <div>
+            <label className="rfm-label">Descrição</label>
+            <input
+              type="text"
+              placeholder="Nova descrição (opcional)"
+              value={renameDescription}
+              onChange={(e) => setRenameDescription(e.target.value)}
+              className="rfm-input"
+            />
+          </div>
+          <div>
+            <label className="rfm-label">Disciplina</label>
+            <input
+              type="text"
+              placeholder="Disciplina (opcional)"
+              value={deckDisciplina}
+              onChange={(e) => setDeckDisciplina(e.target.value)}
+              className="rfm-input"
+            />
+          </div>
+        </div>
+      </RfModal>
 
       {/* MODAL: EDITAR FLASHCARD */}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">✏️ Editar flashcard</h3>
-              <button
-                onClick={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
-                className="text-foreground/50 hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-foreground/55">
-                <span className="rounded-full bg-white/5 px-2 py-0.5 font-medium">Card #{editCardId ? editCardId.slice(-3) : '--'}</span>
-                <span>·</span>
-                <span>{decks.find(d => d.id === selectedDeckId)?.name || "Baralho"}</span>
-                <span>·</span>
-                <span className="inline-flex items-center gap-1 text-primary">
-                  <Sparkles className="h-3 w-3" /> 
-                  {(() => {
-                    const card = dueCards.find(c => c.id === editCardId);
-                    if (!card) return '0%';
-                    const total = dueCards.filter(c => c.deck_id === selectedDeckId).length;
-                    if (total === 0) return '0%';
-                    const maturidade = Math.round(((total - (card.reps === 0 ? 1 : 0)) / total) * 100);
-                    return `${maturidade}%`;
-                  })()}
-                </span>
-              </div>
-              <button
-                onClick={async () => {
-                  if (!editCardId) return;
-                  const deleted = await handleDeleteCard(editCardId);
-                  if (deleted) {
-                    setIsEditModalOpen(false);
-                    setEditCardId(null);
-                    setEditFrente("");
-                    setEditVerso("");
-                    setEditTopico("");
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Excluir cartão
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div className="rf-card p-5 border border-border">
-                <header className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-primary">Pergunta</span>
-                    <span className="text-xs text-foreground/45">Frente do cartão</span>
-                  </div>
-                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/60 p-0.5 text-foreground/55">
-                    <button type="button" onClick={() => applyFormatting(editFrenteRef, 'bold', setEditFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Bold className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(editFrenteRef, 'italic', setEditFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Italic className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(editFrenteRef, 'list', setEditFrente)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><List className="h-3 w-3" /></button>
-                  </div>
-                </header>
-                <textarea
-                  ref={editFrenteRef}
-                  rows={4}
-                  placeholder="Digite a pergunta"
-                  value={editFrente}
-                  onChange={(e) => setEditFrente(e.target.value)}
-                  className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 font-display text-base text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-                />
-              </div>
-              <div className="rf-card p-5 border border-border">
-                <header className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-accent">Resposta</span>
-                    <span className="text-xs text-foreground/45">Verso do cartão</span>
-                  </div>
-                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/60 p-0.5 text-foreground/55">
-                    <button type="button" onClick={() => applyFormatting(editVersoRef, 'bold', setEditVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Bold className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(editVersoRef, 'italic', setEditVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><Italic className="h-3 w-3" /></button>
-                    <button type="button" onClick={() => applyFormatting(editVersoRef, 'list', setEditVerso)} className="grid h-6 w-6 place-items-center rounded hover:bg-white/5 hover:text-foreground"><List className="h-3 w-3" /></button>
-                  </div>
-                </header>
-                <textarea
-                  ref={editVersoRef}
-                  rows={5}
-                  placeholder="Digite a resposta"
-                  value={editVerso}
-                  onChange={(e) => setEditVerso(e.target.value)}
-                  className="w-full resize-none rounded-lg border border-border bg-background/60 px-4 py-3 text-sm leading-relaxed text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground/70">Tópico</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Lesões ósseas"
-                  value={editTopico}
-                  onChange={(e) => setEditTopico(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                />
-              </div>
-              {editCardId && (
-                <div className="rf-card p-5 border border-border">
-                  <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">
-                    <History className="h-3 w-3 text-primary" /> Histórico de revisões
-                  </header>
-                  <ul className="space-y-2 text-xs">
-                    {(() => {
-                      const history = getCardHistory(editCardId);
-                      if (history.length === 0 || history[0]?.message === 'Nenhuma revisão ainda') {
-                        return <li className="text-foreground/45 italic">Nenhuma revisão ainda</li>;
-                      }
-                      return history.map((h, i) => (
-                        <li key={i} className="flex items-center justify-between border-b border-border/60 pb-2 last:border-0 last:pb-0">
-                          <span className="text-foreground/55 tabular-nums">{h.data}</span>
-                          <span className={`font-medium ${h.color || 'text-foreground/55'}`}>{h.rating}</span>
-                        </li>
-                      ));
-                    })()}
-                  </ul>
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  onClick={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/65 hover:bg-white/5 transition-colors"
-                  disabled={isSaving}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleEditCard}
-                  disabled={isSaving}
-                  className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                >
-                  {isSaving ? "Salvando..." : "Salvar alterações"}
-                </button>
-              </div>
-            </div>
+      <RfModal
+        open={isEditModalOpen}
+        onClose={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
+        title="Editar flashcard"
+        icon={<Pencil className="h-4 w-4" />}
+        width="36rem"
+        footer={
+          <>
+            <button
+              className="rfm-btn rfm-btn--ghost"
+              onClick={() => { setIsEditModalOpen(false); setEditCardId(null); setEditFrente(""); setEditVerso(""); setEditTopico(""); setErrorMessage(""); }}
+              disabled={isSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleEditCard}
+              disabled={isSaving}
+              className="btn-sun px-5 py-2.5 text-sm disabled:opacity-40"
+            >
+              {isSaving ? "Salvando..." : "Salvar alterações"}
+            </button>
+          </>
+        }
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-foreground/55">
+            <span className="rounded-full bg-white/5 px-2 py-0.5 font-medium">Card #{editCardId ? editCardId.slice(-3) : '--'}</span>
+            <span>·</span>
+            <span>{decks.find(d => d.id === selectedDeckId)?.name || "Baralho"}</span>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1 text-primary">
+              <Sparkles className="h-3 w-3" /> 
+              {(() => {
+                const card = dueCards.find(c => c.id === editCardId);
+                if (!card) return '0%';
+                const total = dueCards.filter(c => c.deck_id === selectedDeckId).length;
+                if (total === 0) return '0%';
+                const maturidade = Math.round(((total - (card.reps === 0 ? 1 : 0)) / total) * 100);
+                return `${maturidade}%`;
+              })()}
+            </span>
           </div>
+          <button
+            onClick={async () => {
+              if (!editCardId) return;
+              const deleted = await handleDeleteCard(editCardId);
+              if (deleted) {
+                setIsEditModalOpen(false);
+                setEditCardId(null);
+                setEditFrente("");
+                setEditVerso("");
+                setEditTopico("");
+              }
+            }}
+            className="rfm-btn rfm-btn--outline"
+            style={{ "--tone": "var(--destructive)" } as CSSProperties}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Excluir cartão
+          </button>
         </div>
-      )}
+        <div className="space-y-4">
+          <div className="rfm-face" style={{ "--tone": "var(--primary)" } as CSSProperties}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rfm-tag">Pergunta</span>
+                <span className="text-xs text-foreground/45">Frente do cartão</span>
+              </div>
+              <div className="rfm-toolbar">
+                <button type="button" onClick={() => applyFormatting(editFrenteRef, 'bold', setEditFrente)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editFrenteRef, 'italic', setEditFrente)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editFrenteRef, 'list', setEditFrente)} aria-label="Lista"><List className="h-3 w-3" /></button>
+              </div>
+            </div>
+            <textarea
+              ref={editFrenteRef}
+              rows={4}
+              placeholder="Digite a pergunta"
+              value={editFrente}
+              onChange={(e) => setEditFrente(e.target.value)}
+              className="rfm-input font-display text-base"
+            />
+          </div>
+          <div className="rfm-face" style={{ "--tone": "var(--accent)" } as CSSProperties}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rfm-tag">Resposta</span>
+                <span className="text-xs text-foreground/45">Verso do cartão</span>
+              </div>
+              <div className="rfm-toolbar">
+                <button type="button" onClick={() => applyFormatting(editVersoRef, 'bold', setEditVerso)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editVersoRef, 'italic', setEditVerso)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editVersoRef, 'list', setEditVerso)} aria-label="Lista"><List className="h-3 w-3" /></button>
+              </div>
+            </div>
+            <textarea
+              ref={editVersoRef}
+              rows={5}
+              placeholder="Digite a resposta"
+              value={editVerso}
+              onChange={(e) => setEditVerso(e.target.value)}
+              className="rfm-input text-sm leading-relaxed"
+            />
+          </div>
+          <div>
+            <label className="rfm-label">Sub-baralho (Tópico)</label>
+            <input
+              type="text"
+              placeholder="Ex: Osteologia, Arritmias..."
+              value={editTopico}
+              onChange={(e) => setEditTopico(e.target.value)}
+              className="rfm-input"
+              list="sub-baralhos-existentes-edit"
+            />
+            <datalist id="sub-baralhos-existentes-edit">
+              {subBaralhosDoDeck.lista.map((s) => (
+                <option key={s.nome} value={s.nome} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[10px] text-foreground/40">
+              💡 Deixe vazio para o card ficar em "Sem sub-baralho".
+            </p>
+          </div>
+          {editCardId && (
+            <div className="rfm-stat">
+              <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">
+                <History className="h-3 w-3 text-primary" /> Histórico de revisões
+              </header>
+              <ul className="space-y-2 text-xs">
+                {(() => {
+                  const history = getCardHistory(editCardId);
+                  if (history.length === 0 || history[0]?.message === 'Nenhuma revisão ainda') {
+                    return <li className="text-foreground/45 italic">Nenhuma revisão ainda</li>;
+                  }
+                  return history.map((h, i) => (
+                    <li key={i} className="flex items-center justify-between border-b border-border/60 pb-2 last:border-0 last:pb-0">
+                      <span className="text-foreground/55 tabular-nums">{h.data}</span>
+                      <span className={`font-medium ${h.color || 'text-foreground/55'}`}>{h.rating}</span>
+                    </li>
+                  ));
+                })()}
+              </ul>
+            </div>
+          )}
+        </div>
+      </RfModal>
 
       {/* MODAL GERENCIAR MEMBROS */}
-      {isMembersModalOpen && selectedDeckId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                Gerenciar membros
-              </h3>
-              <button
-                onClick={() => { setIsMembersModalOpen(false); setNewMemberId(""); setErrorMessage(""); }}
-                className="text-foreground/50 hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <div className="space-y-2 mb-4">
-                <p className="text-xs text-foreground/40">Membros atuais:</p>
-                {(() => {
-                  const deck = decks.find(d => d.id === selectedDeckId);
-                  if (!deck) return <p className="text-sm text-foreground/55">Carregando...</p>;
-                  const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
-                  const allMembers = [deck.owner_id, ...deck.shared_with];
-                  if (loadingMembers) {
-                    return <div className="flex justify-center py-2"><Loader2 className="h-5 w-5 animate-spin text-primary/60" /></div>;
-                  }
-                  if (allMembers.length === 0) return <p className="text-sm text-foreground/40">Nenhum membro encontrado.</p>;
-                  return allMembers.map((memberId, idx) => {
-                    const isOwner = memberId === deck.owner_id;
-                    const isYou = memberId === currentUserId;
-                    const info = membersInfo[memberId];
-                    const displayName = info?.name || memberId;
-                    const displayEmail = info?.email ? ` (${info.email})` : '';
-                    return (
-                      <div key={idx} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <UserCheck className="h-4 w-4 text-primary/60 shrink-0" />
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {displayName}{displayEmail}
-                            {isYou && <span className="ml-2 text-[10px] text-primary shrink-0">(você)</span>}
-                            {isOwner && <span className="ml-2 text-[10px] text-foreground/40 shrink-0">(dona)</span>}
-                          </span>
-                        </div>
-                        {!isOwner && isYou && (
-                          <span className="text-[10px] text-foreground/30 shrink-0">Convidada</span>
-                        )}
-                        {isOwner && !isYou && (
-                          <span className="text-[10px] text-foreground/30 shrink-0">Dona</span>
-                        )}
-                        {!isOwner && !isYou && (
-                          <button
-                            onClick={() => handleRemoveMember(memberId)}
-                            disabled={isManagingMember}
-                            className="text-destructive/60 hover:text-destructive transition-colors disabled:opacity-30 shrink-0 ml-2"
-                          >
-                            <UserMinus className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-              <div className="border-t border-border/50 pt-4">
-                <label className="text-sm font-medium text-foreground/70">Adicionar por e-mail</label>
-                <div className="flex gap-2 mt-1">
-                  <input
-                    type="email"
-                    placeholder="Digite o e-mail da amiga"
-                    value={newMemberId}
-                    onChange={(e) => setNewMemberId(e.target.value)}
-                    className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-                  />
-                  <button
-                    onClick={handleAddMember}
-                    disabled={isManagingMember || !newMemberId.trim()}
-                    className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity inline-flex items-center gap-1"
-                  >
-                    {isManagingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                    Adicionar
-                  </button>
-                </div>
-                <p className="mt-1 text-[10px] text-foreground/40">
-                  💡 Digite o e-mail cadastrado na conta da pessoa.
-                </p>
-                {copyProgress && copyProgress.total > 0 && (
-                  <div className="mt-3 animate-fadeIn">
-                    <div className="flex items-center justify-between text-xs text-foreground/60">
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Copiando cards...
-                      </span>
-                      <span className="tabular-nums">
-                        {Math.round((copyProgress.current / copyProgress.total) * 100)}% ({copyProgress.current}/{copyProgress.total})
-                      </span>
-                    </div>
-                    <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
-                        style={{ width: `${(copyProgress.current / copyProgress.total) * 100}%` }}
-                      />
-                    </div>
+      <RfModal
+        open={isMembersModalOpen && !!selectedDeckId}
+        onClose={() => { setIsMembersModalOpen(false); setNewMemberId(""); setErrorMessage(""); }}
+        title="Gerenciar membros"
+        icon={<Users className="h-4 w-4" />}
+        width="28rem"
+      >
+        <div className="space-y-2 mb-4">
+          <p className="rfm-stat__label">Membros atuais</p>
+          {(() => {
+            const deck = decks.find(d => d.id === selectedDeckId);
+            if (!deck) return <p className="text-sm text-foreground/55">Carregando...</p>;
+            const currentUserId = localStorage.getItem('revisaflash_user_id') || '';
+            const allMembers = [deck.owner_id, ...deck.shared_with];
+            if (loadingMembers) {
+              return <div className="flex justify-center py-2"><Loader2 className="h-5 w-5 animate-spin text-primary/60" /></div>;
+            }
+            if (allMembers.length === 0) return <p className="text-sm text-foreground/40">Nenhum membro encontrado.</p>;
+            return allMembers.map((memberId, idx) => {
+              const isOwner = memberId === deck.owner_id;
+              const isYou = memberId === currentUserId;
+              const info = membersInfo[memberId];
+              const displayName = info?.name || memberId;
+              const displayEmail = info?.email ? ` (${info.email})` : '';
+              return (
+                <div key={idx} className="flex items-center justify-between rounded-xl border border-border bg-muted px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <UserCheck className="h-4 w-4 text-primary/60 shrink-0" />
+                    <span className="text-sm font-medium text-foreground truncate">
+                      {displayName}{displayEmail}
+                      {isYou && <span className="ml-2 text-[10px] text-primary shrink-0">(você)</span>}
+                      {isOwner && <span className="ml-2 text-[10px] text-foreground/40 shrink-0">(dona)</span>}
+                    </span>
                   </div>
-                )}
+                  {!isOwner && isYou && (
+                    <span className="text-[10px] text-foreground/30 shrink-0">Convidada</span>
+                  )}
+                  {isOwner && !isYou && (
+                    <span className="text-[10px] text-foreground/30 shrink-0">Dona</span>
+                  )}
+                  {!isOwner && !isYou && (
+                    <button
+                      onClick={() => handleRemoveMember(memberId)}
+                      disabled={isManagingMember}
+                      className="rfm-icon-btn rfm-icon-btn--danger shrink-0 ml-2"
+                      aria-label="Remover membro"
+                    >
+                      <UserMinus className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            });
+          })()}
+        </div>
+        <div className="border-t border-border/60 pt-4">
+          <label className="rfm-label">Adicionar por e-mail</label>
+          <div className="flex gap-2 mt-1">
+            <input
+              type="email"
+              placeholder="Digite o e-mail da amiga"
+              value={newMemberId}
+              onChange={(e) => setNewMemberId(e.target.value)}
+              className="rfm-input flex-1"
+            />
+            <button
+              onClick={handleAddMember}
+              disabled={isManagingMember || !newMemberId.trim()}
+              className="btn-sun inline-flex items-center gap-1 px-4 py-2 text-sm disabled:opacity-30"
+            >
+              {isManagingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              Adicionar
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] text-foreground/40">
+            💡 Digite o e-mail cadastrado na conta da pessoa.
+          </p>
+          {copyProgress && copyProgress.total > 0 && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-xs text-foreground/60">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Copiando cards...
+                </span>
+                <span className="tabular-nums">
+                  {Math.round((copyProgress.current / copyProgress.total) * 100)}% ({copyProgress.current}/{copyProgress.total})
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                  style={{ width: `${(copyProgress.current / copyProgress.total) * 100}%` }}
+                />
               </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </RfModal>
 
       {/* MODAL: CARDS MAIS DIFÍCEIS */}
-      {isHardestModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[80vh] flex flex-col shadow-elevated">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Flame className="h-5 w-5 text-accent" />
-                Cards mais difíceis
-              </h3>
-              <button
-                onClick={() => setIsHardestModalOpen(false)}
-                className="text-foreground/50 hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex gap-2 border-b border-border/50 pb-3 mb-3">
-              <button
-                onClick={() => setHardestTab("hoje")}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  hardestTab === "hoje"
-                    ? "bg-primary/20 text-primary"
-                    : "text-foreground/50 hover:text-foreground/80"
-                }`}
-              >
-                📅 Cards de hoje
-              </button>
-              <button
-                onClick={() => setHardestTab("geral")}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  hardestTab === "geral"
-                    ? "bg-primary/20 text-primary"
-                    : "text-foreground/50 hover:text-foreground/80"
-                }`}
-              >
-                📚 Geral
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {hardestTab === "hoje" ? (
-                <HardestList 
-                  title="🔥 Cards mais difíceis de hoje"
-                  cards={getHardestCardsToday(15)}
-                  getCardMeta={getCardMeta}
-                />
-              ) : (
-                <HardestList 
-                  title="📊 Todos os cards mais difíceis"
-                  cards={getHardestCards(20)}
-                  getCardMeta={getCardMeta}
-                />
-              )}
-            </div>
-            <div className="pt-3 border-t border-border/50 flex justify-end">
-              <button
-                onClick={() => setIsHardestModalOpen(false)}
-                className="rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
+      <RfModal
+        open={isHardestModalOpen}
+        onClose={() => setIsHardestModalOpen(false)}
+        title="Cards mais difíceis"
+        icon={<Flame className="h-4 w-4" />}
+        tone="var(--accent)"
+        width="44rem"
+        footer={
+          <button
+            className="rfm-btn rfm-btn--ghost"
+            onClick={() => setIsHardestModalOpen(false)}
+          >
+            Fechar
+          </button>
+        }
+      >
+        <div role="tablist" className="rfm-tabs mb-4">
+          <button
+            role="tab"
+            aria-selected={hardestTab === "hoje"}
+            className="rfm-tab"
+            onClick={() => setHardestTab("hoje")}
+          >
+            <CalendarDays className="h-3.5 w-3.5" /> Cards de hoje
+          </button>
+          <button
+            role="tab"
+            aria-selected={hardestTab === "geral"}
+            className="rfm-tab"
+            onClick={() => setHardestTab("geral")}
+          >
+            <Library className="h-3.5 w-3.5" /> Geral
+          </button>
         </div>
-      )}
+        <div className="max-h-[50vh] overflow-y-auto pr-1" style={{ "--tone": "var(--accent)" } as CSSProperties}>
+          {hardestTab === "hoje" ? (
+            <HardestList 
+              title="Cards mais difíceis de hoje"
+              titleIcon={<Flame className="h-3.5 w-3.5 text-accent" />}
+              cards={getHardestCardsToday(15)}
+              getCardMeta={getCardMeta}
+            />
+          ) : (
+            <HardestList 
+              title="Todos os cards mais difíceis"
+              titleIcon={<BarChart3 className="h-3.5 w-3.5 text-primary" />}
+              cards={getHardestCards(20)}
+              getCardMeta={getCardMeta}
+            />
+          )}
+        </div>
+      </RfModal>
+
+      {/* MODAL: GERENCIAR SUB-BARALHOS */}
+      <RfModal
+        open={isSubBaralhosModalOpen}
+        onClose={() => { setIsSubBaralhosModalOpen(false); setEditandoSub(null); setNomeNovoSub(""); }}
+        title="Gerenciar sub-baralhos"
+        icon={<FolderTree className="h-4 w-4" />}
+        tone="var(--primary)"
+        width="34rem"
+        footer={
+          <button
+            className="rfm-btn rfm-btn--ghost"
+            onClick={() => { setIsSubBaralhosModalOpen(false); setEditandoSub(null); setNomeNovoSub(""); }}
+          >
+            Fechar
+          </button>
+        }
+      >
+        <p className="text-xs text-foreground/50 mb-4">
+          Renomeie ou exclua os sub-baralhos deste baralho. Excluir um sub-baralho <strong>não apaga os cards</strong> — eles voltam para "Sem sub-baralho".
+        </p>
+
+        {subBaralhosDoDeck.lista.length === 0 && subBaralhosDoDeck.semTopico === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Nenhum sub-baralho criado ainda. Adicione cards com o campo "Tópico" preenchido para criar.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {subBaralhosDoDeck.lista.map((s) => {
+              const isEditando = editandoSub === s.nome;
+              return (
+                <div
+                  key={s.nome}
+                  className="flex items-center gap-3 rounded-xl border border-border bg-muted px-3 py-2"
+                >
+                  <span className="rfm-fcard__num shrink-0">
+                    {s.count}
+                  </span>
+                  {isEditando ? (
+                    <>
+                      <input
+                        type="text"
+                        value={nomeNovoSub}
+                        onChange={(e) => setNomeNovoSub(e.target.value)}
+                        className="rfm-input flex-1 py-1.5"
+                        placeholder="Novo nome"
+                        autoFocus
+                      />
+                      <button
+                        className="btn-sun px-3 py-1.5 text-xs"
+                        onClick={async () => {
+                          const novo = nomeNovoSub.trim();
+                          if (!novo || novo === s.nome) {
+                            setEditandoSub(null);
+                            setNomeNovoSub("");
+                            return;
+                          }
+                          const cardsDoSub = allCardsInDeck.filter(c => (c.topico || "").trim() === s.nome);
+                          for (const c of cardsDoSub) {
+                            await editCard(c.id, c.front, c.back, { topico: novo });
+                          }
+                          setEditandoSub(null);
+                          setNomeNovoSub("");
+                          if (filtroTopico === s.nome) setFiltroTopico(novo);
+                          refreshFlashcards();
+                          if (selectedDeckId) {
+                            const atualizados = await getAllCardsByDeck(selectedDeckId);
+                            setAllCardsInDeck(atualizados);
+                          }
+                        }}
+                      >
+                        Salvar
+                      </button>
+                      <button
+                        className="rfm-btn rfm-btn--ghost px-3 py-1.5 text-xs"
+                        onClick={() => { setEditandoSub(null); setNomeNovoSub(""); }}
+                      >
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 truncate text-sm font-medium">{s.nome}</span>
+                      <button
+                        className="rfm-icon-btn"
+                        title="Renomear"
+                        onClick={() => { setEditandoSub(s.nome); setNomeNovoSub(s.nome); }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="rfm-icon-btn rfm-icon-btn--danger"
+                        title="Excluir sub-baralho"
+                        onClick={async () => {
+                          const ok = await confirmDialog({
+                            title: `Excluir sub-baralho "${s.nome}"?`,
+                            description: "Os cards não serão apagados — eles voltam para 'Sem sub-baralho'.",
+                            confirmText: "Excluir",
+                            cancelText: "Cancelar",
+                            destructive: true,
+                          });
+                          if (!ok) return;
+                          const cardsDoSub = allCardsInDeck.filter(c => (c.topico || "").trim() === s.nome);
+                          for (const c of cardsDoSub) {
+                            await editCard(c.id, c.front, c.back, { topico: "" });
+                          }
+                          if (filtroTopico === s.nome) setFiltroTopico(null);
+                          refreshFlashcards();
+                          if (selectedDeckId) {
+                            const atualizados = await getAllCardsByDeck(selectedDeckId);
+                            setAllCardsInDeck(atualizados);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {subBaralhosDoDeck.semTopico > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-transparent px-3 py-2">
+                <span className="rfm-fcard__num shrink-0">{subBaralhosDoDeck.semTopico}</span>
+                <span className="flex-1 text-sm italic text-muted-foreground">Sem sub-baralho</span>
+              </div>
+            )}
+          </div>
+        )}
+      </RfModal>
     </>
   );
 }
 
 // ============================================================
-// COMPONENTES VISUAIS
+// BOTÕES FSRS
 // ============================================================
 
 function FsrsButton({ label, hint, variant = "default", onClick, disabled }: {
@@ -1913,30 +2128,12 @@ function FsrsButton({ label, hint, variant = "default", onClick, disabled }: {
   );
 }
 
-function Mini({ l, v, icon, tone }: { l: string; v: React.ReactNode; icon?: React.ReactNode; tone?: "accent" }) {
-  return (
-    <div className="rf-card p-4">
-      {icon && <div className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">{icon}</div>}
-      <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{l}</div>
-      <div className={["mt-1 font-display text-xl font-semibold tabular-nums", tone === "accent" ? "text-accent" : ""].join(" ")}>{v}</div>
-    </div>
-  );
-}
-
-function Pill({ l, v, accent }: { l: string; v: number; accent?: boolean }) {
-  return (
-    <div>
-      <div className={["font-display text-sm font-semibold tabular-nums", accent ? "text-accent" : "text-foreground"].join(" ")}>{v}</div>
-      <div className="text-[10px] uppercase tracking-widest text-foreground/40">{l}</div>
-    </div>
-  );
-}
-
 // ============================================================
-// COMPONENTE AUXILIAR PARA EXIBIR LISTA DE CARDS DIFÍCEIS
+// LISTA DE CARDS DIFÍCEIS
 // ============================================================
-function HardestList({ title, cards, getCardMeta }: { 
+function HardestList({ title, titleIcon, cards, getCardMeta }: { 
   title: string; 
+  titleIcon?: React.ReactNode;
   cards: any[]; 
   getCardMeta: (id: string) => any;
 }) {
@@ -1945,32 +2142,34 @@ function HardestList({ title, cards, getCardMeta }: {
   }
   
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-foreground/40 mb-2">{title}</p>
+    <div className="space-y-2.5">
+      <p className="rfm-stat__label mb-2 flex items-center gap-1.5">
+        {titleIcon}
+        {title}
+      </p>
       {cards.map((card, index) => {
         const meta = getCardMeta(card.id);
         const lapses = card.lapses || 0;
         const difficulty = card.difficulty || 0;
         const stability = card.stability || 0;
         const isLeech = lapses >= 5;
+        const topico = card.topico || meta.topico;
         
         return (
-          <div key={card.id} className="flex items-start gap-3 rounded-lg bg-background/40 p-3 hover:bg-background/60 transition-colors">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent/10 font-display text-sm font-bold text-accent">
-              {index + 1}
-            </div>
+          <div key={card.id} className="rfm-row">
+            <span className="rfm-rank">{index + 1}</span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground line-clamp-2">
+              <p className="text-sm font-semibold text-foreground leading-snug">
                 <FormattedText text={card.front} />
               </p>
-              {meta.topico && (
-                <span className="text-[10px] text-foreground/40">{meta.topico}</span>
+              {topico && (
+                <span className="text-[10px] text-primary">🏷 {topico}</span>
               )}
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-foreground/40">
-                <span>❌ Erros: <strong className="text-accent">{lapses}</strong></span>
-                <span>📊 Dificuldade: {difficulty.toFixed(1)}</span>
-                <span>⚡ Estabilidade: {stability.toFixed(1)}</span>
-                {isLeech && <span className="text-accent font-medium">🩸 Sanguessuga</span>}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="rfm-meta"><X className="h-3 w-3 text-destructive" /> Erros: <b className="text-accent">{lapses}</b></span>
+                <span className="rfm-meta"><BarChart3 className="h-3 w-3" /> Dificuldade: {difficulty.toFixed(1)}</span>
+                <span className="rfm-meta"><Zap className="h-3 w-3 text-primary" /> Estabilidade: {stability.toFixed(1)}</span>
+                {isLeech && <span className="rfm-meta font-semibold text-accent"><Droplet className="h-3 w-3" /> Sanguessuga</span>}
               </div>
             </div>
           </div>

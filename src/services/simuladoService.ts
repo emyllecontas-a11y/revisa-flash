@@ -42,7 +42,6 @@ function serializar<T>(key: string, fn: () => Promise<T>): Promise<T> {
     return undefined as any;
   });
   saveQueues.set(key, proxima);
-  // Limpa quando terminar para não vazar memória
   proxima.finally(() => {
     if (saveQueues.get(key) === proxima) saveQueues.delete(key);
   });
@@ -248,12 +247,10 @@ export async function salvarProgresso(
       const db = await getDb();
       const now = nowIso();
 
-      // SEMPRE lê o doc atual antes de tocar (evita usar state velho)
       const existing = await db.progresso_simulado.findOne({
         selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
       }).exec();
 
-      // Regra de proteção: nunca sobrescrever com dados vazios se já tem dados
       const existingRespostas: any = existing?.get('respostas') || {};
       const existingMarcadas: any = existing?.get('marcadas') || [];
       const existingTempo: number = existing?.get('tempo_decorrido') || 0;
@@ -262,7 +259,6 @@ export async function salvarProgresso(
       const novasMarcadas = progresso.marcadas ?? existingMarcadas;
       const novoTempo = progresso.tempo_decorrido ?? existingTempo;
 
-      // Se a chamada veio com TUDO vazio mas já tem dados no banco, ignora
       const veioVazio =
         Object.keys(progresso.respostas || {}).length === 0 &&
         (progresso.marcadas || []).length === 0 &&
@@ -786,4 +782,146 @@ export function calcularResultado(
     porcentagem,
     tempoDecorrido: 0,
   };
+}
+
+// ============================================================
+// 17. RESETAR PROGRESSO DO SIMULADO
+// ============================================================
+export async function resetarProgressoSimulado(
+  simuladoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.progresso_simulado.findOne({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+    if (doc) {
+      await doc.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'progresso_simulado', {
+        id: doc.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao resetar progresso do simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// AUXILIAR — apaga study_records vinculados a um simulado.
+// ============================================================
+async function apagarStudyRecordsDoSimulado(
+  userId: string,
+  tituloSimulado: string,
+  createdAts: string[]
+): Promise<void> {
+  if (!tituloSimulado || createdAts.length === 0) return;
+  const db = await getDb();
+  const now = nowIso();
+  const docs = await db.study_records.find({
+    selector: {
+      user_id: userId,
+      source: 'simulado',
+      topic: tituloSimulado,
+    },
+  }).exec();
+
+  for (const d of docs) {
+    if (d.get('isDeleted')) continue;
+    const recordCreatedAt = d.get('createdAt') || '';
+    const match = createdAts.some(ts => {
+      const diff = Math.abs(
+        new Date(recordCreatedAt).getTime() - new Date(ts).getTime()
+      );
+      return diff < 10_000;
+    });
+    if (!match) continue;
+    await d.patch({ isDeleted: true, updated_at: now });
+  }
+}
+
+// ============================================================
+// 18. EXCLUIR UM RESULTADO DE SIMULADO
+// ============================================================
+export async function excluirResultadoSimulado(
+  resultadoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.resultados_simulado.findOne({
+      selector: { id: resultadoId },
+    }).exec();
+    if (!doc || doc.get('user_id') !== userId) {
+      return { success: false, error: 'Resultado não encontrado' };
+    }
+
+    const simuladoId = doc.get('simulado_id');
+    const createdAt = doc.get('created_at') || now;
+
+    await doc.patch({ isdeleted: true, updated_at: now });
+    await enqueueOperation('update', 'resultados_simulado', {
+      id: resultadoId, isdeleted: true, updated_at: now,
+    });
+
+    try {
+      const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+      const titulo = simDoc ? simDoc.get('titulo') : '';
+      if (titulo) {
+        await apagarStudyRecordsDoSimulado(userId, titulo, [createdAt]);
+      }
+    } catch (e) {
+      console.warn('⚠️ Não foi possível apagar study_records do simulado:', e);
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao excluir resultado de simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 19. EXCLUIR TODOS OS RESULTADOS DE UM SIMULADO
+// ============================================================
+export async function excluirTodosResultadosSimulado(
+  simuladoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const docs = await db.resultados_simulado.find({
+      selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
+    }).exec();
+
+    const createdAts: string[] = [];
+    for (const d of docs) {
+      const createdAt = d.get('created_at') || now;
+      createdAts.push(createdAt);
+      await d.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'resultados_simulado', {
+        id: d.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+
+    try {
+      const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+      const titulo = simDoc ? simDoc.get('titulo') : '';
+      if (titulo && createdAts.length > 0) {
+        await apagarStudyRecordsDoSimulado(userId, titulo, createdAts);
+      }
+    } catch (e) {
+      console.warn('⚠️ Não foi possível apagar study_records do simulado:', e);
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao excluir todos os resultados do simulado:', error);
+    return { success: false, error: error.message };
+  }
 }

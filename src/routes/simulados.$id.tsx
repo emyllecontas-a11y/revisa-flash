@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { AppShell } from "@/components/app-shell";
+import { QuestaoCard } from "@/components/QuestaoCard";
 import {
   getSimuladoCompleto,
   getProgresso,
@@ -13,9 +14,9 @@ import {
   buscarResultadoSimulado,
 } from "@/services/simuladoService";
 import {
-  ArrowLeft, ArrowRight, Bookmark, Check, Clock, Flag, Grid3X3, X,
-  CheckCircle2, XCircle, MinusCircle, RotateCcw, Undo2, ChevronLeft,
-  Loader2, Trash2
+  ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
+  CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
+  Loader2, Trash2, Trophy,
 } from "lucide-react";
 import type { SimuladoPlayer, QuestaoPlayer, ProgressoPlayer, Alternativa } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -269,6 +270,17 @@ export default function SimuladoPlayerPage() {
     }
   };
 
+  const handleSair = async () => {
+    const ok = await confirmDialog({
+      title: "Tem certeza que deseja sair?",
+      description: "Você poderá retomar de onde parou se voltar a este simulado.",
+      confirmText: "Sair",
+      cancelText: "Ficar",
+      destructive: true,
+    });
+    if (ok) navigate("/simulados");
+  };
+
   const handleExcluirSimulado = async () => {
     if (!id || !user?.id || !simulado) return;
     const ok = await confirmDialog({
@@ -313,7 +325,7 @@ export default function SimuladoPlayerPage() {
           <p className="text-accent">{error || "Simulado não encontrado"}</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar para simulados
           </button>
@@ -329,7 +341,7 @@ export default function SimuladoPlayerPage() {
           <p className="text-accent">Este simulado não possui questões.</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar para simulados
           </button>
@@ -338,6 +350,9 @@ export default function SimuladoPlayerPage() {
     );
   }
 
+  // ============================================================
+  // FASE RESULTADO (visual novo)
+  // ============================================================
   if (fase === "resultado") {
     const questoes = simulado.questoes;
     const total = questoes.length;
@@ -369,17 +384,18 @@ export default function SimuladoPlayerPage() {
 
     return (
       <AppShell breadcrumb="Simulados" title="Resultado do simulado">
-        <div className="mb-4 flex items-center justify-between">
+        {/* Cabeçalho */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => navigate("/simulados")}
-            className="inline-flex items-center gap-1.5 text-xs text-foreground/50 hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar para simulados
           </button>
           <button
             onClick={handleExcluirSimulado}
             disabled={excluindo}
-            className="inline-flex items-center gap-1.5 text-xs text-accent/70 hover:text-accent transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
           >
             {excluindo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
             Excluir simulado
@@ -387,18 +403,20 @@ export default function SimuladoPlayerPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+          {/* Painel do donut */}
           <div className="rf-card flex flex-col items-center p-6 text-center">
             <Donut pct={pct} />
             <div className="mt-4 font-display text-2xl font-semibold tabular-nums">
               {acertos} / {total}
             </div>
-            <p className="text-xs text-foreground/50">acertos · {pct}% de aproveitamento</p>
-            <p className="mt-3 text-xs text-foreground/45">{simulado.titulo}</p>
+            <p className="text-xs text-muted-foreground">acertos · {pct}% de aproveitamento</p>
+            <p className="mt-3 text-xs text-muted-foreground">{simulado.titulo}</p>
             {usarResultadoSalvo && (
-              <span className="mt-2 text-[10px] text-foreground/30">Resultado salvo</span>
+              <span className="mt-2 text-[10px] text-muted-foreground/60">Resultado salvo</span>
             )}
           </div>
 
+          {/* Stats + lista de questões */}
           <div className="grid gap-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Stat label="Acertos" value={acertos} tone="ok" />
@@ -416,23 +434,25 @@ export default function SimuladoPlayerPage() {
                   const acertou = resp === correta;
                   const status = !resp ? "nao-respondida" : acertou ? "acertou" : "errou";
 
+                  const pillCls =
+                    status === "nao-respondida"
+                      ? "bg-muted text-muted-foreground"
+                      : status === "acertou"
+                      ? "bg-green-500/15 text-green-500"
+                      : "bg-accent/15 text-accent";
+
                   return (
                     <button
                       key={q.id}
                       onClick={() => { setIdx(i); setFase("correcao"); }}
-                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-surface/40 px-3 py-2 text-left transition-colors hover:bg-surface"
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border bg-surface/40 px-3 py-2 text-left transition-colors hover:bg-surface"
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-medium">Questão {q.numero}</div>
-                        <div className="truncate text-[11px] text-foreground/40">{q.area || ""}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">{q.area || ""}</div>
                       </div>
                       <span
-                        className={[
-                          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          status === "nao-respondida" ? "bg-white/5 text-foreground/45" :
-                          status === "acertou" ? "bg-primary/15 text-primary" :
-                          "bg-accent/15 text-accent",
-                        ].join(" ")}
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pillCls}`}
                       >
                         {status === "nao-respondida" ? <MinusCircle className="h-3 w-3" /> :
                          status === "acertou" ? <CheckCircle2 className="h-3 w-3" /> :
@@ -451,19 +471,24 @@ export default function SimuladoPlayerPage() {
     );
   }
 
+  // ============================================================
+  // FASE CORREÇÃO (usando o QuestaoCard com revelar=true)
+  // ============================================================
   if (fase === "correcao") {
     const q = simulado.questoes[idx];
     const respostasParaExibir = resultadoSalvo?.respostas || progresso.respostas;
     const resp = respostasParaExibir[q.numero];
     const correta = q.alternativas.find(a => a.correta)?.letra;
     const acertou = resp === correta;
+    const total = simulado.questoes.length;
 
     return (
       <AppShell breadcrumb="Simulados" title={`Gabarito comentado — Questão ${q.numero}`}>
+        {/* Cabeçalho */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setFase("resultado")}
-            className="inline-flex items-center gap-1.5 text-xs text-foreground/50 hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar ao resultado
           </button>
@@ -480,78 +505,38 @@ export default function SimuladoPlayerPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="rf-card p-5 sm:p-6">
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{q.area || ""}</span>
-            <p className="mt-3 text-sm leading-relaxed text-foreground/85">
-              <span className="font-display font-semibold">{q.numero}.</span> {q.enunciado}
-            </p>
+        <QuestaoCard
+          numero={q.numero}
+          total={total}
+          area={q.area || null}
+          enunciado={q.enunciado}
+          alternativas={q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }))}
+          selecionada={resp ?? null}
+          correta={correta ?? null}
+          comentario={q.comentario_geral || null}
+          revelar={true}
+          permitirEliminar={false}
+          onSelecionar={() => {}}
+        />
 
-            <div className="mt-5 space-y-2">
-              {q.alternativas.map((a: Alternativa) => {
-                const isCorreta = !!a.correta;
-                const isSua = resp === a.letra;
-                return (
-                  <div
-                    key={a.letra}
-                    className={[
-                      "rounded-xl border p-3",
-                      isCorreta
-                        ? "border-primary/50 bg-primary/10"
-                        : isSua
-                          ? "border-accent/50 bg-accent/10"
-                          : "border-border bg-surface/40",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={[
-                          "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold",
-                          isCorreta ? "border-primary text-primary" : isSua ? "border-accent text-accent" : "border-border text-foreground/50",
-                        ].join(" ")}
-                      >
-                        {a.letra}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs leading-relaxed text-foreground/80">{a.texto}</p>
-                        <p className="mt-1 text-[11px] text-foreground/45">
-                          <span className={isCorreta ? "font-semibold text-primary" : "font-semibold text-foreground/60"}>
-                            {isCorreta ? "Correta" : "Incorreta"}
-                          </span>{" "}
-                          — {a.comentario || "Comentário disponível em breve."}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="rf-card p-5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-foreground/50">Sua resposta</span>
-                <span className="font-display text-sm font-semibold">{resp ?? "—"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs">
-                <span className="text-foreground/50">Resposta correta</span>
-                <span className="font-display text-sm font-semibold text-primary">{correta}</span>
-              </div>
-              <div
-                className={[
-                  "mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold",
-                  !resp ? "bg-white/5 text-foreground/50" : acertou ? "bg-primary/15 text-primary" : "bg-accent/15 text-accent",
-                ].join(" ")}
-              >
-                {!resp ? <MinusCircle className="h-3.5 w-3.5" /> : acertou ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                {!resp ? "Não respondida" : acertou ? "Você acertou" : "Você errou"}
-              </div>
-            </div>
-
-            <div className="rf-card p-5">
-              <h4 className="mb-2 font-display text-sm font-semibold">Comentário</h4>
-              <p className="text-xs leading-relaxed text-foreground/60">{q.comentario_geral || "Sem comentário adicional."}</p>
+        {/* Painel lateral com sua resposta / resposta correta */}
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="rf-card p-5">
+            <h4 className="mb-2 font-display text-sm font-semibold">Status</h4>
+            <div
+              className={[
+                "inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-semibold",
+                !resp
+                  ? "bg-muted text-muted-foreground"
+                  : acertou
+                  ? "bg-green-500/15 text-green-500"
+                  : "bg-accent/15 text-accent",
+              ].join(" ")}
+            >
+              {!resp ? <MinusCircle className="h-3.5 w-3.5" /> :
+               acertou ? <CheckCircle2 className="h-3.5 w-3.5" /> :
+               <XCircle className="h-3.5 w-3.5" />}
+              {!resp ? "Não respondida" : acertou ? "Você acertou" : "Você errou"}
             </div>
           </div>
         </div>
@@ -559,6 +544,9 @@ export default function SimuladoPlayerPage() {
     );
   }
 
+  // ============================================================
+  // FASE RESOLVENDO
+  // ============================================================
   const q = simulado.questoes[idx];
   const elimAtual = progresso.eliminadas[q.numero] || [];
   const selecionada = progresso.respostas[q.numero];
@@ -568,11 +556,12 @@ export default function SimuladoPlayerPage() {
 
   return (
     <AppShell breadcrumb="Simulados">
+      {/* Cabeçalho */}
       <div className="rf-card mb-4 p-4 sm:p-5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <div className="min-w-0">
             <button
-              onClick={() => navigate("/simulados")}
+              onClick={handleSair}
               className="inline-flex items-center gap-1.5 text-[11px] text-foreground/45 hover:text-foreground"
             >
               <ChevronLeft className="h-3 w-3" /> Sair do simulado
@@ -582,7 +571,7 @@ export default function SimuladoPlayerPage() {
               Questão {idx + 1} de {total} · {respondidas} respondidas
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
               <Clock className="h-3.5 w-3.5 text-accent" />
               <span className="font-display text-xs font-semibold tabular-nums text-foreground">
@@ -592,8 +581,10 @@ export default function SimuladoPlayerPage() {
             <button
               onClick={() => setPainel(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+              title="Painel de questões"
             >
-              <Grid3X3 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Questões</span>
+              <Grid3X3 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Questões</span>
             </button>
             <button
               onClick={handleExcluirSimulado}
@@ -604,6 +595,13 @@ export default function SimuladoPlayerPage() {
               {excluindo ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
               <span className="hidden sm:inline">Excluir</span>
             </button>
+            <button
+              onClick={() => setConfirmar(true)}
+              className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+            >
+              <Flag className="h-3.5 w-3.5" />
+              Finalizar
+            </button>
           </div>
         </div>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/5">
@@ -611,141 +609,69 @@ export default function SimuladoPlayerPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rf-card p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{q.area || ""}</span>
-            <button
-              onClick={toggleMarcar}
-              className={[
-                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-colors",
-                progresso.marcadas.includes(q.numero)
-                  ? "border-accent/50 bg-accent/10 text-accent"
-                  : "border-border bg-surface/60 text-foreground/60 hover:bg-surface",
-              ].join(" ")}
-            >
-              <Bookmark className={["h-3.5 w-3.5", progresso.marcadas.includes(q.numero) ? "fill-current" : ""].join(" ")} />
-              {progresso.marcadas.includes(q.numero) ? "Marcada" : "Marcar"}
-            </button>
-          </div>
+      {/* Questão em página inteira */}
+      <QuestaoCard
+        numero={idx + 1}
+        total={total}
+        area={q.area || null}
+        enunciado={q.enunciado}
+        alternativas={q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }))}
+        selecionada={selecionada ?? null}
+        eliminadas={elimAtual}
+        marcada={progresso.marcadas.includes(q.numero)}
+        permitirEliminar={true}
+        revelar={false}
+        onSelecionar={(letra) => responder(letra)}
+        onEliminar={(letra) => toggleEliminada(letra)}
+        onMarcar={toggleMarcar}
+      />
 
-          <p className="mt-4 text-sm leading-relaxed text-foreground/85">
-            <span className="font-display font-semibold">{q.numero}.</span> {q.enunciado}
-          </p>
-
-          <p className="mt-5 text-[11px] text-foreground/40">
-            Toque na alternativa para responder · use o <X className="inline h-3 w-3" /> para eliminar
-          </p>
-
-          <div className="mt-2 space-y-2">
-            {q.alternativas.map((a: Alternativa) => {
-              const eliminada = elimAtual.includes(a.letra);
-              const ativa = selecionada === a.letra;
-              return (
-                <div
-                  key={a.letra}
-                  className={[
-                    "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border p-3 transition-colors",
-                    ativa ? "border-primary bg-primary/10" : "border-border bg-surface/40 hover:bg-surface/70",
-                    eliminada ? "opacity-45" : "",
-                  ].join(" ")}
-                >
-                  <button
-                    type="button"
-                    onClick={() => !eliminada && responder(a.letra)}
-                    disabled={eliminada}
-                    className="flex min-w-0 items-start gap-3 text-left"
-                  >
-                    <span
-                      className={[
-                        "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold transition-colors",
-                        ativa ? "border-primary bg-primary text-primary-foreground" : "border-border text-foreground/55",
-                      ].join(" ")}
-                    >
-                      {ativa ? <Check className="h-3.5 w-3.5" /> : a.letra}
-                    </span>
-                    <span className={["min-w-0 text-xs leading-relaxed text-foreground/80", eliminada ? "line-through decoration-accent/70" : ""].join(" ")}>
-                      {a.texto}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleEliminada(a.letra)}
-                    className={[
-                      "grid h-7 w-7 shrink-0 place-items-center rounded-lg border transition-colors",
-                      eliminada
-                        ? "border-accent/50 bg-accent/10 text-accent"
-                        : "border-border text-foreground/35 hover:border-accent/40 hover:text-accent",
-                    ].join(" ")}
-                  >
-                    {eliminada ? <Undo2 className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
-          {elimAtual.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-foreground/45">
-              <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 font-medium text-accent">
-                {elimAtual.length} eliminada{elimAtual.length > 1 ? "s" : ""}: {elimAtual.join(", ")}
-              </span>
-              <button
-                onClick={() => setProgresso(prev => ({
-                  ...prev,
-                  eliminadas: { ...prev.eliminadas, [q.numero]: [] },
-                }))}
-                className="inline-flex items-center gap-1 hover:text-foreground"
-              >
-                <RotateCcw className="h-3 w-3" /> desfazer todas
-              </button>
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-between gap-2">
-            <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
-              <ArrowLeft className="h-3.5 w-3.5" /> Anterior
-            </NavBtn>
-            {idx === total - 1 ? (
-              <button
-                onClick={() => setConfirmar(true)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                <Flag className="h-3.5 w-3.5" /> Finalizar simulado
-              </button>
-            ) : (
-              <button
-                onClick={() => setIdx(i => i + 1)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                Próxima <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+      {elimAtual.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-foreground/45">
+          <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 font-medium text-accent">
+            {elimAtual.length} eliminada{elimAtual.length > 1 ? "s" : ""}: {elimAtual.join(", ")}
+          </span>
+          <button
+            onClick={() => setProgresso(prev => ({
+              ...prev,
+              eliminadas: { ...prev.eliminadas, [q.numero]: [] },
+            }))}
+            className="inline-flex items-center gap-1 hover:text-foreground"
+          >
+            <RotateCcw className="h-3 w-3" /> desfazer todas
+          </button>
         </div>
+      )}
 
-        <aside className="hidden lg:block">
-          <div className="rf-card sticky top-20 p-5">
-            <PainelQuestoes
-              total={total}
-              atual={idx}
-              respostas={progresso.respostas}
-              marcadas={progresso.marcadas}
-              onPick={(i) => setIdx(i)}
-            />
-            <button
-              onClick={() => setConfirmar(true)}
-              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-            >
-              <Flag className="h-3.5 w-3.5" /> Finalizar simulado
-            </button>
-          </div>
-        </aside>
+      {/* Navegação entre questões */}
+      <div className="mt-6 flex items-center justify-between gap-2">
+        <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Anterior
+        </NavBtn>
+        {idx === total - 1 ? (
+          <button
+            onClick={() => setConfirmar(true)}
+            className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+          >
+            <Flag className="h-3.5 w-3.5" /> Finalizar simulado
+          </button>
+        ) : (
+          <button
+            onClick={() => setIdx(i => i + 1)}
+            className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+          >
+            Próxima <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
+      {/* Painel de questões — overlay */}
       {painel && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setPainel(false)}>
-          <div className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" onClick={() => setPainel(false)}>
+          <div
+            className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5 sm:max-w-md sm:rounded-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mb-4 flex items-center justify-between">
               <h3 className="font-display text-sm font-semibold">Painel de questões</h3>
               <button onClick={() => setPainel(false)} className="grid h-7 w-7 place-items-center rounded-md text-foreground/50 hover:bg-white/5">
@@ -759,6 +685,12 @@ export default function SimuladoPlayerPage() {
               marcadas={progresso.marcadas}
               onPick={(i) => { setIdx(i); setPainel(false); }}
             />
+            <button
+              onClick={() => { setPainel(false); setConfirmar(true); }}
+              className="btn-sun mt-5 inline-flex w-full items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-bold"
+            >
+              <Flag className="h-3.5 w-3.5" /> Finalizar simulado
+            </button>
           </div>
         </div>
       )}
@@ -782,7 +714,7 @@ export default function SimuladoPlayerPage() {
               </button>
               <button
                 onClick={handleFinalizar}
-                className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                className="btn-sun flex-1 px-3 py-2 text-xs font-bold"
               >
                 Finalizar
               </button>
@@ -794,6 +726,9 @@ export default function SimuladoPlayerPage() {
   );
 }
 
+// ============================================================
+// Painel de questões
+// ============================================================
 function PainelQuestoes({ total, atual, respostas, marcadas, onPick }: {
   total: number;
   atual: number;
@@ -804,46 +739,36 @@ function PainelQuestoes({ total, atual, respostas, marcadas, onPick }: {
   return (
     <div>
       <h4 className="mb-3 font-display text-sm font-semibold">Painel de questões</h4>
-      <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 lg:grid-cols-5">
+      <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
         {Array.from({ length: total }, (_, i) => {
           const n = i + 1;
           const respondida = !!respostas[n];
           const marcada = marcadas.includes(n);
           const isAtual = i === atual;
+
+          let cls = "bg-muted text-muted-foreground hover:bg-surface-2";
+          if (isAtual) cls = "bg-primary text-primary-foreground";
+          else if (marcada) cls = "bg-success text-primary-foreground";
+          else if (respondida) cls = "bg-accent text-accent-foreground";
+
           return (
             <button
               key={n}
               onClick={() => onPick(i)}
-              className={[
-                "relative grid aspect-square place-items-center rounded-lg border text-[11px] font-semibold tabular-nums transition-colors",
-                isAtual
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : respondida
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-surface/40 text-foreground/45 hover:bg-surface",
-              ].join(" ")}
+              className={`aspect-square rounded-xl text-sm font-bold tabular-nums transition-colors ${cls}`}
             >
               {n}
-              {marcada && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" />}
             </button>
           );
         })}
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px] text-foreground/45">
-        <Legenda className="bg-primary" label="Atual" />
-        <Legenda className="bg-primary/30" label="Respondida" />
-        <Legenda className="bg-white/10" label="Não respondida" />
-        <Legenda className="bg-accent" label="Para revisar" />
+      <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-primary" /> Atual</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-accent" /> Respondida</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-success" /> Marcada para revisão</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-muted" /> Não respondida</p>
       </div>
     </div>
-  );
-}
-
-function Legenda({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={["h-2 w-2 rounded-full", className].join(" ")} /> {label}
-    </span>
   );
 }
 
@@ -873,8 +798,8 @@ function Linha({ label, value, tone }: { label: string; value: number; tone?: "o
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: "ok" | "bad" }) {
   return (
     <div className="rf-card p-4">
-      <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{label}</div>
-      <div className={["mt-1.5 font-display text-2xl font-semibold tabular-nums", tone === "ok" ? "text-primary" : tone === "bad" ? "text-accent" : "text-foreground"].join(" ")}>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={["mt-1.5 font-display text-2xl font-semibold tabular-nums", tone === "ok" ? "text-green-500" : tone === "bad" ? "text-accent" : "text-foreground"].join(" ")}>
         {value}
       </div>
     </div>
@@ -895,7 +820,7 @@ function Donut({ pct }: { pct: number }) {
       </svg>
       <div className="absolute grid place-items-center">
         <span className="font-display text-3xl font-semibold tabular-nums">{pct}%</span>
-        <span className="text-[10px] uppercase tracking-widest text-foreground/40">aproveit.</span>
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground">aproveit.</span>
       </div>
     </div>
   );

@@ -1,0 +1,71 @@
+/* RevisaFlash — visual de jogo de cartas (somente aparência). Usa os tokens já existentes do tema. */
+
+/* ---------- BARALHO (deck) ---------- */
+.rf-deck { position: relative; padding-top: 14px; cursor: pointer; outline: none; }
+.rf-deck__back {
+  position: absolute; inset: 14px 0 0 0;
+  border-radius: 1.25rem;
+  background: var(--surface-2, var(--muted));
+  border: 1px solid var(--border);
+  transition: transform .25s ease;
+}
+.rf-deck__back--1 { transform: translate(6px, -6px) rotate(2.5deg); opacity: .85; }
+.rf-deck__back--2 { transform: translate(12px, -12px) rotate(5deg); opacity: .55; }
+.rf-deck:hover .rf-deck__back--1, .rf-deck:focus-visible .rf-deck__back--1 { transform: translate(9px, -9px) rotate(4deg); }
+.rf-deck:hover .rf-deck__back--2, .rf-deck:focus-visible .rf-deck__back--2 { transform: translate(18px, -16px) rotate(8deg); }
+.rf-deck--empty .rf-deck__back { display: none; }
+
+.rf-deck__front {
+  position: relative; display: flex; flex-direction: column; min-height: 230px;
+  border-radius: 1.25rem; padding: 1.1rem 1.1rem 1rem;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in oklab, var(--deck) 22%, transparent), transparent 55%),
+    var(--card);
+  border: 1px solid color-mix(in oklab, var(--deck) 45%, var(--border));
+  box-shadow: 0 4px 0 0 var(--deck), 0 14px 28px -14px rgb(0 0 0 / .55);
+  transition: transform .2s ease;
+}
+.rf-deck:hover .rf-deck__front { transform: translateY(-3px); }
+.rf-deck--empty .rf-deck__front { border-style: dashed; box-shadow: none; background: transparent; }
+
+/* moldura interna, como uma carta de jogo */
+.rf-deck__front::before, .rf-studycard__face::before {
+  content: ""; position: absolute; inset: 7px; pointer-events: none;
+  border-radius: calc(1.25rem - 6px);
+  border: 1px solid color-mix(in oklab, var(--deck) 30%, transparent);
+}
+.rf-pip {
+  display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: .9rem;
+  background: color-mix(in oklab, var(--deck) 22%, transparent); color: var(--deck);
+}
+.rf-corner { font-family: var(--font-display, inherit); font-weight: 700; line-height: 1; color: var(--deck); }
+
+/* ---------- CARTA (flashcard) ---------- */
+.rf-studycard { perspective: 1400px; width: 100%; max-width: 30rem; margin: 0 auto; }
+.rf-studycard__inner {
+  position: relative; width: 100%; min-height: 22rem; aspect-ratio: 5 / 7; max-height: 70vh;
+  transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.8,.2,1);
+}
+@media (min-width: 640px) { .rf-studycard__inner { aspect-ratio: 4 / 5; } }
+.rf-studycard--flipped .rf-studycard__inner { transform: rotateY(180deg); }
+.rf-studycard__face {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  border-radius: 1.5rem; padding: 1.4rem;
+  background: var(--card); border: 1px solid color-mix(in oklab, var(--deck) 45%, var(--border));
+  box-shadow: 0 5px 0 0 var(--deck), 0 24px 40px -20px rgb(0 0 0 / .6);
+  overflow: hidden;
+}
+.rf-studycard__face--back {
+  transform: rotateY(180deg);
+  background:
+    radial-gradient(circle at 0% 100%, color-mix(in oklab, var(--deck) 20%, transparent), transparent 60%),
+    var(--surface, var(--card));
+}
+.rf-studycard__body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; justify-content: center; text-align: center; padding: .5rem .25rem; }
+.rf-studycard__body img { max-width: 100%; max-height: 12rem; margin: .75rem auto; border-radius: .75rem; object-fit: contain; }
+.rf-studycard__body mark, .rf-studycard__body strong { background: var(--primary); color: var(--primary-foreground); padding: 0 .25em; border-radius: .2em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-studycard__inner, .rf-deck__back, .rf-deck__front { transition: none; }
+}

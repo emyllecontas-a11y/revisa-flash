@@ -5,8 +5,7 @@ import { uid } from '@/utils/helpers';
 import { getDb } from '@/lib/db';
 import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { CAMPOS, TIPOS_ESTUDO } from '@/constants';
-import { enqueueOperation } from '@/services/queueService';
-import { updateTopicStatusAndRevisions } from '@/services/topicService'; // 🔥 IMPORTADO
+import { updateTopicStatusAndRevisions } from '@/services/topicService';
 
 export type StudyType = 'teorico' | 'pratico';
 
@@ -79,7 +78,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       const db = await getDb();
       const result = await db.study_records.find({
-        selector: { 
+        selector: {
           user_id: userIdFromAuth,
           isDeleted: { $ne: true }
         }
@@ -134,7 +133,10 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [loadData]);
 
   // ============================================================
-  // ADICIONAR REGISTRO (com isDeleted: false)
+  // ADICIONAR REGISTRO
+  // Usa a RPC salvar_study_records_batch (a mesma usada pelo sync).
+  // A RPC cuida da conversão do user_id (Clerk → UUID interno).
+  // Se falhar, o sync geral (foco, online, periódico) retenta.
   // ============================================================
   const addRecord = useCallback(async (data: AddStudyData) => {
     if (!userId) {
@@ -161,13 +163,11 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
-          .from('study_records')
-          .insert(newRecord);
+          .rpc('salvar_study_records_batch', { p_records: [newRecord] });
         if (error) throw error;
         console.log('✅ [StudyContext] Registro sincronizado com Supabase.');
       } catch (supabaseError) {
-        console.warn('⚠️ [StudyContext] Falha ao sincronizar (offline?), adicionando à fila.');
-        await enqueueOperation('create', 'study_records', newRecord);
+        console.warn('⚠️ [StudyContext] Falha ao sincronizar (offline?). O sync geral vai retentar.');
       }
     } catch (error) {
       console.error('❌ [StudyContext] Erro ao salvar registro:', error);
@@ -177,6 +177,8 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // ============================================================
   // EDITAR REGISTRO
+  // Envia o registro INTEIRO para a RPC (não apenas os campos alterados),
+  // porque a RPC valida o registro completo antes de gravar.
   // ============================================================
   const editRecord = useCallback(async (id: string, data: Partial<Omit<StudyRecord, 'id' | 'user_id' | 'createdAt'>>) => {
     try {
@@ -199,17 +201,20 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       console.log('✏️ [StudyContext] Registro atualizado localmente:', id);
 
+      // Busca o estado final (patch aplicado) para mandar o registro COMPLETO.
+      const patchedDoc = await db.study_records.findOne({ selector: { id } }).exec();
+      const fullRecord = patchedDoc
+        ? (patchedDoc.toJSON() as StudyRecord)
+        : ({ ...(doc.toJSON() as StudyRecord), ...updatedData } as StudyRecord);
+
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
-          .from('study_records')
-          .update(updatedData)
-          .eq('id', id);
+          .rpc('salvar_study_records_batch', { p_records: [fullRecord] });
         if (error) throw error;
         console.log('✅ [StudyContext] Registro atualizado no Supabase.');
       } catch (supabaseError) {
-        console.warn('⚠️ [StudyContext] Falha ao sincronizar (offline?), adicionando à fila.');
-        await enqueueOperation('update', 'study_records', { id, ...updatedData });
+        console.warn('⚠️ [StudyContext] Falha ao sincronizar edição (offline?). O sync geral vai retentar.');
       }
     } catch (error) {
       console.error('❌ [StudyContext] Erro ao editar registro:', error);
@@ -219,6 +224,7 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // ============================================================
   // EXCLUIR REGISTRO (SOFT DELETE + RECALCULAR REVISÕES)
+  // Envia o registro INTEIRO (com isDeleted: true) para a RPC.
   // ============================================================
   const deleteRecord = useCallback(async (id: string) => {
     console.log('🔍 [StudyContext] Tentando excluir registro com id:', id);
@@ -246,23 +252,26 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         isDeleted: true,
         updated_at: now,
       });
-      
+
       // Atualiza o estado local (remove da lista)
       setRecords(prev => prev.filter(r => r.id !== id));
       console.log('🗑️ [StudyContext] Registro marcado como deletado localmente.');
 
-      // Tenta sincronizar soft delete com Supabase
+      // Envia o registro COMPLETO com isDeleted: true para a RPC.
+      const deletedFullRecord: StudyRecord = {
+        ...record,
+        isDeleted: true,
+        updated_at: now,
+      };
+
       try {
         const supabaseClient = await getSupabaseWithToken();
         const { error } = await supabaseClient
-          .from('study_records')
-          .update({ isDeleted: true, updated_at: now })
-          .eq('id', id);
+          .rpc('salvar_study_records_batch', { p_records: [deletedFullRecord] });
         if (error) throw error;
         console.log('✅ [StudyContext] Registro marcado como deletado no Supabase.');
       } catch (supabaseError) {
-        console.warn('⚠️ [StudyContext] Falha ao sincronizar soft delete (offline?), adicionando à fila.');
-        await enqueueOperation('update', 'study_records', { id, isDeleted: true, updated_at: now });
+        console.warn('⚠️ [StudyContext] Falha ao sincronizar soft delete (offline?). O sync geral vai retentar.');
       }
 
       // 🔥 3. SE FOR REGISTRO TEÓRICO, recalcular revisões
@@ -286,21 +295,17 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         let studyDate: string | undefined;
 
         if (remainingRecords.length === 0) {
-          // Nenhum registro restante -> status "nao_estudado"
           newStatus = 'nao_estudado';
-          studyDate = undefined; // não há data para usar
+          studyDate = undefined;
           console.log(`ℹ️ [StudyContext] Nenhum registro restante. Status será "nao_estudado".`);
         } else {
-          // Há pelo menos um registro -> status "estudando" (pois há estudo)
           newStatus = 'estudando';
-          // Usa a data do registro mais recente como data base (opcional)
           const sorted = remainingRecords.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          studyDate = sorted[0]?.date; // pega a data do mais recente
+          studyDate = sorted[0]?.date;
           console.log(`ℹ️ [StudyContext] ${remainingRecords.length} registros restantes. Status será "estudando". Data base: ${studyDate || 'hoje'}`);
         }
 
-        // 🔥 4. Buscar o ID do tópico (precisamos do `topico_id` para chamar updateTopicStatusAndRevisions)
-        // O tópico é identificado pelo nome. Precisamos encontrar o ID correspondente.
+        // 🔥 4. Buscar o ID do tópico
         const topicDoc = await db.topics.findOne({
           selector: { user_id: userId, name: topic, isDeleted: { $ne: true } }
         }).exec();
@@ -311,7 +316,6 @@ export const StudyProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           const topicData = topicDoc.toJSON();
           const topicId = topicData.id;
 
-          // 🔥 5. Chamar a função que atualiza status e revisões, passando a data base (se houver)
           await updateTopicStatusAndRevisions(topicId, newStatus, userId, studyDate);
           console.log(`✅ [StudyContext] Revisões recalculadas para o tópico "${topic}" com status "${newStatus}".`);
         }

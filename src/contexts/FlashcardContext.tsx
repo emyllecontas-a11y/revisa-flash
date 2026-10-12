@@ -32,6 +32,7 @@ interface Card {
   user_id: string;
   front: string;
   back: string;
+  topico?: string;
   difficulty: number;
   stability: number;
   retrievability?: number;
@@ -128,7 +129,7 @@ interface FlashcardContextType {
   // FUNÇÕES DE CONFIGURAÇÃO E PRIORIZAÇÃO
   getUserSettings: () => Promise<UserSettings>;
   updateUserSettings: (settings: Partial<UserSettings>) => Promise<void>;
-  getDailyStudyCards: (deckId?: string) => Promise<Card[]>;
+  getDailyStudyCards: (deckId?: string, topico?: string) => Promise<Card[]>;
   getCardsReviewedToday: () => number;
   getHardestCards: (limit?: number) => Card[];
   getHardestCardsToday: (limit?: number) => Card[];
@@ -159,7 +160,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const scheduler = useMemo(() => new FSRSScheduler(), []);
 
   // ============================================================
-  // METADADOS (LOCALSTORAGE)
+  // METADADOS (LOCALSTORAGE) — apenas deck metas permanecem aqui.
+  // O card.topico agora vive dentro do próprio card (sincroniza).
+  // Mantemos cardMetas em memória/localStorage APENAS como cache
+  // de leitura e para compatibilidade com a migração inicial.
   // ============================================================
   const [deckMetas, setDeckMetas] = useState<Record<string, DeckMeta>>(() => {
     if (typeof window === 'undefined') return {};
@@ -199,13 +203,107 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     setDeckMetas(prev => ({ ...prev, [deckId]: { ...prev[deckId], ...meta } }));
   }, []);
 
+  // ============================================================
+  // getCardMeta: prioriza o topico do próprio card.
+  // Cai no localStorage (cardMetas) como fallback durante a transição.
+  // ============================================================
   const getCardMeta = useCallback((cardId: string): CardMeta => {
+    const card = allFlashcards.find(c => c.id === cardId);
+    if (card && card.topico) {
+      return { topico: card.topico };
+    }
     return cardMetas[cardId] || {};
-  }, [cardMetas]);
+  }, [allFlashcards, cardMetas]);
 
+  // ============================================================
+  // setCardMeta: agora grava no próprio card (RxDB + Supabase).
+  // Também atualiza o cache local para leitura instantânea.
+  // ============================================================
   const setCardMeta = useCallback((cardId: string, meta: CardMeta) => {
+    // Atualiza o cache local primeiro (leitura instantânea)
     setCardMetas(prev => ({ ...prev, [cardId]: { ...prev[cardId], ...meta } }));
+
+    if (!meta.topico && meta.topico !== '') return; // nada novo a gravar no card
+
+    // Atualiza o card no RxDB (async, fire-and-forget)
+    (async () => {
+      try {
+        const db = await getDb();
+        const doc = await db.flashcards.findOne({ selector: { id: cardId } }).exec();
+        if (!doc) return;
+        const now = new Date().toISOString();
+        await doc.patch({ topico: meta.topico, updated_at: now });
+
+        // Atualiza o estado local em memória
+        setAllFlashcards(prev => prev.map(c =>
+          c.id === cardId ? { ...c, topico: meta.topico } : c
+        ));
+
+        // Enfileira para sincronizar com Supabase
+        await enqueueOperation('update', 'flashcards', {
+          id: cardId, topico: meta.topico, updated_at: now,
+        });
+      } catch (e) {
+        console.warn('⚠️ Erro ao salvar topico no card:', e);
+      }
+    })();
   }, []);
+
+  // ============================================================
+  // MIGRAÇÃO: uma vez só, copia os tópicos do localStorage antigo
+  // para dentro dos cards no RxDB e enfileira para o Supabase.
+  // ============================================================
+  useEffect(() => {
+    if (!userId) return;
+
+    const migrar = async () => {
+      try {
+        const flag = localStorage.getItem('eot_card_metas_migrated');
+        if (flag === 'true') return;
+
+        const saved = localStorage.getItem('eot_card_metas');
+        if (!saved) {
+          localStorage.setItem('eot_card_metas_migrated', 'true');
+          return;
+        }
+
+        let metas: Record<string, CardMeta> = {};
+        try { metas = JSON.parse(saved); } catch { metas = {}; }
+
+        const entradas = Object.entries(metas).filter(([, m]) => m && m.topico);
+        if (entradas.length === 0) {
+          localStorage.setItem('eot_card_metas_migrated', 'true');
+          return;
+        }
+
+        console.log(`🔄 [Migração] Migrando ${entradas.length} tópicos para os cards...`);
+        const db = await getDb();
+        let migrados = 0;
+
+        for (const [cardId, meta] of entradas) {
+          try {
+            const doc = await db.flashcards.findOne({ selector: { id: cardId } }).exec();
+            if (!doc) continue;
+            const now = new Date().toISOString();
+            await doc.patch({ topico: meta.topico, updated_at: now });
+            await enqueueOperation('update', 'flashcards', {
+              id: cardId, topico: meta.topico, updated_at: now,
+            });
+            migrados++;
+          } catch (e) {
+            console.warn(`⚠️ [Migração] Falha ao migrar card ${cardId}:`, e);
+          }
+        }
+
+        localStorage.setItem('eot_card_metas_migrated', 'true');
+        console.log(`✅ [Migração] ${migrados} tópicos migrados para os cards.`);
+      } catch (e) {
+        console.warn('⚠️ [Migração] Erro geral:', e);
+      }
+    };
+
+    migrar();
+  }, [userId]);
 
   // ============================================================
   // CARREGAR CONFIGURAÇÕES DO USUÁRIO (recarregável)
@@ -221,7 +319,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         setUserSettings(settings);
         console.log('📋 Configurações carregadas:', settings);
       } else {
-        // Criar configurações padrão se não existirem
         const now = new Date().toISOString();
         const newSettings: UserSettings = {
           id: uid(),
@@ -275,7 +372,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log(`📊 [loadLocalData] Encontrados ${filteredCards.length} flashcards (dos decks acessíveis).`);
       setAllFlashcards(filteredCards);
 
-      // Carregar configurações do usuário
       await loadUserSettings(db, userId);
 
       console.log('✅ Dados carregados do banco local');
@@ -352,7 +448,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [loadLocalData]);
 
   // ============================================================
-  // 🔥 RECARREGAR CONFIGURAÇÕES (DEFINIR ANTES DE refreshFlashcards)
+  // 🔥 RECARREGAR CONFIGURAÇÕES
   // ============================================================
   const refreshUserSettings = useCallback(async () => {
     if (!userId) return;
@@ -366,7 +462,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [userId, loadUserSettings]);
 
   // ============================================================
-  // 🔥 REFRESH (recarrega dados E configurações)
+  // 🔥 REFRESH
   // ============================================================
   const refreshFlashcards = useCallback(() => {
     setVersion(prev => prev + 1);
@@ -381,7 +477,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [userId, loadLocalData, refreshUserSettings]);
 
   // ============================================================
-  // 🔥 OBSERVADOR RxDB PARA user_settings (detecta mudanças locais)
+  // 🔥 OBSERVADOR RxDB PARA user_settings
   // ============================================================
   useEffect(() => {
     if (!userId) return;
@@ -437,14 +533,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newSettings;
   }, [userId, userSettings]);
 
-  // ============================================================
-  // 🔥 FUNÇÃO updateUserSettings CORRIGIDA
-  // ============================================================
   const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
 
-    // Força o updated_at para garantir que seja uma data nova
     const updatedData = {
       ...settings,
       updated_at: new Date().toISOString()
@@ -452,7 +544,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     console.log('💾 [updateUserSettings] Salvando configurações:', updatedData);
 
-    // 1. Busca o documento no RxDB
     let doc = await db.user_settings.findOne({
       selector: { user_id: userId }
     }).exec();
@@ -460,8 +551,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     let updatedSettings: UserSettings;
 
     if (!doc) {
-      // Se não existir, cria um novo
-      console.log('📄 [updateUserSettings] Documento não encontrado, criando novo...');
       const now = new Date().toISOString();
       const newSettings: UserSettings = {
         id: uid(),
@@ -474,13 +563,8 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       updatedSettings = newSettings;
       setUserSettings(newSettings);
     } else {
-      // Se existir, atualiza com $set (mais confiável que patch para persistência)
-      console.log('📄 [updateUserSettings] Documento encontrado, atualizando com $set...');
       const currentDoc = doc.toJSON() as UserSettings;
-      
-      // Usa update com $set para garantir que a mudança seja aplicada no banco
       await doc.update({ $set: updatedData });
-      
       updatedSettings = { ...currentDoc, ...updatedData } as UserSettings;
       setUserSettings(updatedSettings);
     }
@@ -578,7 +662,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return (card.lapses || 0) >= threshold;
   }, [userSettings]);
 
-  const getDailyStudyCards = useCallback(async (deckId?: string): Promise<Card[]> => {
+  // ============================================================
+  // getDailyStudyCards — agora aceita filtro por topico (sub-baralho)
+  // ============================================================
+  const getDailyStudyCards = useCallback(async (deckId?: string, topico?: string): Promise<Card[]> => {
     if (!userId) throw new Error('Usuário não autenticado');
 
     const settings = await getUserSettings();
@@ -598,15 +685,23 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
+    // Filtro por topico (sub-baralho)
+    const passaFiltroTopico = (c: Card): boolean => {
+      if (!topico) return true;
+      if (topico === '__sem_topico__') return !c.topico;
+      return c.topico === topico;
+    };
+
     let eligible: Card[];
     if (deckId) {
       eligible = allFlashcards.filter(c =>
         c.deck_id === deckId &&
         !c.isDeleted &&
+        passaFiltroTopico(c) &&
         (c.reps === 0 || new Date(c.dueDate) <= hoje)
       );
     } else {
-      eligible = dueCards;
+      eligible = dueCards.filter(passaFiltroTopico);
     }
 
     const atrasados = eligible.filter(c =>
@@ -665,7 +760,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
     }
 
-    // Intercalar para diversificar
     if (selected.length > 10) {
       const top = selected.slice(0, Math.floor(selected.length * 0.2));
       const rest = selected.slice(Math.floor(selected.length * 0.2));
@@ -678,7 +772,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       selected = result;
     }
 
-    console.log(`📋 Selecionados ${selected.length} cards (limite: ${remainingSlots})`);
+    console.log(`📋 Selecionados ${selected.length} cards (limite: ${remainingSlots})${topico ? ` [topico: ${topico}]` : ''}`);
     return selected;
   }, [userId, allFlashcards, dueCards, getUserSettings, calculatePriority, getCardsReviewedToday]);
 
@@ -699,7 +793,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [dueCards, calculatePriority]);
 
   // ============================================================
-  // CRUD (MANTIDO IGUAL)
+  // CRUD
   // ============================================================
   const createDeck = useCallback(async (
     name: string,
@@ -793,6 +887,9 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newDeck;
   }, [userId, refreshFlashcards]);
 
+  // ============================================================
+  // addCard — agora grava `topico` DENTRO do card
+  // ============================================================
   const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
@@ -832,6 +929,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     const sharedCardId = deck.is_shared ? uid() : null;
     const createdCardIds: string[] = [];
+    const topico = meta?.topico?.trim() || undefined;
 
     for (const targetUserId of targetUserIds) {
       const cardId = uid();
@@ -843,6 +941,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         user_id: targetUserId,
         front: fsrsCard.front,
         back: fsrsCard.back,
+        topico: topico,
         difficulty: fsrsCard.difficulty,
         stability: fsrsCard.stability,
         retrievability: 0.9,
@@ -860,9 +959,12 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       };
 
       await db.flashcards.insert(newCard);
-      if (meta) {
-        setCardMeta(cardId, meta);
+
+      if (topico) {
+        // Guarda também no cache local para leitura instantânea
+        setCardMetas(prev => ({ ...prev, [cardId]: { ...prev[cardId], topico } }));
       }
+
       createdCardIds.push(cardId);
       console.log(`📇 [FlashcardContext] Card criado para usuário ${targetUserId}:`, cardId);
     }
@@ -898,7 +1000,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       selector: { deck_id: deckId, user_id: userId, shared_card_id: sharedCardId }
     }).exec();
     return userCard ? userCard.toJSON().id : createdCardIds[0];
-  }, [userId, refreshFlashcards, setCardMeta, scheduler]);
+  }, [userId, refreshFlashcards, scheduler]);
 
   const reviewCard = useCallback(async (cardId: string, rating: Rating) => {
     if (!userId) throw new Error('Usuário não autenticado');
@@ -1164,6 +1266,9 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards]);
 
+  // ============================================================
+  // editCard — agora grava `topico` DENTRO do card
+  // ============================================================
   const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -1218,11 +1323,19 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       cardIdsToUpdate = [cardId];
     }
 
-    const updatedData = {
+    const updatedData: any = {
       front: front.trim(),
       back: back.trim(),
       updatedAt: new Date().toISOString()
     };
+
+    const topicoNormalizado = meta?.topico !== undefined
+      ? (meta.topico?.trim() || null)
+      : undefined;
+    if (topicoNormalizado !== undefined) {
+      updatedData.topico = topicoNormalizado;
+      updatedData.updated_at = updatedData.updatedAt;
+    }
 
     for (const id of cardIdsToUpdate) {
       const doc = await db.flashcards.findOne({ selector: { id } }).exec();
@@ -1232,9 +1345,15 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
     }
 
-    if (meta) {
+    // Atualiza o cache local de metas
+    if (topicoNormalizado !== undefined) {
       for (const id of cardIdsToUpdate) {
-        setCardMeta(id, meta);
+        setCardMetas(prev => {
+          const newMetas = { ...prev };
+          if (topicoNormalizado) newMetas[id] = { ...newMetas[id], topico: topicoNormalizado };
+          else if (newMetas[id]) delete newMetas[id].topico;
+          return newMetas;
+        });
       }
     }
 
@@ -1252,7 +1371,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         await enqueueOperation('update', 'flashcards', { id, ...updatedData });
       }
     }
-  }, [userId, refreshFlashcards, setCardMeta]);
+  }, [userId, refreshFlashcards, setCardMetas]);
 
   const updateCardMeta = useCallback(async (cardId: string, meta: Partial<CardMeta>) => {
     setCardMeta(cardId, meta);
@@ -1272,7 +1391,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   ) => {
     if (!userId) throw new Error('Usuário não autenticado');
     if (newUserId === userId) throw new Error('Você não pode adicionar a si mesmo.');
-    
+
     const db = await getDb();
 
     const deck = await db.decks.findOne({
@@ -1381,6 +1500,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
               user_id: newUserId,
               front: cardData.front,
               back: cardData.back,
+              topico: cardData.topico || undefined,
               difficulty: fsrsCard.difficulty,
               stability: fsrsCard.stability,
               retrievability: 0.9,
@@ -1491,7 +1611,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const addMemberByEmail = useCallback(async (deckId: string, email: string) => {
     if (!userId) throw new Error('Usuário não autenticado');
-    
+
     const foundUserId = await findUserByEmail(email);
     if (!foundUserId) {
       throw new Error(`Nenhum usuário encontrado com o e-mail: ${email}`);

@@ -8,14 +8,17 @@ import {
   importarSimulado, 
   excluirSimulado,
   buscarResultadosDoUsuario,
-  buscarHistoricoCompleto
+  buscarHistoricoCompleto,
+  resetarProgressoSimulado,
+  excluirResultadoSimulado,
+  excluirTodosResultadosSimulado,
 } from "@/services/simuladoService";
 import { useStudy } from "@/contexts/StudyContext";
 import { ListasTab } from "@/components/ListasTab";
 import {
-  Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, Upload, FileText,
+  Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
-  BarChart3, ChevronDown, ChevronUp, History, Search, FileStack
+  BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack
 } from "lucide-react";
 import type { Simulado } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -168,6 +171,65 @@ export default function SimuladosPage() {
       toast.error("Erro ao excluir", { description: err.message });
     } finally {
       setExcluindo(null);
+    }
+  };
+
+  const handleRecomecarSimulado = async (id: string, titulo: string) => {
+    if (!user?.id) return;
+    const ok = await confirmDialog({
+      title: `Recomeçar "${titulo}" do zero?`,
+      description: "Suas respostas, marcações e o tempo serão apagados. O histórico de tentativas é mantido.",
+      confirmText: "Recomeçar",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await resetarProgressoSimulado(id, user.id);
+    if (res.success) {
+      toast.success("Progresso apagado. Você pode começar de novo.");
+      await loadData();
+    } else {
+      toast.error("Erro ao apagar progresso", { description: res.error });
+    }
+  };
+
+  const handleExcluirResultado = async (resultadoId: string) => {
+    if (!user?.id) return;
+    const ok = await confirmDialog({
+      title: "Excluir esta tentativa?",
+      description: "O resultado será removido do histórico e das Sessões. Não pode ser desfeito.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await excluirResultadoSimulado(resultadoId, user.id);
+    if (res.success) {
+      toast.success("Tentativa excluída");
+      await loadData();
+      loadHistorico();
+    } else {
+      toast.error("Erro ao excluir", { description: res.error });
+    }
+  };
+
+  const handleLimparHistoricoSimulado = async (simuladoId: string, titulo: string) => {
+    if (!user?.id) return;
+    const ok = await confirmDialog({
+      title: `Limpar histórico de "${titulo}"?`,
+      description: "Todas as tentativas deste simulado serão removidas. O simulado em si continua intacto. Não pode ser desfeito.",
+      confirmText: "Limpar tudo",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await excluirTodosResultadosSimulado(simuladoId, user.id);
+    if (res.success) {
+      toast.success("Histórico limpo");
+      await loadData();
+      loadHistorico();
+    } else {
+      toast.error("Erro ao limpar", { description: res.error });
     }
   };
 
@@ -459,6 +521,13 @@ export default function SimuladosPage() {
                                     className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
                                   >
                                     Ver detalhes
+                                  </button>
+                                  <button
+                                    onClick={() => handleRecomecarSimulado(s.id, s.titulo)}
+                                    className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                                    title="Recomeçar do zero"
+                                  >
+                                    <RefreshCcw className="h-3.5 w-3.5" />
                                   </button>
                                   <button
                                     onClick={() => handleStartSimulado(s.id)}
@@ -871,6 +940,22 @@ export default function SimuladosPage() {
                   </div>
                 </div>
 
+                {resultadosLista.length > 0 && (
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (resultadosLista.length === 0) return;
+                        const primeiro = resultadosLista[0];
+                        handleLimparHistoricoSimulado(primeiro.simulado_id, getSimuladoTitulo(primeiro.simulado_id));
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive/80 hover:bg-destructive/20 transition-colors"
+                      title="Remove todas as tentativas do primeiro simulado listado. Para limpar outros, use a lixeira em cada tentativa."
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Limpar histórico do último simulado
+                    </button>
+                  </div>
+                )}
+
                 {historicoLoading ? (
                   <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
                 ) : historicoData.total === 0 ? (
@@ -891,6 +976,7 @@ export default function SimuladosPage() {
                             key={r.id}
                             resultado={r}
                             onVerResultado={() => { setIsStatsModalOpen(false); navigate(`/simulados/${r.simulado_id}?view=resultado`); }}
+                            onExcluir={() => handleExcluirResultado(r.id)}
                           />
                         ))}
                     </div>
@@ -940,36 +1026,41 @@ function KpiStats({ label, value, icon, accent }: { label: string; value: string
   );
 }
 
-function HistoricoCardMini({ resultado, onVerResultado }: { resultado: any; onVerResultado: () => void }) {
+function HistoricoCardMini({ resultado, onVerResultado, onExcluir }: { resultado: any; onVerResultado: () => void; onExcluir: () => void }) {
   const data = new Date(resultado.created_at);
   const pct = resultado.porcentagem || 0;
   const tempoMin = Math.floor(resultado.tempo_segundos / 60);
 
   return (
-    <button onClick={onVerResultado} className="w-full rf-card hover:bg-surface/50 transition-colors p-3 text-left">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm truncate">{resultado.simulado_titulo || 'Simulado'}</span>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              pct >= 70 ? 'bg-primary/15 text-primary' :
-              pct >= 50 ? 'bg-warning/15 text-warning' :
-              'bg-accent/15 text-accent'
-            }`}>
-              {pct}%
-            </span>
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground/40">
-            <span>{data.toLocaleDateString('pt-BR')}</span>
-            <span>•</span>
-            <span>{resultado.acertos}/{resultado.total_questoes} acertos</span>
-            <span>•</span>
-            <span>{tempoMin}min</span>
-            {resultado.simulado_area && (<><span>•</span><span className="text-primary/60">{resultado.simulado_area}</span></>)}
-          </div>
+    <div className="w-full rf-card p-3 flex items-center gap-2">
+      <button onClick={onVerResultado} className="min-w-0 flex-1 text-left hover:opacity-90">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm truncate">{resultado.simulado_titulo || 'Simulado'}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            pct >= 70 ? 'bg-primary/15 text-primary' :
+            pct >= 50 ? 'bg-warning/15 text-warning' :
+            'bg-accent/15 text-accent'
+          }`}>
+            {pct}%
+          </span>
         </div>
-        <Eye className="h-4 w-4 text-foreground/30 shrink-0" />
-      </div>
-    </button>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground/40">
+          <span>{data.toLocaleDateString('pt-BR')}</span>
+          <span>•</span>
+          <span>{resultado.acertos}/{resultado.total_questoes} acertos</span>
+          <span>•</span>
+          <span>{tempoMin}min</span>
+          {resultado.simulado_area && (<><span>•</span><span className="text-primary/60">{resultado.simulado_area}</span></>)}
+        </div>
+      </button>
+      <Eye className="h-4 w-4 text-foreground/30 shrink-0" />
+      <button
+        onClick={onExcluir}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors"
+        title="Excluir tentativa"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }

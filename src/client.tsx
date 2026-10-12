@@ -7,6 +7,7 @@ import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
 import { FlashcardProvider, useFlashcardContext } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
+import { ActiveSessionProvider } from './contexts/ActiveSessionContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -27,7 +28,7 @@ addRxPlugin(RxDBUpdatePlugin);
 
 declare const __BUILD_TIMESTAMP__: string;
 
-const SCHEMA_VERSION = '5';
+const SCHEMA_VERSION = '6';
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -266,9 +267,11 @@ function Root() {
       <LoadingProvider>
         <FlashcardProvider>
           <StudyProvider>
-            <ErrorProvider>
-              <AppContent />
-            </ErrorProvider>
+            <ActiveSessionProvider>
+              <ErrorProvider>
+                <AppContent />
+              </ErrorProvider>
+            </ActiveSessionProvider>
           </StudyProvider>
         </FlashcardProvider>
       </LoadingProvider>

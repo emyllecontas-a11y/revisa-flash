@@ -423,7 +423,6 @@ export async function excluirLista(
     const db = await getDb();
     const now = nowIso();
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const listaDoc = await db.listas.findOne({ selector: { id: listaId } }).exec();
     if (listaDoc && listaDoc.get('user_id') === userId) {
       await listaDoc.patch({ isdeleted: true, updated_at: now });
@@ -644,7 +643,6 @@ export async function atualizarLista(
       updated_at: now,
     };
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const doc = await db.listas.findOne({ selector: { id: listaId } }).exec();
     if (!doc || doc.get('user_id') !== userId) {
       return { success: false, error: 'Lista não encontrada' };
@@ -792,10 +790,6 @@ export async function criarQuestaoNaLista(
   }
 }
 
-// ============================================================
-// CORRIGIDO — busca só pela PK + valida em JS
-// ============================================================
-
 export async function atualizarQuestaoLista(
   questaoId: string,
   userId: string,
@@ -834,7 +828,6 @@ export async function atualizarQuestaoLista(
       updated_at: now,
     };
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const doc = await db.questoes_lista.findOne({ selector: { id: questaoId } }).exec();
     if (!doc || doc.get('user_id') !== userId) {
       return { success: false, error: 'Questão não encontrada' };
@@ -856,7 +849,6 @@ export async function buscarQuestao(
   try {
     const db = await getDb();
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const doc = await db.questoes_lista.findOne({ selector: { id: questaoId } }).exec();
     if (!doc) return { success: false, error: 'Questão não encontrada' };
 
@@ -945,7 +937,6 @@ export async function renomearPasta(
     const db = await getDb();
     const now = nowIso();
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const doc = await db.listas_pastas.findOne({ selector: { id: pastaId } }).exec();
     if (!doc || doc.get('user_id') !== userId) {
       return { success: false, error: 'Pasta não encontrada' };
@@ -976,7 +967,6 @@ export async function excluirPasta(
       await enqueueOperation('update', 'listas', { id: l.get('id'), folder_id: null, updated_at: now });
     }
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const pastaDoc = await db.listas_pastas.findOne({ selector: { id: pastaId } }).exec();
     if (pastaDoc && pastaDoc.get('user_id') === userId) {
       await pastaDoc.patch({ isdeleted: true, updated_at: now });
@@ -999,7 +989,6 @@ export async function moverListaParaPasta(
     const db = await getDb();
     const now = nowIso();
 
-    // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
     const doc = await db.listas.findOne({ selector: { id: listaId } }).exec();
     if (!doc) return { success: false, error: 'Lista não encontrada' };
     if (doc.get('user_id') !== userId || doc.get('isdeleted')) {
@@ -1026,7 +1015,6 @@ export async function reordenarPastas(
     const now = nowIso();
 
     for (const item of itens) {
-      // Busca só pela PK + valida em JS (evita bug IDBKeyRange)
       const doc = await db.listas_pastas.findOne({ selector: { id: item.id } }).exec();
       if (!doc || doc.get('user_id') !== userId) continue;
       await doc.patch({ order: item.order, updated_at: now });
@@ -1135,4 +1123,83 @@ export async function salvarProgressoLista(
       return { success: false, error: error.message };
     }
   });
+}
+
+// ============================================================
+// 25. RESETAR PROGRESSO DA LISTA
+// ============================================================
+export async function resetarProgressoLista(
+  listaId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.progresso_lista.findOne({
+      selector: { lista_id: listaId, user_id: userId, isdeleted: false },
+    }).exec();
+    if (doc) {
+      await doc.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'progresso_lista', {
+        id: doc.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao resetar progresso da lista:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 26. EXCLUIR UM RESULTADO DA LISTA
+// ============================================================
+export async function excluirResultadoLista(
+  resultadoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const doc = await db.resultados_lista.findOne({
+      selector: { id: resultadoId },
+    }).exec();
+    if (!doc || doc.get('user_id') !== userId) {
+      return { success: false, error: 'Resultado não encontrado' };
+    }
+    await doc.patch({ isdeleted: true, updated_at: now });
+    await enqueueOperation('update', 'resultados_lista', {
+      id: resultadoId, isdeleted: true, updated_at: now,
+    });
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao excluir resultado da lista:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 27. EXCLUIR TODOS OS RESULTADOS DE UMA LISTA
+// ============================================================
+export async function excluirTodosResultadosLista(
+  listaId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+    const docs = await db.resultados_lista.find({
+      selector: { lista_id: listaId, user_id: userId, isdeleted: false },
+    }).exec();
+    for (const d of docs) {
+      await d.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'resultados_lista', {
+        id: d.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao excluir todos os resultados da lista:', error);
+    return { success: false, error: error.message };
+  }
 }

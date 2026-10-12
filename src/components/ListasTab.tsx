@@ -13,6 +13,9 @@ import {
   excluirPasta,
   moverListaParaPasta,
   reordenarPastas,
+  resetarProgressoLista,
+  excluirResultadoLista,
+  excluirTodosResultadosLista,
 } from "@/services/listaService";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useAppUser } from "@/contexts/UserContext";
@@ -27,7 +30,7 @@ import {
 } from "recharts";
 import {
   ListChecks, Play, Loader2, Layers, Plus, X, CheckCircle2,
-  RotateCcw, Trash2, Clock, History, Image as ImageIcon, TrendingUp, Pencil,
+  RotateCcw, RefreshCcw, Trash2, Clock, History, Image as ImageIcon, TrendingUp, Pencil,
   Folder, FolderOpen, FolderPlus, ChevronRight, ArrowLeft, FolderInput,
   Search, ChevronUp, ChevronDown, AlertCircle,
 } from "lucide-react";
@@ -36,9 +39,9 @@ import {
 // CORES PASTEL ROTATIVAS (mesmas do Conteúdo)
 // ============================================================
 const CARD_COLORS = [
-  '#E8A87C', // laranja pêssego
-  '#E0A5C0', // rosa bebê
-  '#D4A88E', // pêssego neutro
+  '#E8A87C',
+  '#E0A5C0',
+  '#D4A88E',
   '#E8A87C',
   '#E0A5C0',
   '#D9A57E',
@@ -326,7 +329,7 @@ export function ListasTab() {
   }
 
   // ============================================================
-  // NÍVEL 1 — DISCIPLINAS (cards estilo Conteúdo)
+  // NÍVEL 1 — DISCIPLINAS
   // ============================================================
   if (!disciplinaAberta) {
     return (
@@ -537,10 +540,12 @@ export function ListasTab() {
           />
         )}
 
-        {historicoLista && (
+        {historicoLista && user?.id && (
           <HistoricoListaModal
             lista={historicoLista}
             resultados={resultados.filter((r) => r.lista_id === historicoLista.id)}
+            userId={user.id}
+            onRefresh={loadData}
             onClose={() => setHistoricoLista(null)}
           />
         )}
@@ -647,7 +652,6 @@ export function ListasTab() {
                       ].join(" ")}
                       style={{ '--lip': cor } as React.CSSProperties}
                     >
-                      {/* 🔥 Topo: ícone + botões de mover (sem aninhamento) */}
                       <div className="flex w-full items-start justify-between gap-2">
                         <div
                           className="grid h-12 w-12 shrink-0 place-items-center"
@@ -689,7 +693,6 @@ export function ListasTab() {
                         </div>
                       </div>
 
-                      {/* 🔥 Corpo clicável (o botão agora está sozinho, sem filhos botão) */}
                       <button
                         type="button"
                         onClick={() => setPastaAberta(p)}
@@ -706,7 +709,6 @@ export function ListasTab() {
                         </div>
                       </button>
 
-                      {/* 🔥 Rodapé com ações (fora do botão de abrir) */}
                       <div className="mt-3 flex items-center gap-2 border-t border-border/60 pt-3">
                         <button
                           type="button"
@@ -814,10 +816,12 @@ export function ListasTab() {
         />
       )}
 
-      {historicoLista && (
+      {historicoLista && user?.id && (
         <HistoricoListaModal
           lista={historicoLista}
           resultados={resultados.filter((r) => r.lista_id === historicoLista.id)}
+          userId={user.id}
+          onRefresh={loadData}
           onClose={() => setHistoricoLista(null)}
         />
       )}
@@ -854,7 +858,7 @@ export function ListasTab() {
 }
 
 // ============================================================
-// GRID DE LISTAS (mantido)
+// GRID DE LISTAS
 // ============================================================
 function GridListas({
   listas, ultimosResultados, excluindo, onAbrir, onExcluir,
@@ -890,7 +894,6 @@ function GridListas({
               className="cursor-grab active:cursor-grabbing"
             >
               <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:gap-4">
-                {/* Ícone circular */}
                 <div
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-full"
                   style={{
@@ -901,7 +904,6 @@ function GridListas({
                   <ListChecks className="h-5 w-5" />
                 </div>
 
-                {/* Nome + meta */}
                 <div className="min-w-0 flex-1">
                   <button onClick={() => onAbrir(l)} className="block w-full text-left">
                     <h3 className="font-display text-base font-bold tracking-tight truncate">
@@ -915,7 +917,6 @@ function GridListas({
                   </button>
                 </div>
 
-                {/* Progresso + botões */}
                 <div className="flex items-center gap-3 sm:w-auto w-full">
                   {temResultado && (
                     <div className="flex-1 sm:w-40 sm:flex-initial">
@@ -1039,15 +1040,22 @@ function EmptyStateListas({
 }
 
 // ============================================================
-// MODAL DE HISTÓRICO (mantido)
+// MODAL DE HISTÓRICO (agora com ações de exclusão/reset)
 // ============================================================
 function HistoricoListaModal({
-  lista, resultados, onClose,
+  lista, resultados, userId, onRefresh, onClose,
 }: {
   lista: Lista;
   resultados: ResultadoLista[];
+  userId: string;
+  onRefresh: () => void;
   onClose: () => void;
 }) {
+  const toast = useToast();
+  const confirmDialog = useConfirm();
+  const [excluindo, setExcluindo] = useState<string | null>(null);
+  const [limpando, setLimpando] = useState(false);
+
   const dadosGrafico = [...resultados]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     .map((r, i) => ({
@@ -1062,10 +1070,75 @@ function HistoricoListaModal({
   const penultimoPct = resultados[1]?.porcentagem ?? null;
   const tendencia = penultimoPct !== null ? ultimoPct - penultimoPct : null;
 
+  const handleExcluirUm = async (resultadoId: string) => {
+    const ok = await confirmDialog({
+      title: "Excluir esta tentativa?",
+      description: "O resultado será removido do histórico. Não pode ser desfeito.",
+      confirmText: "Excluir",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    setExcluindo(resultadoId);
+    try {
+      const res = await excluirResultadoLista(resultadoId, userId);
+      if (res.success) {
+        toast.success("Tentativa excluída");
+        onRefresh();
+      } else {
+        toast.error("Erro ao excluir", { description: res.error });
+      }
+    } finally {
+      setExcluindo(null);
+    }
+  };
+
+  const handleLimparTudo = async () => {
+    if (resultados.length === 0) return;
+    const ok = await confirmDialog({
+      title: "Limpar todo o histórico?",
+      description: `As ${resultados.length} tentativas serão removidas. A lista continua intacta. Não pode ser desfeito.`,
+      confirmText: "Limpar tudo",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    setLimpando(true);
+    try {
+      const res = await excluirTodosResultadosLista(lista.id, userId);
+      if (res.success) {
+        toast.success("Histórico limpo");
+        onRefresh();
+      } else {
+        toast.error("Erro ao limpar", { description: res.error });
+      }
+    } finally {
+      setLimpando(false);
+    }
+  };
+
+  const handleRecomecar = async () => {
+    const ok = await confirmDialog({
+      title: "Recomeçar do zero?",
+      description: "Suas respostas, marcações e o tempo desta lista serão apagados. O histórico de tentativas é mantido.",
+      confirmText: "Recomeçar",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await resetarProgressoLista(lista.id, userId);
+    if (res.success) {
+      toast.success("Progresso apagado. Você pode começar de novo.");
+      onRefresh();
+    } else {
+      toast.error("Erro ao apagar progresso", { description: res.error });
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-elevated">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-display text-lg font-semibold">Histórico de tentativas</h2>
             <p className="text-xs text-foreground/50">{lista.titulo}</p>
@@ -1073,6 +1146,25 @@ function HistoricoListaModal({
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-foreground/50 hover:bg-white/5 hover:text-foreground transition-colors">
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleRecomecar}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" /> Recomeçar do zero
+          </button>
+          {resultados.length > 0 && (
+            <button
+              onClick={handleLimparTudo}
+              disabled={limpando}
+              className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
+            >
+              {limpando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Limpar histórico
+            </button>
+          )}
         </div>
 
         {resultados.length === 0 ? (
@@ -1138,8 +1230,8 @@ function HistoricoListaModal({
               {resultados.map((r) => {
                 const pct = r.porcentagem;
                 return (
-                  <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-surface/40 px-4 py-3">
-                    <div className="min-w-0">
+                  <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface/40 px-4 py-3">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           pct >= 70 ? 'bg-primary/15 text-primary' :
@@ -1158,6 +1250,14 @@ function HistoricoListaModal({
                         {r.nao_respondidas > 0 && (<><span>•</span><span>{r.nao_respondidas} não respondida{r.nao_respondidas > 1 ? 's' : ''}</span></>)}
                       </div>
                     </div>
+                    <button
+                      onClick={() => handleExcluirUm(r.id)}
+                      disabled={excluindo === r.id}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+                      title="Excluir tentativa"
+                    >
+                      {excluindo === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
                   </div>
                 );
               })}
@@ -1170,7 +1270,7 @@ function HistoricoListaModal({
 }
 
 // ============================================================
-// MODAL DE IMPORTAÇÃO (mantido)
+// MODAL DE IMPORTAÇÃO
 // ============================================================
 interface ImportJob {
   file: File;
@@ -1455,7 +1555,7 @@ function ImportListaModal({
 }
 
 // ============================================================
-// MODAIS DE PASTA (mantidos)
+// MODAIS DE PASTA
 // ============================================================
 function NovaPastaModal({ userId, disciplinaId, onClose, onSuccess }: {
   userId: string; disciplinaId: string; onClose: () => void; onSuccess: () => void;
@@ -1613,7 +1713,7 @@ function ExcluirPastaModal({ pasta, qtdListas, userId, onClose, onSuccess }: {
 }
 
 // ============================================================
-// MODAL DE MOVER LISTA (mantido)
+// MODAL DE MOVER LISTA
 // ============================================================
 function MoverListaModal({ lista, pastas, userId, onClose, onSuccess }: {
   lista: Lista; pastas: Pasta[]; userId: string; onClose: () => void; onSuccess: () => void;

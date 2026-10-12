@@ -158,6 +158,7 @@ const flashcardSchema = {
     user_id: { type: 'string' },
     front: { type: 'string' },
     back: { type: 'string' },
+    topico: { type: 'string' },
     difficulty: { type: 'number' },
     stability: { type: 'number' },
     retrievability: { type: 'number' },
@@ -708,21 +709,22 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v8';
+    const DB_NAME = 'revisaflash_db_v9';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v5'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v6'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v7'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v8'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v8') {
+      if (markerVersion !== 'v9') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
         clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v8');
+        localStorage.setItem('revisaflash_db_version', 'v9');
       }
     } catch (e) {}
 

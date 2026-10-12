@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
@@ -42,6 +42,7 @@ const ROTAS = [
   { to: "/", label: "Início", icon: "home" },
   { to: "/conteudo", label: "Conteúdo", icon: "book" },
   { to: "/calendario", label: "Calendário", icon: "calendar" },
+  { to: "/sessoes", label: "Sessões", icon: "timer" },
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
   { to: "/simulados", label: "Simulados", icon: "file-text" },
@@ -52,6 +53,7 @@ const ICONS = {
   home: Home,
   book: BookOpen,
   calendar: Calendar,
+  timer: Timer,
   alert: AlertTriangle,
   layers: Layers,
   "file-text": FileText,

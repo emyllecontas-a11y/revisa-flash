@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { AppShell } from "@/components/app-shell";
+import { QuestaoCard } from "@/components/QuestaoCard";
 import {
   getListaCompleta,
   calcularResultadoLista,
@@ -14,8 +15,9 @@ import {
 import { QuestaoListaPlayer, ResultadoListaCalc } from "@/lib/listas-types";
 import { EnviarErrosModal, QuestaoErrada } from "@/components/EnviarErrosModal";
 import { useToast } from "@/hooks/useToast";
+import { useConfirm } from "@/components/ConfirmDialog";
 import {
-  ArrowLeft, ArrowRight, Bookmark, Check, Clock, Flag, Grid3X3, X,
+  ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
   Loader2, Keyboard,
 } from "lucide-react";
@@ -38,11 +40,22 @@ function getCorreta(q: QuestaoListaPlayer): string | null {
   return null;
 }
 
+function getAlternativasView(q: QuestaoListaPlayer) {
+  if (q.tipo === "certo_errado") {
+    return [
+      { letra: "C", texto: "Certo" },
+      { letra: "E", texto: "Errado" },
+    ];
+  }
+  return (q.alternativas || []).map(a => ({ letra: a.letra, texto: a.texto }));
+}
+
 export default function ListaPlayerPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAppUser();
   const toast = useToast();
+  const confirmDialog = useConfirm();
 
   const [lista, setLista] = useState<{
     id: string;
@@ -68,12 +81,13 @@ export default function ListaPlayerPage() {
   const [enviadosAoBanco, setEnviadosAoBanco] = useState(false);
   const [mostrarAtalhos, setMostrarAtalhos] = useState(false);
 
-  // Flag que bloqueia autosave até o boot terminar
+  // Correção imediata: questões que já revelaram a resposta
+  const [reveladas, setReveladas] = useState<Set<number>>(new Set());
+
   const [booted, setBooted] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Refs para listeners pegarem estado atual
   const respostasRef = useRef(respostas);
   useEffect(() => { respostasRef.current = respostas; }, [respostas]);
 
@@ -85,6 +99,9 @@ export default function ListaPlayerPage() {
 
   const faseRef = useRef(fase);
   useEffect(() => { faseRef.current = fase; }, [fase]);
+
+  const reveladasRef = useRef(reveladas);
+  useEffect(() => { reveladasRef.current = reveladas; }, [reveladas]);
 
   const lastSavedRef = useRef<string>('');
 
@@ -122,16 +139,22 @@ export default function ListaPlayerPage() {
           discipline_id: result.data.discipline_id ?? null,
         });
 
-        // Carrega progresso local (se existir)
         const prog = await getProgressoLista(id, user.id);
         if (prog.success && prog.data) {
-          setRespostas(prog.data.respostas || {});
-          setMarcadas(prog.data.marcadas || []);
+          const respostasSalvas = prog.data.respostas || {};
+          const marcadasSalvas = prog.data.marcadas || [];
+          setRespostas(respostasSalvas);
+          setMarcadas(marcadasSalvas);
           setTempoDecorrido(prog.data.tempo_decorrido || 0);
-          lastSavedRef.current = snapshotDe(
-            prog.data.respostas || {},
-            prog.data.marcadas || []
-          );
+
+          const reveladasIniciais = new Set<number>();
+          Object.keys(respostasSalvas).forEach(k => {
+            const n = parseInt(k, 10);
+            if (!Number.isNaN(n)) reveladasIniciais.add(n);
+          });
+          setReveladas(reveladasIniciais);
+
+          lastSavedRef.current = snapshotDe(respostasSalvas, marcadasSalvas);
         } else {
           lastSavedRef.current = snapshotDe({}, []);
         }
@@ -159,7 +182,7 @@ export default function ListaPlayerPage() {
   }, [fase, lista]);
 
   // ============================================================
-  // AUTOSAVE IMEDIATO (respostas + marcadas)
+  // AUTOSAVE
   // ============================================================
   useEffect(() => {
     if (!id || !user?.id || fase !== "resolvendo" || !lista) return;
@@ -181,9 +204,6 @@ export default function ListaPlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [respostas, marcadas, id, user?.id, fase, lista, booted]);
 
-  // ============================================================
-  // AUTOSAVE DE TEMPO (a cada 10s)
-  // ============================================================
   useEffect(() => {
     if (!id || !user?.id || fase !== "resolvendo" || !lista) return;
     if (!booted) return;
@@ -202,9 +222,6 @@ export default function ListaPlayerPage() {
     return () => clearInterval(interval);
   }, [id, user?.id, fase, lista, booted]);
 
-  // ============================================================
-  // BEFOREUNLOAD + VISIBILITYCHANGE
-  // ============================================================
   useEffect(() => {
     if (!id || !user?.id) return;
 
@@ -233,6 +250,25 @@ export default function ListaPlayerPage() {
   }, [id, user?.id, booted]);
 
   // ============================================================
+  // AÇÕES
+  // ============================================================
+  const responder = useCallback((numero: number, letra: string) => {
+    if (reveladasRef.current.has(numero)) return;
+    setRespostas(prev => ({ ...prev, [numero]: letra }));
+    setReveladas(prev => {
+      const next = new Set(prev);
+      next.add(numero);
+      return next;
+    });
+  }, []);
+
+  const toggleMarcar = useCallback((numero: number) => {
+    setMarcadas(prev =>
+      prev.includes(numero) ? prev.filter(n => n !== numero) : [...prev, numero]
+    );
+  }, []);
+
+  // ============================================================
   // ATALHOS DE TECLADO
   // ============================================================
   useEffect(() => {
@@ -257,11 +293,12 @@ export default function ListaPlayerPage() {
         return;
       }
 
+      const jaRevelada = reveladas.has(q.numero);
       const tecla = e.key.toUpperCase();
       const numeros = ["1", "2", "3", "4", "5"];
       const letras = ["A", "B", "C", "D", "E"];
 
-      if (q.tipo === "multipla_escolha" && q.alternativas) {
+      if (!jaRevelada && q.tipo === "multipla_escolha" && q.alternativas) {
         let letraAlvo: string | null = null;
         const idxNum = numeros.indexOf(tecla);
         if (idxNum >= 0) letraAlvo = letras[idxNum];
@@ -271,7 +308,7 @@ export default function ListaPlayerPage() {
           const existe = q.alternativas.some(a => a.letra === letraAlvo);
           if (existe) { e.preventDefault(); responder(q.numero, letraAlvo); return; }
         }
-      } else if (q.tipo === "certo_errado") {
+      } else if (!jaRevelada && q.tipo === "certo_errado") {
         if (tecla === "1" || tecla === "C") { e.preventDefault(); responder(q.numero, "C"); return; }
         if (tecla === "2" || tecla === "E") { e.preventDefault(); responder(q.numero, "E"); return; }
       }
@@ -291,26 +328,16 @@ export default function ListaPlayerPage() {
       }
       if (tecla === "M") { e.preventDefault(); toggleMarcar(q.numero); return; }
       if (tecla === "F") { e.preventDefault(); setConfirmar(true); return; }
-      if (tecla === "?" || e.key === "?") { e.preventDefault(); setMostrarAtalhos(v => !v); return; }
+      if (e.key === "?") { e.preventDefault(); setMostrarAtalhos(v => !v); return; }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fase, lista, idx, confirmar, painel]);
+  }, [fase, lista, idx, confirmar, painel, reveladas, responder, toggleMarcar]);
 
   // ============================================================
-  // AÇÕES
+  // ERROS + FINALIZAR
   // ============================================================
-  const responder = useCallback((numero: number, letra: string) => {
-    setRespostas(prev => ({ ...prev, [numero]: letra }));
-  }, []);
-
-  const toggleMarcar = useCallback((numero: number) => {
-    setMarcadas(prev =>
-      prev.includes(numero) ? prev.filter(n => n !== numero) : [...prev, numero]
-    );
-  }, []);
-
   const montarErros = (): QuestaoErrada[] => {
     if (!lista) return [];
     const erros: QuestaoErrada[] = [];
@@ -372,7 +399,6 @@ export default function ListaPlayerPage() {
       acertosPorArea
     );
 
-    // Marca progresso como concluído
     await salvarProgressoLista(lista.id, user.id, {
       respostas,
       marcadas,
@@ -399,8 +425,19 @@ export default function ListaPlayerPage() {
     setFase("resultado");
   };
 
+  const handleSair = async () => {
+    const ok = await confirmDialog({
+      title: "Tem certeza que deseja sair?",
+      description: "Você poderá retomar de onde parou se voltar a esta lista.",
+      confirmText: "Sair",
+      cancelText: "Ficar",
+      destructive: true,
+    });
+    if (ok) navigate("/simulados");
+  };
+
   // ============================================================
-  // RENDER: LOADING / ERRO
+  // LOADING / ERRO
   // ============================================================
   if (loading) {
     return (
@@ -419,7 +456,7 @@ export default function ListaPlayerPage() {
           <p className="text-accent">{error || "Lista não encontrada"}</p>
           <button
             onClick={() => navigate("/simulados")}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar
           </button>
@@ -431,17 +468,17 @@ export default function ListaPlayerPage() {
   const total = lista.questoes.length;
 
   // ============================================================
-  // RESULTADO
+  // RESULTADO (visual novo)
   // ============================================================
   if (fase === "resultado" && resultado) {
     const pct = resultado.porcentagem;
 
     return (
       <AppShell breadcrumb="Listas" title="Resultado da lista">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => navigate("/simulados")}
-            className="inline-flex items-center gap-1.5 text-xs text-foreground/50 hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar para listas
           </button>
@@ -453,10 +490,10 @@ export default function ListaPlayerPage() {
             <div className="mt-4 font-display text-2xl font-semibold tabular-nums">
               {resultado.acertos} / {resultado.totalQuestoes}
             </div>
-            <p className="text-xs text-foreground/50">
+            <p className="text-xs text-muted-foreground">
               acertos · {pct}% de aproveitamento
             </p>
-            <p className="mt-3 text-xs text-foreground/45">{lista.titulo}</p>
+            <p className="mt-3 text-xs text-muted-foreground">{lista.titulo}</p>
           </div>
 
           <div className="grid gap-4">
@@ -475,23 +512,26 @@ export default function ListaPlayerPage() {
                   const correta = getCorreta(q);
                   const acertou = resp === correta;
                   const status = !resp ? "nao-respondida" : acertou ? "acertou" : "errou";
+
+                  const pillCls =
+                    status === "nao-respondida"
+                      ? "bg-muted text-muted-foreground"
+                      : status === "acertou"
+                      ? "bg-green-500/15 text-green-500"
+                      : "bg-accent/15 text-accent";
+
                   return (
                     <button
                       key={q.id}
                       onClick={() => { setIdx(i); setFase("correcao"); }}
-                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-surface/40 px-3 py-2 text-left transition-colors hover:bg-surface"
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border bg-surface/40 px-3 py-2 text-left transition-colors hover:bg-surface"
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-medium">Questão {q.numero}</div>
-                        <div className="truncate text-[11px] text-foreground/40">{q.area || ""}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">{q.area || ""}</div>
                       </div>
                       <span
-                        className={[
-                          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          status === "nao-respondida" ? "bg-white/5 text-foreground/45" :
-                          status === "acertou" ? "bg-primary/15 text-primary" :
-                          "bg-accent/15 text-accent",
-                        ].join(" ")}
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pillCls}`}
                       >
                         {status === "nao-respondida" ? <MinusCircle className="h-3 w-3" /> :
                          status === "acertou" ? <CheckCircle2 className="h-3 w-3" /> :
@@ -516,6 +556,7 @@ export default function ListaPlayerPage() {
                   setFase("resolvendo");
                   setErrosParaEnviar(null);
                   setEnviadosAoBanco(false);
+                  setReveladas(new Set());
                 }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-4 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
               >
@@ -524,7 +565,7 @@ export default function ListaPlayerPage() {
               {errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
                 <button
                   onClick={() => setMostrarModalErros(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
                 >
                   📥 Enviar {errosParaEnviar.length} {errosParaEnviar.length === 1 ? 'erro' : 'erros'} ao caderno
                 </button>
@@ -555,7 +596,7 @@ export default function ListaPlayerPage() {
   }
 
   // ============================================================
-  // CORREÇÃO
+  // CORREÇÃO (gabarito comentado — usando QuestaoCard)
   // ============================================================
   if (fase === "correcao") {
     const q = lista.questoes[idx];
@@ -568,7 +609,7 @@ export default function ListaPlayerPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setFase("resultado")}
-            className="inline-flex items-center gap-1.5 text-xs text-foreground/50 hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar ao resultado
           </button>
@@ -585,137 +626,40 @@ export default function ListaPlayerPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="rf-card p-5 sm:p-6">
-            {q.area && (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                {q.area}
-              </span>
-            )}
-            <p className="mt-3 text-sm leading-relaxed text-foreground/85">
-              <span className="font-display font-semibold">{q.numero}.</span> {q.enunciado}
-            </p>
+        <QuestaoCard
+          numero={q.numero}
+          total={total}
+          area={q.area || null}
+          enunciado={q.enunciado}
+          imagens={q.imagem_url ? [q.imagem_url] : []}
+          tipo={q.tipo === "certo_errado" ? "certo_errado" : "multipla_escolha"}
+          alternativas={getAlternativasView(q)}
+          selecionada={resp ?? null}
+          correta={correta ?? null}
+          comentario={q.comentario_geral || null}
+          revelar={true}
+          permitirEliminar={false}
+          onSelecionar={() => {}}
+        />
 
-            {q.imagem_url && (
-              <div className="mt-4">
-                <img
-                  src={q.imagem_url}
-                  alt={`Imagem da questão ${q.numero}`}
-                  className="max-h-80 rounded-lg border border-border"
-                />
-              </div>
-            )}
-
-            {q.tipo === "multipla_escolha" && q.alternativas && (
-              <div className="mt-5 space-y-2">
-                {q.alternativas.map(a => {
-                  const isCorreta = !!a.correta;
-                  const isSua = resp === a.letra;
-                  return (
-                    <div
-                      key={a.letra}
-                      className={[
-                        "rounded-xl border p-3",
-                        isCorreta ? "border-primary/50 bg-primary/10" :
-                        isSua ? "border-accent/50 bg-accent/10" :
-                        "border-border bg-surface/40",
-                      ].join(" ")}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span
-                          className={[
-                            "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold",
-                            isCorreta ? "border-primary text-primary" :
-                            isSua ? "border-accent text-accent" :
-                            "border-border text-foreground/50",
-                          ].join(" ")}
-                        >
-                          {a.letra}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-xs leading-relaxed text-foreground/80">{a.texto}</p>
-                          <p className="mt-1 text-[11px] text-foreground/45">
-                            <span className={isCorreta ? "font-semibold text-primary" : "font-semibold text-foreground/60"}>
-                              {isCorreta ? "Correta" : "Incorreta"}
-                            </span>
-                            {a.comentario && ` — ${a.comentario}`}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {q.tipo === "certo_errado" && (
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                {["C", "E"].map(letra => {
-                  const isCorreta = letra === correta;
-                  const isSua = resp === letra;
-                  return (
-                    <div
-                      key={letra}
-                      className={[
-                        "rounded-xl border p-4 text-center",
-                        isCorreta ? "border-primary/50 bg-primary/10" :
-                        isSua ? "border-accent/50 bg-accent/10" :
-                        "border-border bg-surface/40",
-                      ].join(" ")}
-                    >
-                      <div className={[
-                        "font-display text-sm font-semibold",
-                        isCorreta ? "text-primary" : isSua ? "text-accent" : "text-foreground/60",
-                      ].join(" ")}>
-                        {letra === "C" ? "Certo" : "Errado"}
-                      </div>
-                      <div className="mt-1 text-[10px] text-foreground/45">
-                        {isCorreta ? "Correta" : isSua ? "Sua resposta" : "—"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div className="rf-card p-5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-foreground/50">Sua resposta</span>
-                <span className="font-display text-sm font-semibold">
-                  {resp === "C" ? "Certo" : resp === "E" ? "Errado" : resp ?? "—"}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs">
-                <span className="text-foreground/50">Resposta correta</span>
-                <span className="font-display text-sm font-semibold text-primary">
-                  {correta === "C" ? "Certo" : correta === "E" ? "Errado" : correta}
-                </span>
-              </div>
-              <div
-                className={[
-                  "mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold",
-                  !resp ? "bg-white/5 text-foreground/50" :
-                  acertou ? "bg-primary/15 text-primary" :
-                  "bg-accent/15 text-accent",
-                ].join(" ")}
-              >
-                {!resp ? <MinusCircle className="h-3.5 w-3.5" /> :
-                 acertou ? <CheckCircle2 className="h-3.5 w-3.5" /> :
-                 <XCircle className="h-3.5 w-3.5" />}
-                {!resp ? "Não respondida" : acertou ? "Você acertou" : "Você errou"}
-              </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="rf-card p-5">
+            <h4 className="mb-2 font-display text-sm font-semibold">Status</h4>
+            <div
+              className={[
+                "inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-semibold",
+                !resp
+                  ? "bg-muted text-muted-foreground"
+                  : acertou
+                  ? "bg-green-500/15 text-green-500"
+                  : "bg-accent/15 text-accent",
+              ].join(" ")}
+            >
+              {!resp ? <MinusCircle className="h-3.5 w-3.5" /> :
+               acertou ? <CheckCircle2 className="h-3.5 w-3.5" /> :
+               <XCircle className="h-3.5 w-3.5" />}
+              {!resp ? "Não respondida" : acertou ? "Você acertou" : "Você errou"}
             </div>
-
-            {q.comentario_geral && (
-              <div className="rf-card p-5">
-                <h4 className="mb-2 font-display text-sm font-semibold">Comentário</h4>
-                <p className="text-xs leading-relaxed text-foreground/60 whitespace-pre-wrap">
-                  {q.comentario_geral}
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </AppShell>
@@ -729,14 +673,17 @@ export default function ListaPlayerPage() {
   const selecionada = respostas[q.numero];
   const respondidas = Object.keys(respostas).length;
   const progressoPercentual = Math.round(((idx + 1) / total) * 100);
+  const correta = getCorreta(q);
+  const jaRevelada = reveladas.has(q.numero);
 
   return (
     <AppShell breadcrumb="Listas">
+      {/* Cabeçalho */}
       <div className="rf-card mb-4 p-4 sm:p-5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <div className="min-w-0">
             <button
-              onClick={() => navigate("/simulados")}
+              onClick={handleSair}
               className="inline-flex items-center gap-1.5 text-[11px] text-foreground/45 hover:text-foreground"
             >
               <ChevronLeft className="h-3 w-3" /> Sair da lista
@@ -748,7 +695,7 @@ export default function ListaPlayerPage() {
               Questão {idx + 1} de {total} · {respondidas} respondidas
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
               <Clock className="h-3.5 w-3.5 text-accent" />
               <span className="font-display text-xs font-semibold tabular-nums">
@@ -765,9 +712,17 @@ export default function ListaPlayerPage() {
             <button
               onClick={() => setPainel(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+              title="Painel de questões"
             >
               <Grid3X3 className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Questões</span>
+            </button>
+            <button
+              onClick={() => setConfirmar(true)}
+              className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+            >
+              <Flag className="h-3.5 w-3.5" />
+              Finalizar
             </button>
           </div>
         </div>
@@ -803,165 +758,52 @@ export default function ListaPlayerPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rf-card p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {q.area ? (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                {q.area}
-              </span>
-            ) : <span />}
-            <button
-              onClick={() => toggleMarcar(q.numero)}
-              className={[
-                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-colors",
-                marcadas.includes(q.numero)
-                  ? "border-accent/50 bg-accent/10 text-accent"
-                  : "border-border bg-surface/60 text-foreground/60 hover:bg-surface",
-              ].join(" ")}
-            >
-              <Bookmark className={["h-3.5 w-3.5", marcadas.includes(q.numero) ? "fill-current" : ""].join(" ")} />
-              {marcadas.includes(q.numero) ? "Marcada" : "Marcar"}
-            </button>
-          </div>
+      <QuestaoCard
+        numero={idx + 1}
+        total={total}
+        area={q.area || null}
+        enunciado={q.enunciado}
+        imagens={q.imagem_url ? [q.imagem_url] : []}
+        tipo={q.tipo === "certo_errado" ? "certo_errado" : "multipla_escolha"}
+        alternativas={getAlternativasView(q)}
+        selecionada={selecionada ?? null}
+        correta={jaRevelada ? correta : null}
+        comentario={jaRevelada ? (q.comentario_geral || null) : null}
+        revelar={jaRevelada}
+        permitirEliminar={false}
+        marcada={marcadas.includes(q.numero)}
+        onSelecionar={(letra) => responder(q.numero, letra)}
+        onMarcar={() => toggleMarcar(q.numero)}
+      />
 
-          <p className="mt-4 text-sm leading-relaxed text-foreground/85 whitespace-pre-wrap">
-            <span className="font-display font-semibold">{q.numero}.</span> {q.enunciado}
-          </p>
-
-          {q.imagem_url && (
-            <div className="mt-4">
-              <img
-                src={q.imagem_url}
-                alt={`Imagem da questão ${q.numero}`}
-                className="max-h-80 rounded-lg border border-border"
-              />
-            </div>
-          )}
-
-          {q.tipo === "multipla_escolha" && q.alternativas && (
-            <div className="mt-5 space-y-2">
-              {q.alternativas.map((a, i) => {
-                const ativa = selecionada === a.letra;
-                return (
-                  <button
-                    key={a.letra}
-                    type="button"
-                    onClick={() => responder(q.numero, a.letra)}
-                    className={[
-                      "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
-                      ativa
-                        ? "border-primary bg-primary/10"
-                        : "border-border bg-surface/40 hover:bg-surface/70",
-                    ].join(" ")}
-                  >
-                    <span
-                      className={[
-                        "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold transition-colors",
-                        ativa
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border text-foreground/55",
-                      ].join(" ")}
-                    >
-                      {ativa ? <Check className="h-3.5 w-3.5" /> : a.letra}
-                    </span>
-                    <span className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/80">
-                      {a.texto}
-                    </span>
-                    {i < 5 && (
-                      <span className="hidden shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/35 sm:inline-block">
-                        {i + 1}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {q.tipo === "certo_errado" && (
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              {[
-                { letra: "C", label: "Certo", tecla: "1" },
-                { letra: "E", label: "Errado", tecla: "2" },
-              ].map(opt => {
-                const ativa = selecionada === opt.letra;
-                return (
-                  <button
-                    key={opt.letra}
-                    type="button"
-                    onClick={() => responder(q.numero, opt.letra)}
-                    className={[
-                      "rounded-xl border p-4 text-center transition-colors",
-                      ativa
-                        ? "border-primary bg-primary/10"
-                        : "border-border bg-surface/40 hover:bg-surface/70",
-                    ].join(" ")}
-                  >
-                    <div className={[
-                      "font-display text-sm font-semibold",
-                      ativa ? "text-primary" : "text-foreground/70",
-                    ].join(" ")}>
-                      {opt.label}
-                    </div>
-                    <div className="mt-1 text-[10px] text-foreground/40">
-                      {ativa ? "Selecionado" : `Tecla ${opt.tecla}`}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-between gap-2">
-            <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
-              <ArrowLeft className="h-3.5 w-3.5" /> Anterior
-            </NavBtn>
-            {idx === total - 1 ? (
-              <button
-                onClick={() => setConfirmar(true)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                <Flag className="h-3.5 w-3.5" /> Finalizar lista
-              </button>
-            ) : (
-              <button
-                onClick={() => setIdx(i => i + 1)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                Próxima <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        <aside className="hidden lg:block">
-          <div className="rf-card sticky top-20 p-5">
-            <PainelQuestoes
-              total={total}
-              atual={idx}
-              respostas={respostas}
-              marcadas={marcadas}
-              questoes={lista.questoes}
-              onPick={(i) => setIdx(i)}
-            />
-            <button
-              onClick={() => setConfirmar(true)}
-              className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-            >
-              <Flag className="h-3.5 w-3.5" /> Finalizar lista
-            </button>
-          </div>
-        </aside>
+      <div className="mt-6 flex items-center justify-between gap-2">
+        <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Anterior
+        </NavBtn>
+        {idx === total - 1 ? (
+          <button
+            onClick={() => setConfirmar(true)}
+            className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+          >
+            <Flag className="h-3.5 w-3.5" /> Finalizar lista
+          </button>
+        ) : (
+          <button
+            onClick={() => setIdx(i => i + 1)}
+            className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
+          >
+            Próxima <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {painel && (
         <div
-          className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4"
           onClick={() => setPainel(false)}
         >
           <div
-            className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5"
+            className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5 sm:max-w-md sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -978,9 +820,14 @@ export default function ListaPlayerPage() {
               atual={idx}
               respostas={respostas}
               marcadas={marcadas}
-              questoes={lista.questoes}
               onPick={(i) => { setIdx(i); setPainel(false); }}
             />
+            <button
+              onClick={() => { setPainel(false); setConfirmar(true); }}
+              className="btn-sun mt-5 inline-flex w-full items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-bold"
+            >
+              <Flag className="h-3.5 w-3.5" /> Finalizar lista
+            </button>
           </div>
         </div>
       )}
@@ -1011,7 +858,7 @@ export default function ListaPlayerPage() {
               <button
                 onClick={handleFinalizar}
                 disabled={salvando}
-                className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                className="btn-sun flex-1 px-3 py-2 text-xs font-bold disabled:opacity-50"
               >
                 {salvando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Finalizar"}
               </button>
@@ -1023,62 +870,51 @@ export default function ListaPlayerPage() {
   );
 }
 
+// ============================================================
+// Componentes auxiliares
+// ============================================================
 function PainelQuestoes({
-  total, atual, respostas, marcadas, questoes, onPick,
+  total, atual, respostas, marcadas, onPick,
 }: {
   total: number;
   atual: number;
   respostas: Record<number, string>;
   marcadas: number[];
-  questoes: QuestaoListaPlayer[];
   onPick: (i: number) => void;
 }) {
   return (
     <div>
       <h4 className="mb-3 font-display text-sm font-semibold">Painel de questões</h4>
-      <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 lg:grid-cols-5">
+      <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
         {Array.from({ length: total }, (_, i) => {
-          const q = questoes[i];
-          const numero = q.numero;
-          const respondida = !!respostas[numero];
-          const marcada = marcadas.includes(numero);
+          const n = i + 1;
+          const respondida = !!respostas[n];
+          const marcada = marcadas.includes(n);
           const isAtual = i === atual;
+
+          let cls = "bg-muted text-muted-foreground hover:bg-surface-2";
+          if (isAtual) cls = "bg-primary text-primary-foreground";
+          else if (marcada) cls = "bg-success text-primary-foreground";
+          else if (respondida) cls = "bg-accent text-accent-foreground";
+
           return (
             <button
-              key={q.id}
+              key={n}
               onClick={() => onPick(i)}
-              className={[
-                "relative grid aspect-square place-items-center rounded-lg border text-[11px] font-semibold tabular-nums transition-colors",
-                isAtual
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : respondida
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-surface/40 text-foreground/45 hover:bg-surface",
-              ].join(" ")}
+              className={`aspect-square rounded-xl text-sm font-bold tabular-nums transition-colors ${cls}`}
             >
-              {i + 1}
-              {marcada && (
-                <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
-              )}
+              {n}
             </button>
           );
         })}
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px] text-foreground/45">
-        <Legenda className="bg-primary" label="Atual" />
-        <Legenda className="bg-primary/30" label="Respondida" />
-        <Legenda className="bg-white/10" label="Não respondida" />
-        <Legenda className="bg-accent" label="Para revisar" />
+      <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-primary" /> Atual</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-accent" /> Respondida</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-success" /> Marcada para revisão</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-muted" /> Não respondida</p>
       </div>
     </div>
-  );
-}
-
-function Legenda({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={["h-2 w-2 rounded-full", className].join(" ")} /> {label}
-    </span>
   );
 }
 
@@ -1116,7 +952,7 @@ function Linha({ label, value, tone }: { label: string; value: number; tone?: "o
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-surface/40 px-3 py-2">
       <span className="text-xs text-foreground/55">{label}</span>
-      <span className={["font-display text-sm font-semibold tabular-nums", tone === "ok" ? "text-primary" : tone === "bad" ? "text-accent" : ""].join(" ")}>
+      <span className={["font-display text-sm font-semibold tabular-nums", tone === "ok" ? "text-green-500" : tone === "bad" ? "text-accent" : ""].join(" ")}>
         {value}
       </span>
     </div>
@@ -1126,8 +962,8 @@ function Linha({ label, value, tone }: { label: string; value: number; tone?: "o
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: "ok" | "bad" }) {
   return (
     <div className="rf-card p-4">
-      <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{label}</div>
-      <div className={["mt-1.5 font-display text-2xl font-semibold tabular-nums", tone === "ok" ? "text-primary" : tone === "bad" ? "text-accent" : "text-foreground"].join(" ")}>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={["mt-1.5 font-display text-2xl font-semibold tabular-nums", tone === "ok" ? "text-green-500" : tone === "bad" ? "text-accent" : "text-foreground"].join(" ")}>
         {value}
       </div>
     </div>
@@ -1143,14 +979,12 @@ function Donut({ pct }: { pct: number }) {
         <circle cx="60" cy="60" r={r} fill="none" strokeWidth="10" className="stroke-white/5" />
         <circle
           cx="60" cy="60" r={r} fill="none" strokeWidth="10" strokeLinecap="round"
-          className="stroke-primary"
-          strokeDasharray={c}
-          strokeDashoffset={c - (c * pct) / 100}
+          className="stroke-primary" strokeDasharray={c} strokeDashoffset={c - (c * pct) / 100}
         />
       </svg>
       <div className="absolute grid place-items-center">
         <span className="font-display text-3xl font-semibold tabular-nums">{pct}%</span>
-        <span className="text-[10px] uppercase tracking-widest text-foreground/40">aproveit.</span>
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground">aproveit.</span>
       </div>
     </div>
   );
