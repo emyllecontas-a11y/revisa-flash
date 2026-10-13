@@ -1,5 +1,6 @@
 // src/components/PdfViewer.tsx
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, X, Trash2, Highlighter, StickyNote, Pencil, Check, Plus, BookOpen, Minimize2, Copy, Strikethrough, Underline, Square, Move } from 'lucide-react';
 import { getDb } from '@/lib/db';
@@ -1921,7 +1922,7 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
         )}
       </div>
 
-      {hoveredHighlight && hoveredNote && !clickedHighlight && (
+      {hoveredHighlight && hoveredNote && !clickedHighlight && createPortal(
         <div
           className="hidden sm:block"
           style={{
@@ -1947,19 +1948,21 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
               Clique para editar
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {toastMsg && (
+      {toastMsg && createPortal(
         <div
           className="fixed left-1/2 top-6 -translate-x-1/2 rounded-full bg-neutral-800 px-4 py-2 text-sm font-medium text-white shadow-2xl"
           style={{ zIndex: 10020 }}
         >
           {toastMsg}
-        </div>
+        </div>,
+        document.body
       )}
 
-      {selection && (
+      {selection && createPortal(
         <div
           style={{
             position: 'fixed',
@@ -2033,10 +2036,11 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
               <span className="hidden xs:inline">Anotar</span>
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {notePopover && (
+      {notePopover && createPortal(
         <div
           className="pdf-note-popover"
           style={{
@@ -2114,10 +2118,11 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {clickedHighlight && (
+      {clickedHighlight && createPortal(
         <div
           className="pdf-highlight-popover"
           style={{
@@ -2285,7 +2290,8 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
               </button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
