@@ -8,9 +8,11 @@ import { uid } from '@/utils/helpers';
 import { ensureCached, getPdfBlob } from '@/services/pdfCache';
 import { useAppUser } from '@/contexts/UserContext';
 
-import '@/lib/pdfWorker';
+import { setupPdfWorker } from '@/lib/pdfWorker';
 import 'react-pdf/dist/Page/TextLayer.css';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
+
+setupPdfWorker();
 
 interface PdfViewerProps {
   url: string;

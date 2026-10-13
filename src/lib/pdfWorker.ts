@@ -2,18 +2,28 @@
 // Configura o worker do PDF.js. DEVE ser importado antes de qualquer
 // componente que use react-pdf.
 //
-// Aqui criamos o Worker manualmente e o entregamos ao PDF.js via
-// `workerPort`. Essa é a forma recomendada pelo Vite para workers:
-//   - o Vite entende o padrão `new Worker(new URL(...), { type: 'module' })`
-//   - ele empacota o arquivo do worker como asset separado
-//   - funciona em dev E em produção
+// Esta função é chamada EXPLICITAMENTE pelo PdfViewer (não é side-effect
+// import), para o bundler não poder descartá-la.
 //
-// Não usamos `workerSrc` porque o PDF.js tentaria um `import()` dinâmico
-// da URL, e o Vite reescreveria isso com `?import`, quebrando.
+// Estratégia:
+//   1. Tenta o arquivo local empacotado pelo Vite (?url).
+//   2. Se o valor vier vazio/undefined, cai para o CDN do unpkg (sempre
+//      funciona, casa com a versão instalada do pdfjs-dist).
+//   3. Se o CDN também falhar, cai para um caminho absoluto fixo.
 
 import { pdfjs } from 'react-pdf';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-pdfjs.GlobalWorkerOptions.workerPort = new Worker(
-  new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url),
-  { type: 'module' }
-);
+export function setupPdfWorker(): void {
+  const local = typeof pdfWorkerUrl === 'string' && pdfWorkerUrl.length > 0
+    ? pdfWorkerUrl
+    : null;
+
+  const cdn = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+  const finalUrl = local || cdn;
+
+  pdfjs.GlobalWorkerOptions.workerSrc = finalUrl;
+
+  console.log('[pdfWorker] workerSrc configurado para:', finalUrl);
+}

@@ -22,8 +22,6 @@ import './styles/pdf.css';
 import { addRxPlugin } from 'rxdb';
 import { RxDBMigrationPlugin } from 'rxdb/plugins/migration';
 import { RxDBUpdatePlugin } from 'rxdb/plugins/update';
-import { pdfjs } from 'react-pdf';
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 addRxPlugin(RxDBMigrationPlugin);
 addRxPlugin(RxDBUpdatePlugin);
