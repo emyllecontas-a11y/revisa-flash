@@ -8,11 +8,14 @@ import { router } from './router';
 import { FlashcardProvider, useFlashcardContext } from './contexts/FlashcardContext';
 import { StudyProvider } from './contexts/StudyContext';
 import { ActiveSessionProvider } from './contexts/ActiveSessionContext';
+import { PomodoroProvider } from './contexts/PomodoroContext';
+import { MusicProvider } from './contexts/MusicContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider, useAppUser } from './contexts/UserContext';
 import { ConfirmProvider } from './components/ConfirmDialog';
+import { MiniMusicPlayer } from './components/MiniMusicPlayer';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { processPendingOperations } from '@/services/queueService';
@@ -36,9 +39,6 @@ if (!PUBLISHABLE_KEY) {
   throw new Error('❌ Missing Clerk Publishable Key. Add VITE_CLERK_PUBLISHABLE_KEY to your .env file.');
 }
 
-// ============================================================
-// 📦 COMPONENTE QUE USA O CONTEXTO (filho do FlashcardProvider)
-// ============================================================
 function AppContent() {
   const { refreshUserSettings } = useFlashcardContext();
   const { userId } = useAppUser();
@@ -158,9 +158,6 @@ function AppContent() {
   );
 }
 
-// ============================================================
-// 📦 COMPONENTE ROOT
-// ============================================================
 function Root() {
   const { userId, isLoaded, isSignedIn, user } = useAppUser();
   const [ready, setReady] = useState(false);
@@ -268,9 +265,14 @@ function Root() {
         <FlashcardProvider>
           <StudyProvider>
             <ActiveSessionProvider>
-              <ErrorProvider>
-                <AppContent />
-              </ErrorProvider>
+              <PomodoroProvider>
+                <MusicProvider>
+                  <ErrorProvider>
+                    <AppContent />
+                  </ErrorProvider>
+                  <MiniMusicPlayer />
+                </MusicProvider>
+              </PomodoroProvider>
             </ActiveSessionProvider>
           </StudyProvider>
         </FlashcardProvider>
@@ -279,9 +281,6 @@ function Root() {
   );
 }
 
-// ============================================================
-// 🌐 COMPONENTE PRINCIPAL
-// ============================================================
 function AppWithAuth() {
   return (
     <ClerkProvider
@@ -300,9 +299,6 @@ function AppWithAuth() {
   );
 }
 
-// ============================================================
-// 🔥 SERVICE WORKER
-// ============================================================
 if ('serviceWorker' in navigator) {
   const registerSW = async () => {
     try {
@@ -324,9 +320,6 @@ if ('serviceWorker' in navigator) {
   console.warn('⚠️ Service Worker não é suportado neste navegador.');
 }
 
-// ============================================================
-// 🔧 SINCRONIZAÇÃO MANUAL
-// ============================================================
 export const manualSync = async () => {
   const userId = localStorage.getItem('revisaflash_user_id');
   if (!userId) {

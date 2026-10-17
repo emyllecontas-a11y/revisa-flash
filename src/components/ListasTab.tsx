@@ -25,6 +25,7 @@ import { Lista, ResultadoLista, Pasta, ListaImport } from "@/lib/listas-types";
 import { EstatisticasListasModal } from "@/components/EstatisticasListasModal";
 import { EditarListaModal } from "@/components/EditarListaModal";
 import { GerenciarQuestoesModal } from "@/components/GerenciarQuestoesModal";
+import { RevisarImportacaoPdfModal } from "@/components/RevisarImportacaoPdfModal";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -99,6 +100,7 @@ export function ListasTab() {
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [pdfFileParaRevisar, setPdfFileParaRevisar] = useState<File | null>(null);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [historicoLista, setHistoricoLista] = useState<Lista | null>(null);
   const [editandoLista, setEditandoLista] = useState<Lista | null>(null);
@@ -509,7 +511,7 @@ export function ListasTab() {
           ) : (
             <EmptyStateListas
               titulo="Nenhuma lista nesta pasta"
-              descricao="Importe um JSON para criar a primeira lista desta pasta."
+              descricao="Importe um JSON ou PDF para criar a primeira lista desta pasta."
               onImportar={() => setIsImportModalOpen(true)}
             />
           )
@@ -537,6 +539,20 @@ export function ListasTab() {
             pastasDisponiveis={todasPastas}
             onClose={() => setIsImportModalOpen(false)}
             onSuccess={() => { setIsImportModalOpen(false); loadData(); }}
+            onPdfSelected={(f) => setPdfFileParaRevisar(f)}
+          />
+        )}
+
+        {pdfFileParaRevisar && user?.id && (
+          <RevisarImportacaoPdfModal
+            file={pdfFileParaRevisar}
+            userId={user.id}
+            modo="lista"
+            disciplinaInicial={disciplinaAberta.id}
+            pastaInicial={pastaAberta.id}
+            pastasDisponiveis={todasPastas.map((p) => ({ id: p.id, name: p.name, discipline_id: p.discipline_id }))}
+            onClose={() => setPdfFileParaRevisar(null)}
+            onSuccess={() => { setPdfFileParaRevisar(null); loadData(); }}
           />
         )}
 
@@ -785,6 +801,20 @@ export function ListasTab() {
           pastasDisponiveis={todasPastas}
           onClose={() => setIsImportModalOpen(false)}
           onSuccess={() => { setIsImportModalOpen(false); loadData(); }}
+          onPdfSelected={(f) => setPdfFileParaRevisar(f)}
+        />
+      )}
+
+      {pdfFileParaRevisar && user?.id && (
+        <RevisarImportacaoPdfModal
+          file={pdfFileParaRevisar}
+          userId={user.id}
+          modo="lista"
+          disciplinaInicial={disciplinaAberta.id}
+          pastaInicial={null}
+          pastasDisponiveis={todasPastas.map((p) => ({ id: p.id, name: p.name, discipline_id: p.discipline_id }))}
+          onClose={() => setPdfFileParaRevisar(null)}
+          onSuccess={() => { setPdfFileParaRevisar(null); loadData(); }}
         />
       )}
 
@@ -1040,7 +1070,7 @@ function EmptyStateListas({
 }
 
 // ============================================================
-// MODAL DE HISTÓRICO (agora com ações de exclusão/reset)
+// MODAL DE HISTÓRICO
 // ============================================================
 function HistoricoListaModal({
   lista, resultados, userId, onRefresh, onClose,
@@ -1280,7 +1310,7 @@ interface ImportJob {
 }
 
 function ImportListaModal({
-  userId, disciplinaInicial, pastaInicial, pastasDisponiveis, onClose, onSuccess,
+  userId, disciplinaInicial, pastaInicial, pastasDisponiveis, onClose, onSuccess, onPdfSelected,
 }: {
   userId: string;
   disciplinaInicial: string;
@@ -1288,10 +1318,10 @@ function ImportListaModal({
   pastasDisponiveis: Pasta[];
   onClose: () => void;
   onSuccess: () => void;
+  onPdfSelected: (file: File) => void;
 }) {
   const toast = useToast();
 
-  const [password, setPassword] = useState("");
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [disciplineId, setDisciplineId] = useState(disciplinaInicial);
@@ -1324,8 +1354,27 @@ function ImportListaModal({
 
   const handleSelectFiles = (files: File[]) => {
     setError(null);
+
+    // 1) PDFs → passam para a tela de revisão (um por vez)
+    const pdfs = files.filter((f) => /\.pdf$/i.test(f.name));
+    if (pdfs.length > 0) {
+      if (pdfs.length > 1) {
+        setError("Selecione apenas um PDF por vez.");
+        return;
+      }
+      if (files.length > 1) {
+        setError("Não misture PDF com JSON na mesma importação.");
+        return;
+      }
+      onPdfSelected(pdfs[0]);
+      onClose();
+      return;
+    }
+
+    // 2) JSONs → vão para a fila (comportamento antigo)
     const novos: ImportJob[] = [];
     for (const f of files) {
+      if (!/\.json$/i.test(f.name)) continue;
       const titulo = f.name.replace(/\.json$/i, "");
       novos.push({ file: f, status: "pending", titulo });
     }
@@ -1339,7 +1388,6 @@ function ImportListaModal({
 
   const handleImport = async () => {
     setError(null);
-    if (password !== "admin123") { setError("Senha incorreta"); return; }
     if (jobs.length === 0) { setError("Selecione pelo menos um arquivo JSON"); return; }
     if (!disciplineId) { setError("Selecione uma disciplina"); return; }
     if (!userId) { setError("Usuário não autenticado"); return; }
@@ -1386,7 +1434,7 @@ function ImportListaModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-foreground">Importar listas (JSON)</h3>
+          <h3 className="text-lg font-semibold text-foreground">Importar listas</h3>
           <button onClick={onClose} className="text-foreground/50 hover:text-foreground transition-colors">
             <X className="h-5 w-5" />
           </button>
@@ -1399,17 +1447,6 @@ function ImportListaModal({
           </div>
         ) : (
           <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-foreground/70">Senha administrativa *</label>
-              <input
-                type="password"
-                placeholder="Digite a senha"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={importing}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-              />
-            </div>
 
             <div>
               <label className="text-sm font-medium text-foreground/70">Disciplina *</label>
@@ -1449,18 +1486,18 @@ function ImportListaModal({
 
             <div>
               <label className="text-sm font-medium text-foreground/70">
-                Arquivos JSON * <span className="text-foreground/40">(pode selecionar vários)</span>
+                Arquivos (JSON ou PDF) * <span className="text-foreground/40">(pode selecionar vários JSONs)</span>
               </label>
               <input
                 type="file"
-                accept=".json"
+                accept=".json,.pdf"
                 multiple
                 onChange={(e) => { handleSelectFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
                 disabled={importing}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
               />
               <p className="mt-1 text-xs text-foreground/40">
-                Cada JSON deve seguir o formato de lista (com campo <code>tipo</code> em cada questão).
+                Aceita <b>JSON</b> (lista pronta) ou <b>PDF</b> (para revisar antes de salvar). Se for PDF, você verá uma tela de revisão.
               </p>
 
               {jobs.length > 0 && (

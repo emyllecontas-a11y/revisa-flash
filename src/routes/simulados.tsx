@@ -3,9 +3,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { AppShell } from "@/components/app-shell";
-import { 
-  getSimulados, 
-  importarSimulado, 
+import {
+  getSimulados,
+  importarSimulado,
   excluirSimulado,
   buscarResultadosDoUsuario,
   buscarHistoricoCompleto,
@@ -15,6 +15,7 @@ import {
 } from "@/services/simuladoService";
 import { useStudy } from "@/contexts/StudyContext";
 import { ListasTab } from "@/components/ListasTab";
+import { RevisarImportacaoPdfModal } from "@/components/RevisarImportacaoPdfModal";
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
@@ -23,6 +24,7 @@ import {
 import type { Simulado } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
+import { GerenciarQuestoesSimuladoModal } from "@/components/GerenciarQuestoesSimuladoModal";
 
 export default function SimuladosPage() {
   const navigate = useNavigate();
@@ -40,11 +42,11 @@ export default function SimuladosPage() {
   const [resultadosLista, setResultadosLista] = useState<any[]>([]);
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importPassword, setImportPassword] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
+  const [pdfFileParaRevisar, setPdfFileParaRevisar] = useState<File | null>(null);
 
   const [excluindo, setExcluindo] = useState<string | null>(null);
 
@@ -55,6 +57,8 @@ export default function SimuladosPage() {
   const [historicoPage, setHistoricoPage] = useState(1);
   const [historicoLoading, setHistoricoLoading] = useState(false);
   const [historicoFilter, setHistoricoFilter] = useState('');
+
+  const [gerenciandoSimulado, setGerenciandoSimulado] = useState<Simulado | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -115,10 +119,10 @@ export default function SimuladosPage() {
     const total = simulados.length;
     const idsAtivos = new Set(simulados.map(s => s.id));
     const titulosAtivos = new Set(simulados.map(s => s.titulo));
-    
+
     const recordsValidos = studyRecords.filter(r => titulosAtivos.has(r.topic));
     const emAndamento = recordsValidos.filter(r => r.type === 'pratico' && !r.isDeleted).length;
-    
+
     const resultadosValidos = Object.fromEntries(
       Object.entries(resultadosUsuario).filter(([id]) => idsAtivos.has(id))
     );
@@ -233,8 +237,19 @@ export default function SimuladosPage() {
     }
   };
 
+  // ---- Importação: JSON (antigo) ou PDF (novo) ----
+  const handleFileSelected = (file: File | null) => {
+    setImportFile(file);
+    setImportError(null);
+    if (file && /\.pdf$/i.test(file.name)) {
+      // É PDF → manda para a tela de revisão
+      setPdfFileParaRevisar(file);
+      setIsImportModalOpen(false);
+      setImportFile(null);
+    }
+  };
+
   const handleImport = async () => {
-    if (importPassword !== "admin123") { setImportError("Senha incorreta"); return; }
     if (!importFile) { setImportError("Selecione um arquivo JSON"); return; }
     if (!user?.id) { setImportError("Usuário não autenticado"); return; }
 
@@ -249,7 +264,6 @@ export default function SimuladosPage() {
       if (result.success) {
         setImportSuccess(true);
         setImportFile(null);
-        setImportPassword("");
         setIsImportModalOpen(false);
         loadData();
       } else {
@@ -514,6 +528,15 @@ export default function SimuladosPage() {
                             )}
 
                             <div className="flex items-center gap-1.5">
+                              {/* Botão Gerenciar — SEMPRE visível */}
+                              <button
+                                onClick={() => setGerenciandoSimulado(s)}
+                                className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                                title="Gerenciar questões"
+                              >
+                                <ListChecks className="h-3.5 w-3.5" />
+                              </button>
+
                               {temResultado ? (
                                 <>
                                   <button
@@ -584,7 +607,7 @@ export default function SimuladosPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">Importar simulado (JSON)</h3>
+              <h3 className="text-lg font-semibold text-foreground">Importar simulado</h3>
               <button
                 onClick={() => { setIsImportModalOpen(false); setImportError(null); setImportSuccess(false); }}
                 className="text-foreground/50 hover:text-foreground transition-colors"
@@ -606,26 +629,20 @@ export default function SimuladosPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-foreground/70">Senha administrativa *</label>
-                  <input
-                    type="password"
-                    placeholder="Digite a senha"
-                    value={importPassword}
-                    onChange={(e) => setImportPassword(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40 mt-1"
-                  />
-                </div>
 
                 <div>
-                  <label className="text-sm font-medium text-foreground/70">Arquivo JSON *</label>
+                  <label className="text-sm font-medium text-foreground/70">
+                    Arquivo (JSON ou PDF) *
+                  </label>
                   <input
                     type="file"
-                    accept=".json"
-                    onChange={(e) => { const file = e.target.files?.[0] || null; setImportFile(file); setImportError(null); }}
+                    accept=".json,.pdf"
+                    onChange={(e) => { const file = e.target.files?.[0] || null; handleFileSelected(file); e.target.value = ''; }}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
                   />
-                  <p className="mt-1 text-xs text-foreground/40">O JSON deve seguir o schema definido em `simulados-types.ts`.</p>
+                  <p className="mt-1 text-xs text-foreground/40">
+                    <b>JSON</b> = simulado pronto. <b>PDF</b> = você revisa antes de salvar (o app extrai questões, gabaritos, sublinhados e imagens automaticamente).
+                  </p>
                 </div>
 
                 {importError && (
@@ -644,16 +661,33 @@ export default function SimuladosPage() {
                   </button>
                   <button
                     onClick={handleImport}
-                    disabled={importing}
+                    disabled={importing || !importFile}
                     className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                   >
-                    {importing ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Importar"}
+                    {importing ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Importar JSON"}
                   </button>
                 </div>
               </div>
             )}
           </div>
         </div>
+      )}
+
+      {pdfFileParaRevisar && user?.id && (
+        <RevisarImportacaoPdfModal
+          file={pdfFileParaRevisar}
+          userId={user.id}
+          modo="simulado"
+          simuladoDefaults={{
+            area: undefined,
+            nivel: 'Intermediário',
+            banca: '',
+            ano: new Date().getFullYear(),
+            tempo_total: 60,
+          }}
+          onClose={() => setPdfFileParaRevisar(null)}
+          onSuccess={() => { setPdfFileParaRevisar(null); loadData(); }}
+        />
       )}
 
       {isStatsModalOpen && (
@@ -967,7 +1001,7 @@ export default function SimuladosPage() {
                   <>
                     <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                       {historicoData.resultados
-                        .filter((r: any) => 
+                        .filter((r: any) =>
                           r.simulado_titulo?.toLowerCase().includes(historicoFilter.toLowerCase()) ||
                           r.simulado_area?.toLowerCase().includes(historicoFilter.toLowerCase())
                         )
@@ -1010,6 +1044,15 @@ export default function SimuladosPage() {
             )}
           </div>
         </div>
+      )}
+
+      {gerenciandoSimulado && user?.id && (
+        <GerenciarQuestoesSimuladoModal
+          simulado={gerenciandoSimulado}
+          userId={user.id}
+          onClose={() => setGerenciandoSimulado(null)}
+          onSimuladoAlterado={() => loadData()}
+        />
       )}
     </AppShell>
   );

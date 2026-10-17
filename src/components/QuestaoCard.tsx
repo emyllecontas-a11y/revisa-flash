@@ -1,54 +1,114 @@
 // src/components/QuestaoCard.tsx
 // Componente visual puro para renderizar uma questão.
-// Não tem lógica própria — recebe tudo por props.
-// Usado pelas telas de Simulado (resolvendo) e Lista (resolvendo).
+// Suporta: sublinhado, negrito, itálico, imagens, certo/errado e grifos interativos.
 
 import { Bookmark, Check, Scissors, X } from "lucide-react";
+import { Fragment } from "react";
+import { TextoGrifavel } from "@/components/TextoGrifavel";
+import type {
+  AnotacaoQuestao,
+  CampoAlvo,
+  CorGrifo,
+  RectGrifo,
+} from "@/lib/anotacoes-types";
 
 export interface AlternativaView {
   letra: string;
   texto: string;
 }
 
+export interface Intervalo {
+  inicio: number;
+  fim: number;
+}
+
 export interface QuestaoCardProps {
-  /** Número da questão (1, 2, 3...) */
   numero: number;
-  /** Total de questões */
   total: number;
-  /** Ano da questão (opcional) */
   ano?: string | number | null;
-  /** Área/disciplina (opcional) */
   area?: string | null;
-  /** Instituição/banca (opcional) */
   instituicao?: string | null;
-  /** Enunciado da questão */
   enunciado: string;
-  /** URLs das imagens (opcional). Renderizadas abaixo do enunciado. */
+  sublinhadosEnunciado?: Intervalo[] | null;
+  negritosEnunciado?: Intervalo[] | null;
+  italicosEnunciado?: Intervalo[] | null;
   imagens?: string[];
-  /** Tipo da questão */
   tipo?: "multipla_escolha" | "certo_errado";
-  /** Alternativas. Para certo_errado use: [{letra:"C",texto:"Certo"},{letra:"E",texto:"Errado"}] */
   alternativas: AlternativaView[];
-  /** Letra da alternativa selecionada */
   selecionada?: string | null;
-  /** Letras eliminadas (riscadas). Só usado quando permitirEliminar=true. */
   eliminadas?: string[];
-  /** Letra da alternativa correta (usada quando revelar=true) */
   correta?: string | null;
-  /** Comentário geral (usado quando revelar=true) */
   comentario?: string | null;
-  /** Se true, mostra as alternativas coloridas (verde/vermelha) */
+  sublinhadosComentario?: Intervalo[] | null;
+  negritosComentario?: Intervalo[] | null;
+  italicosComentario?: Intervalo[] | null;
   revelar?: boolean;
-  /** Se true, mostra o botão de tesoura (eliminar) nas alternativas */
   permitirEliminar?: boolean;
-  /** Se true, o botão "Marcar" aparece ativo */
   marcada?: boolean;
-  /** Callback de seleção de alternativa */
   onSelecionar: (letra: string) => void;
-  /** Callback de eliminar/restaurar alternativa */
   onEliminar?: (letra: string) => void;
-  /** Callback de marcar/desmarcar a questão */
   onMarcar?: () => void;
+
+  // ---- Grifos (opcional) ----
+  anotacoes?: AnotacaoQuestao[];
+  onGrifar?: (campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => void;
+  onRemoverGrifo?: (id: string) => void;
+  onTrocarCorGrifo?: (id: string, cor: CorGrifo) => void;
+  /** Se false, não permite criar novos grifos (mas mostra os existentes) */
+  grifarAtivo?: boolean;
+}
+
+const campoAlternativa = (letra: string): CampoAlvo => `alternativa_${letra}` as CampoAlvo;
+
+function TextoFormatado({
+  texto,
+  sublinhados,
+  negritos,
+  italicos,
+}: {
+  texto: string;
+  sublinhados?: Intervalo[] | null;
+  negritos?: Intervalo[] | null;
+  italicos?: Intervalo[] | null;
+}) {
+  const n = texto.length;
+  const mask = new Uint8Array(n);
+  for (const s of sublinhados ?? []) {
+    const a = Math.max(0, s.inicio), b = Math.min(n, s.fim);
+    for (let i = a; i < b; i++) mask[i] |= 1;
+  }
+  for (const s of negritos ?? []) {
+    const a = Math.max(0, s.inicio), b = Math.min(n, s.fim);
+    for (let i = a; i < b; i++) mask[i] |= 2;
+  }
+  for (const s of italicos ?? []) {
+    const a = Math.max(0, s.inicio), b = Math.min(n, s.fim);
+    for (let i = a; i < b; i++) mask[i] |= 4;
+  }
+
+  if (mask.every((m) => m === 0)) return <>{texto}</>;
+
+  const partes: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  while (i < n) {
+    const m = mask[i];
+    let j = i;
+    while (j < n && mask[j] === m) j++;
+    const trecho = texto.slice(i, j);
+
+    if (m === 0) {
+      partes.push(<Fragment key={key++}>{trecho}</Fragment>);
+    } else {
+      let node: React.ReactNode = trecho;
+      if (m & 1) node = <u>{node}</u>;
+      if (m & 2) node = <b>{node}</b>;
+      if (m & 4) node = <i>{node}</i>;
+      partes.push(<Fragment key={key++}>{node}</Fragment>);
+    }
+    i = j;
+  }
+  return <>{partes}</>;
 }
 
 export function QuestaoCard({
@@ -58,6 +118,9 @@ export function QuestaoCard({
   area,
   instituicao,
   enunciado,
+  sublinhadosEnunciado,
+  negritosEnunciado,
+  italicosEnunciado,
   imagens,
   tipo = "multipla_escolha",
   alternativas,
@@ -65,14 +128,34 @@ export function QuestaoCard({
   eliminadas = [],
   correta = null,
   comentario = null,
+  sublinhadosComentario,
+  negritosComentario,
+  italicosComentario,
   revelar = false,
   permitirEliminar = false,
   marcada = false,
   onSelecionar,
   onEliminar,
   onMarcar,
+  anotacoes,
+  onGrifar,
+  onRemoverGrifo,
+  onTrocarCorGrifo,
+  grifarAtivo = true,
 }: QuestaoCardProps) {
   const isCertoErrado = tipo === "certo_errado";
+  const grifoHabilitado = !!onGrifar;
+  const podeGrifar = grifoHabilitado && grifarAtivo;
+
+  const grifosDoCampo = (campo: CampoAlvo): AnotacaoQuestao[] =>
+    (anotacoes ?? []).filter((a) => a.campo_alvo === campo && !a.isdeleted);
+
+  const handleCliqueAlternativa = (letra: string) => {
+    // Se o usuário acabou de selecionar texto (para grifar), não conta como clique.
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (sel && sel.toString().trim().length > 0) return;
+    onSelecionar(letra);
+  };
 
   return (
     <article className="overflow-hidden rounded-3xl border border-border bg-surface">
@@ -121,7 +204,33 @@ export function QuestaoCard({
 
       <div className="p-5 lg:p-7">
         {/* Enunciado */}
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">{enunciado}</p>
+        {grifoHabilitado ? (
+          <TextoGrifavel
+            grifos={grifosDoCampo("enunciado")}
+            ativo={podeGrifar}
+            onGrifar={(cor, texto, rects) => onGrifar!("enunciado", cor, texto, rects)}
+            onRemover={onRemoverGrifo}
+            onTrocarCor={onTrocarCorGrifo}
+          >
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+              <TextoFormatado
+                texto={enunciado}
+                sublinhados={sublinhadosEnunciado}
+                negritos={negritosEnunciado}
+                italicos={italicosEnunciado}
+              />
+            </p>
+          </TextoGrifavel>
+        ) : (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+            <TextoFormatado
+              texto={enunciado}
+              sublinhados={sublinhadosEnunciado}
+              negritos={negritosEnunciado}
+              italicos={italicosEnunciado}
+            />
+          </p>
+        )}
 
         {/* Imagens da questão */}
         {imagens && imagens.length > 0 && (
@@ -144,6 +253,9 @@ export function QuestaoCard({
             : permitirEliminar
             ? "Toque na alternativa para responder · use a tesoura para eliminar"
             : "Toque na alternativa para responder"}
+          {grifoHabilitado && podeGrifar && (
+            <> · selecione um trecho para grifar</>
+          )}
         </p>
 
         {/* Alternativas — múltipla escolha */}
@@ -154,6 +266,8 @@ export function QuestaoCard({
               const isCorreta = revelar && correta === a.letra;
               const isErrada = revelar && isSel && correta !== a.letra;
               const cut = eliminadas.includes(a.letra);
+              const campo = campoAlternativa(a.letra);
+              const grifosAlt = grifosDoCampo(campo);
 
               const borderCls = isCorreta
                 ? "border-green-500 bg-green-500/15"
@@ -182,11 +296,21 @@ export function QuestaoCard({
                       <Scissors className="h-4 w-4" />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    disabled={cut}
-                    onClick={() => onSelecionar(a.letra)}
-                    className="flex flex-1 items-center gap-3 text-left disabled:cursor-not-allowed"
+                  <div
+                    role="button"
+                    tabIndex={cut ? -1 : 0}
+                    aria-disabled={cut}
+                    onClick={() => !cut && handleCliqueAlternativa(a.letra)}
+                    onKeyDown={(e) => {
+                      if (cut) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleCliqueAlternativa(a.letra);
+                      }
+                    }}
+                    className={`flex flex-1 items-center gap-3 text-left ${
+                      cut ? "cursor-not-allowed" : "cursor-pointer"
+                    }`}
                   >
                     <span
                       className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-bold ${
@@ -203,14 +327,32 @@ export function QuestaoCard({
                         a.letra
                       )}
                     </span>
-                    <span
-                      className={
-                        cut ? "text-muted-foreground line-through opacity-60" : ""
-                      }
-                    >
-                      {a.texto}
-                    </span>
-                  </button>
+                    {grifoHabilitado ? (
+                      <TextoGrifavel
+                        grifos={grifosAlt}
+                        ativo={podeGrifar && !cut}
+                        onGrifar={(cor, texto, rects) => onGrifar!(campo, cor, texto, rects)}
+                        onRemover={onRemoverGrifo}
+                        onTrocarCor={onTrocarCorGrifo}
+                      >
+                        <span
+                          className={
+                            cut ? "text-muted-foreground line-through opacity-60" : ""
+                          }
+                        >
+                          {a.texto}
+                        </span>
+                      </TextoGrifavel>
+                    ) : (
+                      <span
+                        className={
+                          cut ? "text-muted-foreground line-through opacity-60" : ""
+                        }
+                      >
+                        {a.texto}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -224,6 +366,8 @@ export function QuestaoCard({
               const isSel = selecionada === a.letra;
               const isCorreta = revelar && correta === a.letra;
               const isErrada = revelar && isSel && correta !== a.letra;
+              const campo = campoAlternativa(a.letra);
+              const grifosAlt = grifosDoCampo(campo);
 
               const cls = isCorreta
                 ? "border-green-500 bg-green-500/15"
@@ -234,43 +378,98 @@ export function QuestaoCard({
                 : "border-transparent bg-muted hover:bg-surface-2";
 
               return (
-                <button
+                <div
                   key={a.letra}
-                  type="button"
-                  onClick={() => onSelecionar(a.letra)}
-                  className={`rounded-2xl border-2 p-4 text-center transition-colors ${cls}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleCliqueAlternativa(a.letra)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleCliqueAlternativa(a.letra);
+                    }
+                  }}
+                  className={`rounded-2xl border-2 p-4 text-center transition-colors cursor-pointer ${cls}`}
                 >
-                  <div
-                    className={`font-display text-sm font-semibold ${
-                      isCorreta
-                        ? "text-green-500"
-                        : isErrada
-                        ? "text-destructive"
-                        : isSel
-                        ? "text-primary"
-                        : "text-foreground/70"
-                    }`}
-                  >
-                    {a.texto}
-                  </div>
+                  {grifoHabilitado ? (
+                    <TextoGrifavel
+                      grifos={grifosAlt}
+                      ativo={podeGrifar}
+                      onGrifar={(cor, texto, rects) => onGrifar!(campo, cor, texto, rects)}
+                      onRemover={onRemoverGrifo}
+                      onTrocarCor={onTrocarCorGrifo}
+                    >
+                      <div
+                        className={`font-display text-sm font-semibold ${
+                          isCorreta
+                            ? "text-green-500"
+                            : isErrada
+                            ? "text-destructive"
+                            : isSel
+                            ? "text-primary"
+                            : "text-foreground/70"
+                        }`}
+                      >
+                        {a.texto}
+                      </div>
+                    </TextoGrifavel>
+                  ) : (
+                    <div
+                      className={`font-display text-sm font-semibold ${
+                        isCorreta
+                          ? "text-green-500"
+                          : isErrada
+                          ? "text-destructive"
+                          : isSel
+                          ? "text-primary"
+                          : "text-foreground/70"
+                      }`}
+                    >
+                      {a.texto}
+                    </div>
+                  )}
                   {isSel && !revelar && (
                     <div className="mt-1 text-[10px] text-foreground/40">Selecionado</div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
         )}
 
-        {/* Bloco de correção (aparece quando revelar=true e tem comentário) */}
+        {/* Comentário */}
         {revelar && comentario && (
           <div className="mt-6 rounded-2xl bg-muted p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-primary">
               Comentário
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {comentario}
-            </p>
+            {grifoHabilitado ? (
+              <TextoGrifavel
+                grifos={grifosDoCampo("comentario")}
+                ativo={podeGrifar}
+                onGrifar={(cor, texto, rects) => onGrifar!("comentario", cor, texto, rects)}
+                onRemover={onRemoverGrifo}
+                onTrocarCor={onTrocarCorGrifo}
+              >
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                  <TextoFormatado
+                    texto={comentario}
+                    sublinhados={sublinhadosComentario}
+                    negritos={negritosComentario}
+                    italicos={italicosComentario}
+                  />
+                </p>
+              </TextoGrifavel>
+            ) : (
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                <TextoFormatado
+                  texto={comentario}
+                  sublinhados={sublinhadosComentario}
+                  negritos={negritosComentario}
+                  italicos={italicosComentario}
+                />
+              </p>
+            )}
             {selecionada && correta && (
               <div className="mt-3 flex gap-4 text-xs">
                 <span>

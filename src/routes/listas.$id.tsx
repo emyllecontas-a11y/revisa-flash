@@ -17,9 +17,21 @@ import { EnviarErrosModal, QuestaoErrada } from "@/components/EnviarErrosModal";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
+  getAnotacoesDeQuestoes,
+  criarAnotacao,
+  removerAnotacao,
+  trocarCorAnotacao,
+} from "@/services/anotacaoQuestaoService";
+import type {
+  AnotacaoQuestao,
+  CampoAlvo,
+  CorGrifo,
+  RectGrifo,
+} from "@/lib/anotacoes-types";
+import {
   ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, Keyboard,
+  Loader2, Keyboard, Scissors,
 } from "lucide-react";
 
 type Fase = "resolvendo" | "resultado" | "correcao";
@@ -68,8 +80,15 @@ export default function ListaPlayerPage() {
 
   const [fase, setFase] = useState<Fase>("resolvendo");
   const [idx, setIdx] = useState(0);
+
+  // Respostas já confirmadas
   const [respostas, setRespostas] = useState<Record<number, string>>({});
+  // Selecionadas (ainda não confirmadas)
+  const [selecionadas, setSelecionadas] = useState<Record<number, string>>({});
+  // Riscadas
+  const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
   const [marcadas, setMarcadas] = useState<number[]>([]);
+
   const [tempoDecorrido, setTempoDecorrido] = useState(0);
   const [confirmar, setConfirmar] = useState(false);
   const [painel, setPainel] = useState(false);
@@ -81,8 +100,8 @@ export default function ListaPlayerPage() {
   const [enviadosAoBanco, setEnviadosAoBanco] = useState(false);
   const [mostrarAtalhos, setMostrarAtalhos] = useState(false);
 
-  // Correção imediata: questões que já revelaram a resposta
-  const [reveladas, setReveladas] = useState<Set<number>>(new Set());
+  // Grifos
+  const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
 
   const [booted, setBooted] = useState(false);
 
@@ -90,6 +109,12 @@ export default function ListaPlayerPage() {
 
   const respostasRef = useRef(respostas);
   useEffect(() => { respostasRef.current = respostas; }, [respostas]);
+
+  const selecionadasRef = useRef(selecionadas);
+  useEffect(() => { selecionadasRef.current = selecionadas; }, [selecionadas]);
+
+  const eliminadasRef = useRef(eliminadas);
+  useEffect(() => { eliminadasRef.current = eliminadas; }, [eliminadas]);
 
   const marcadasRef = useRef(marcadas);
   useEffect(() => { marcadasRef.current = marcadas; }, [marcadas]);
@@ -99,9 +124,6 @@ export default function ListaPlayerPage() {
 
   const faseRef = useRef(fase);
   useEffect(() => { faseRef.current = fase; }, [fase]);
-
-  const reveladasRef = useRef(reveladas);
-  useEffect(() => { reveladasRef.current = reveladas; }, [reveladas]);
 
   const lastSavedRef = useRef<string>('');
 
@@ -146,14 +168,6 @@ export default function ListaPlayerPage() {
           setRespostas(respostasSalvas);
           setMarcadas(marcadasSalvas);
           setTempoDecorrido(prog.data.tempo_decorrido || 0);
-
-          const reveladasIniciais = new Set<number>();
-          Object.keys(respostasSalvas).forEach(k => {
-            const n = parseInt(k, 10);
-            if (!Number.isNaN(n)) reveladasIniciais.add(n);
-          });
-          setReveladas(reveladasIniciais);
-
           lastSavedRef.current = snapshotDe(respostasSalvas, marcadasSalvas);
         } else {
           lastSavedRef.current = snapshotDe({}, []);
@@ -167,6 +181,18 @@ export default function ListaPlayerPage() {
     };
     load();
   }, [id, user?.id]);
+
+  // ============================================================
+  // CARREGAR GRIFOS
+  // ============================================================
+  useEffect(() => {
+    if (!user?.id || !lista) return;
+    const ids = lista.questoes.map((q) => q.id);
+    if (ids.length === 0) return;
+    getAnotacoesDeQuestoes(user.id, 'lista', ids)
+      .then(setAnotacoes)
+      .catch(() => {});
+  }, [user?.id, lista]);
 
   // ============================================================
   // CRONÔMETRO
@@ -252,13 +278,39 @@ export default function ListaPlayerPage() {
   // ============================================================
   // AÇÕES
   // ============================================================
-  const responder = useCallback((numero: number, letra: string) => {
-    if (reveladasRef.current.has(numero)) return;
+  const selecionar = useCallback((numero: number, letra: string) => {
+    if (respostasRef.current[numero]) return;
+    const elims = eliminadasRef.current[numero] || [];
+    if (elims.includes(letra)) return;
+    setSelecionadas(prev => ({ ...prev, [numero]: letra }));
+  }, []);
+
+  const confirmarResposta = useCallback((numero: number) => {
+    if (respostasRef.current[numero]) return;
+    const letra = selecionadasRef.current[numero];
+    if (!letra) return;
     setRespostas(prev => ({ ...prev, [numero]: letra }));
-    setReveladas(prev => {
-      const next = new Set(prev);
-      next.add(numero);
+    setSelecionadas(prev => {
+      const next = { ...prev };
+      delete next[numero];
       return next;
+    });
+  }, []);
+
+  const toggleEliminada = useCallback((numero: number, letra: string) => {
+    if (respostasRef.current[numero]) return;
+    setEliminadas(prev => {
+      const atual = prev[numero] || [];
+      const nova = atual.includes(letra) ? atual.filter(l => l !== letra) : [...atual, letra];
+      return { ...prev, [numero]: nova };
+    });
+    setSelecionadas(prev => {
+      if (prev[numero] === letra) {
+        const next = { ...prev };
+        delete next[numero];
+        return next;
+      }
+      return prev;
     });
   }, []);
 
@@ -269,7 +321,56 @@ export default function ListaPlayerPage() {
   }, []);
 
   // ============================================================
-  // ATALHOS DE TECLADO
+  // GRIFOS
+  // ============================================================
+  const handleGrifar = useCallback(
+    async (
+      questaoId: string,
+      campo: CampoAlvo,
+      cor: CorGrifo,
+      texto: string,
+      rects: RectGrifo[]
+    ) => {
+      if (!user?.id) return;
+      const nova = await criarAnotacao(user.id, 'lista', questaoId, campo, cor, texto, rects);
+      if (!nova) return;
+      setAnotacoes((prev) => {
+        const next = new Map(prev);
+        const atual = next.get(questaoId) ?? [];
+        next.set(questaoId, [...atual, nova]);
+        return next;
+      });
+    },
+    [user?.id]
+  );
+
+  const handleRemoverGrifo = useCallback(async (anotacaoId: string) => {
+    const ok = await removerAnotacao(anotacaoId);
+    if (!ok) return;
+    setAnotacoes((prev) => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        const filtrados = lista.filter((a) => a.id !== anotacaoId);
+        if (filtrados.length !== lista.length) next.set(qid, filtrados);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTrocarCorGrifo = useCallback(async (anotacaoId: string, cor: CorGrifo) => {
+    const ok = await trocarCorAnotacao(anotacaoId, cor);
+    if (!ok) return;
+    setAnotacoes((prev) => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        next.set(qid, lista.map((a) => (a.id === anotacaoId ? { ...a, cor } : a)));
+      }
+      return next;
+    });
+  }, []);
+
+  // ============================================================
+  // ATALHOS
   // ============================================================
   useEffect(() => {
     if (fase !== "resolvendo" || !lista) return;
@@ -293,12 +394,13 @@ export default function ListaPlayerPage() {
         return;
       }
 
-      const jaRevelada = reveladas.has(q.numero);
+      const jaConfirmada = !!respostas[q.numero];
+      const temSelecao = !!selecionadas[q.numero];
       const tecla = e.key.toUpperCase();
       const numeros = ["1", "2", "3", "4", "5"];
       const letras = ["A", "B", "C", "D", "E"];
 
-      if (!jaRevelada && q.tipo === "multipla_escolha" && q.alternativas) {
+      if (!jaConfirmada && q.tipo === "multipla_escolha" && q.alternativas) {
         let letraAlvo: string | null = null;
         const idxNum = numeros.indexOf(tecla);
         if (idxNum >= 0) letraAlvo = letras[idxNum];
@@ -306,21 +408,31 @@ export default function ListaPlayerPage() {
 
         if (letraAlvo) {
           const existe = q.alternativas.some(a => a.letra === letraAlvo);
-          if (existe) { e.preventDefault(); responder(q.numero, letraAlvo); return; }
+          const elims = eliminadas[q.numero] || [];
+          if (existe && !elims.includes(letraAlvo)) {
+            e.preventDefault();
+            selecionar(q.numero, letraAlvo);
+            return;
+          }
         }
-      } else if (!jaRevelada && q.tipo === "certo_errado") {
-        if (tecla === "1" || tecla === "C") { e.preventDefault(); responder(q.numero, "C"); return; }
-        if (tecla === "2" || tecla === "E") { e.preventDefault(); responder(q.numero, "E"); return; }
+      } else if (!jaConfirmada && q.tipo === "certo_errado") {
+        if (tecla === "1" || tecla === "C") { e.preventDefault(); selecionar(q.numero, "C"); return; }
+        if (tecla === "2" || tecla === "E") { e.preventDefault(); selecionar(q.numero, "E"); return; }
       }
 
-      if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, i - 1)); return; }
-      if (e.key === "ArrowRight" || e.key === " ") {
+      if (e.key === "Enter") {
         e.preventDefault();
+        if (!jaConfirmada && temSelecao) {
+          confirmarResposta(q.numero);
+          return;
+        }
         if (idx === lista.questoes.length - 1) setConfirmar(true);
         else setIdx(i => i + 1);
         return;
       }
-      if (e.key === "Enter") {
+
+      if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, i - 1)); return; }
+      if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
         if (idx === lista.questoes.length - 1) setConfirmar(true);
         else setIdx(i => i + 1);
@@ -333,16 +445,16 @@ export default function ListaPlayerPage() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fase, lista, idx, confirmar, painel, reveladas, responder, toggleMarcar]);
+  }, [fase, lista, idx, confirmar, painel, respostas, selecionadas, eliminadas, selecionar, confirmarResposta, toggleMarcar]);
 
   // ============================================================
   // ERROS + FINALIZAR
   // ============================================================
-  const montarErros = (): QuestaoErrada[] => {
+  const montarErros = (respostasFinais: Record<number, string>): QuestaoErrada[] => {
     if (!lista) return [];
     const erros: QuestaoErrada[] = [];
     for (const q of lista.questoes) {
-      const resp = respostas[q.numero];
+      const resp = respostasFinais[q.numero];
       if (!resp) continue;
       const correta = getCorreta(q);
       if (resp === correta) continue;
@@ -378,29 +490,39 @@ export default function ListaPlayerPage() {
     if (!lista || !user?.id) return;
     setConfirmar(false);
 
+    const respostasFinais: Record<number, string> = { ...respostas };
+    for (const [numStr, letra] of Object.entries(selecionadas)) {
+      const num = parseInt(numStr, 10);
+      if (!Number.isNaN(num) && !respostasFinais[num]) {
+        respostasFinais[num] = letra;
+      }
+    }
+    setRespostas(respostasFinais);
+    setSelecionadas({});
+
     const areasMap: Record<number, string> = {};
     lista.questoes.forEach(q => {
       areasMap[q.numero] = q.area || "Não categorizada";
     });
 
-    const result = calcularResultadoLista(lista.questoes, respostas);
+    const result = calcularResultadoLista(lista.questoes, respostasFinais);
     result.listaId = lista.id;
     result.tempoDecorrido = tempoDecorrido;
 
-    const acertosPorArea = calcularAcertosPorArea(lista.questoes, respostas);
+    const acertosPorArea = calcularAcertosPorArea(lista.questoes, respostasFinais);
 
     setSalvando(true);
     const save = await salvarResultadoLista(
       lista.id,
       user.id,
       result,
-      respostas,
+      respostasFinais,
       areasMap,
       acertosPorArea
     );
 
     await salvarProgressoLista(lista.id, user.id, {
-      respostas,
+      respostas: respostasFinais,
       marcadas,
       tempo_decorrido: tempoDecorrido,
       status: 'concluido',
@@ -412,7 +534,7 @@ export default function ListaPlayerPage() {
       return;
     }
 
-    const erros = montarErros();
+    const erros = montarErros(respostasFinais);
     if (erros.length > 0) {
       setErrosParaEnviar(erros);
       setMostrarModalErros(false);
@@ -468,7 +590,7 @@ export default function ListaPlayerPage() {
   const total = lista.questoes.length;
 
   // ============================================================
-  // RESULTADO (visual novo)
+  // RESULTADO
   // ============================================================
   if (fase === "resultado" && resultado) {
     const pct = resultado.porcentagem;
@@ -549,6 +671,8 @@ export default function ListaPlayerPage() {
               <button
                 onClick={() => {
                   setRespostas({});
+                  setSelecionadas({});
+                  setEliminadas({});
                   setMarcadas([]);
                   setTempoDecorrido(0);
                   setResultado(null);
@@ -556,7 +680,6 @@ export default function ListaPlayerPage() {
                   setFase("resolvendo");
                   setErrosParaEnviar(null);
                   setEnviadosAoBanco(false);
-                  setReveladas(new Set());
                 }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-4 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
               >
@@ -596,13 +719,14 @@ export default function ListaPlayerPage() {
   }
 
   // ============================================================
-  // CORREÇÃO (gabarito comentado — usando QuestaoCard)
+  // CORREÇÃO
   // ============================================================
   if (fase === "correcao") {
     const q = lista.questoes[idx];
     const resp = respostas[q.numero];
     const correta = getCorreta(q);
     const acertou = resp === correta;
+    const elims = eliminadas[q.numero] || [];
 
     return (
       <AppShell breadcrumb="Listas" title={`Gabarito — Questão ${q.numero}`}>
@@ -631,15 +755,27 @@ export default function ListaPlayerPage() {
           total={total}
           area={q.area || null}
           enunciado={q.enunciado}
+          sublinhadosEnunciado={q.sublinhados_enunciado ?? null}
+          negritosEnunciado={q.negritos_enunciado ?? null}
+          italicosEnunciado={q.italicos_enunciado ?? null}
           imagens={q.imagem_url ? [q.imagem_url] : []}
           tipo={q.tipo === "certo_errado" ? "certo_errado" : "multipla_escolha"}
           alternativas={getAlternativasView(q)}
           selecionada={resp ?? null}
+          eliminadas={elims}
           correta={correta ?? null}
           comentario={q.comentario_geral || null}
+          sublinhadosComentario={q.sublinhados_comentario ?? null}
+          negritosComentario={q.negritos_comentario ?? null}
+          italicosComentario={q.italicos_comentario ?? null}
           revelar={true}
           permitirEliminar={false}
           onSelecionar={() => {}}
+          anotacoes={anotacoes.get(q.id) ?? []}
+          onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+          onRemoverGrifo={handleRemoverGrifo}
+          onTrocarCorGrifo={handleTrocarCorGrifo}
+          grifarAtivo={true}
         />
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
@@ -670,15 +806,17 @@ export default function ListaPlayerPage() {
   // RESOLVENDO
   // ============================================================
   const q = lista.questoes[idx];
-  const selecionada = respostas[q.numero];
+  const respostaConfirmada = respostas[q.numero];
+  const respostaPendente = selecionadas[q.numero];
+  const respondida = !!respostaConfirmada;
+  const selecionadaAtual = respondida ? respostaConfirmada : (respostaPendente ?? null);
+  const eliminadasAtuais = eliminadas[q.numero] || [];
   const respondidas = Object.keys(respostas).length;
   const progressoPercentual = Math.round(((idx + 1) / total) * 100);
   const correta = getCorreta(q);
-  const jaRevelada = reveladas.has(q.numero);
 
   return (
     <AppShell breadcrumb="Listas">
-      {/* Cabeçalho */}
       <div className="rf-card mb-4 p-4 sm:p-5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <div className="min-w-0">
@@ -746,9 +884,9 @@ export default function ListaPlayerPage() {
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3 text-[11px] sm:grid-cols-4">
-            <Shortcut keys={["1", "2", "3"]} label="Escolher alternativa" />
+            <Shortcut keys={["1", "2", "3"]} label="Selecionar alternativa" />
+            <Shortcut keys={["Enter"]} label="Responder · próxima" />
             <Shortcut keys={["←", "→"]} label="Navegar questões" />
-            <Shortcut keys={["Enter"]} label="Próxima / finalizar" />
             <Shortcut keys={["Espaço"]} label="Próxima questão" />
             <Shortcut keys={["M"]} label="Marcar para revisão" />
             <Shortcut keys={["F"]} label="Finalizar lista" />
@@ -763,18 +901,64 @@ export default function ListaPlayerPage() {
         total={total}
         area={q.area || null}
         enunciado={q.enunciado}
+        sublinhadosEnunciado={q.sublinhados_enunciado ?? null}
+        negritosEnunciado={q.negritos_enunciado ?? null}
+        italicosEnunciado={q.italicos_enunciado ?? null}
         imagens={q.imagem_url ? [q.imagem_url] : []}
         tipo={q.tipo === "certo_errado" ? "certo_errado" : "multipla_escolha"}
         alternativas={getAlternativasView(q)}
-        selecionada={selecionada ?? null}
-        correta={jaRevelada ? correta : null}
-        comentario={jaRevelada ? (q.comentario_geral || null) : null}
-        revelar={jaRevelada}
-        permitirEliminar={false}
+        selecionada={selecionadaAtual}
+        eliminadas={eliminadasAtuais}
+        correta={respondida ? correta : null}
+        comentario={respondida ? (q.comentario_geral || null) : null}
+        sublinhadosComentario={respondida ? (q.sublinhados_comentario ?? null) : null}
+        negritosComentario={respondida ? (q.negritos_comentario ?? null) : null}
+        italicosComentario={respondida ? (q.italicos_comentario ?? null) : null}
+        revelar={respondida}
+        permitirEliminar={!respondida}
         marcada={marcadas.includes(q.numero)}
-        onSelecionar={(letra) => responder(q.numero, letra)}
+        onSelecionar={(letra) => selecionar(q.numero, letra)}
+        onEliminar={(letra) => toggleEliminada(q.numero, letra)}
         onMarcar={() => toggleMarcar(q.numero)}
+        anotacoes={anotacoes.get(q.id) ?? []}
+        onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+        onRemoverGrifo={handleRemoverGrifo}
+        onTrocarCorGrifo={handleTrocarCorGrifo}
+        grifarAtivo={true}
       />
+
+      {!respondida && eliminadasAtuais.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-foreground/45">
+          <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 font-medium text-accent">
+            <Scissors className="h-3 w-3" />
+            {eliminadasAtuais.length} eliminada{eliminadasAtuais.length > 1 ? "s" : ""}: {eliminadasAtuais.join(", ")}
+          </span>
+          <button
+            onClick={() => setEliminadas(prev => ({ ...prev, [q.numero]: [] }))}
+            className="inline-flex items-center gap-1 hover:text-foreground"
+          >
+            <RotateCcw className="h-3 w-3" /> desfazer todas
+          </button>
+        </div>
+      )}
+
+      {!respondida && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <button
+            onClick={() => confirmarResposta(q.numero)}
+            disabled={!respostaPendente}
+            className="btn-sun inline-flex items-center gap-2 px-6 py-2.5 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            Responder
+          </button>
+          <p className="text-[11px] text-foreground/40">
+            {respostaPendente
+              ? "Clique em Responder para ver o gabarito"
+              : "Selecione uma alternativa para poder responder"}
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 flex items-center justify-between gap-2">
         <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
@@ -819,6 +1003,7 @@ export default function ListaPlayerPage() {
               total={total}
               atual={idx}
               respostas={respostas}
+              selecionadas={selecionadas}
               marcadas={marcadas}
               onPick={(i) => { setIdx(i); setPainel(false); }}
             />
@@ -870,15 +1055,13 @@ export default function ListaPlayerPage() {
   );
 }
 
-// ============================================================
-// Componentes auxiliares
-// ============================================================
 function PainelQuestoes({
-  total, atual, respostas, marcadas, onPick,
+  total, atual, respostas, selecionadas, marcadas, onPick,
 }: {
   total: number;
   atual: number;
   respostas: Record<number, string>;
+  selecionadas: Record<number, string>;
   marcadas: number[];
   onPick: (i: number) => void;
 }) {
@@ -888,14 +1071,16 @@ function PainelQuestoes({
       <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
         {Array.from({ length: total }, (_, i) => {
           const n = i + 1;
-          const respondida = !!respostas[n];
+          const confirmada = !!respostas[n];
+          const pendente = !confirmada && !!selecionadas[n];
           const marcada = marcadas.includes(n);
           const isAtual = i === atual;
 
           let cls = "bg-muted text-muted-foreground hover:bg-surface-2";
           if (isAtual) cls = "bg-primary text-primary-foreground";
           else if (marcada) cls = "bg-success text-primary-foreground";
-          else if (respondida) cls = "bg-accent text-accent-foreground";
+          else if (confirmada) cls = "bg-accent text-accent-foreground";
+          else if (pendente) cls = "bg-warning/30 text-foreground";
 
           return (
             <button
@@ -911,6 +1096,7 @@ function PainelQuestoes({
       <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
         <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-primary" /> Atual</p>
         <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-accent" /> Respondida</p>
+        <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-warning/30" /> Selecionada (não respondida)</p>
         <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-success" /> Marcada para revisão</p>
         <p className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-muted" /> Não respondida</p>
       </div>

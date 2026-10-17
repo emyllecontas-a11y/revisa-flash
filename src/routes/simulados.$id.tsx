@@ -14,15 +14,51 @@ import {
   buscarResultadoSimulado,
 } from "@/services/simuladoService";
 import {
+  getAnotacoesDeQuestoes,
+  criarAnotacao,
+  removerAnotacao,
+  trocarCorAnotacao,
+} from "@/services/anotacaoQuestaoService";
+import type {
+  AnotacaoQuestao,
+  CampoAlvo,
+  CorGrifo,
+  RectGrifo,
+} from "@/lib/anotacoes-types";
+import {
   ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, Trash2, Trophy,
+  Loader2, Trash2,
 } from "lucide-react";
 import type { SimuladoPlayer, QuestaoPlayer, ProgressoPlayer, Alternativa } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 
 type Fase = "resolvendo" | "resultado" | "correcao";
+
+function getTipoQuestao(q: QuestaoPlayer): 'multipla_escolha' | 'certo_errado' {
+  if (q.alternativas && q.alternativas.length > 0) return 'multipla_escolha';
+  return 'certo_errado';
+}
+
+function getCorreta(q: QuestaoPlayer): string | null {
+  if (getTipoQuestao(q) === 'multipla_escolha') {
+    return q.alternativas.find(a => a.correta)?.letra || null;
+  }
+  if (q.gabarito_ce === true) return 'C';
+  if (q.gabarito_ce === false) return 'E';
+  return null;
+}
+
+function getAlternativasView(q: QuestaoPlayer): { letra: string; texto: string }[] {
+  if (getTipoQuestao(q) === 'certo_errado') {
+    return [
+      { letra: 'C', texto: 'Certo' },
+      { letra: 'E', texto: 'Errado' },
+    ];
+  }
+  return q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }));
+}
 
 export default function SimuladoPlayerPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,6 +86,8 @@ export default function SimuladoPlayerPage() {
   const [painel, setPainel] = useState(false);
   const [confirmar, setConfirmar] = useState(false);
   const [resultadoSalvo, setResultadoSalvo] = useState<any>(null);
+
+  const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
 
   const [booted, setBooted] = useState(false);
 
@@ -136,6 +174,16 @@ export default function SimuladoPlayerPage() {
 
     loadData();
   }, [id, user?.id, location.search]);
+
+  // Carregar grifos
+  useEffect(() => {
+    if (!user?.id || !simulado) return;
+    const ids = simulado.questoes.map((q) => q.id);
+    if (ids.length === 0) return;
+    getAnotacoesDeQuestoes(user.id, 'simulado', ids)
+      .then(setAnotacoes)
+      .catch(() => {});
+  }, [user?.id, simulado]);
 
   useEffect(() => {
     if (fase !== "resolvendo" || !simulado || simulado.questoes.length === 0) return;
@@ -231,6 +279,53 @@ export default function SimuladoPlayerPage() {
         : [...prev.marcadas, q.numero],
     }));
   };
+
+  // Grifos
+  const handleGrifar = useCallback(
+    async (
+      questaoId: string,
+      campo: CampoAlvo,
+      cor: CorGrifo,
+      texto: string,
+      rects: RectGrifo[]
+    ) => {
+      if (!user?.id) return;
+      const nova = await criarAnotacao(user.id, 'simulado', questaoId, campo, cor, texto, rects);
+      if (!nova) return;
+      setAnotacoes((prev) => {
+        const next = new Map(prev);
+        const atual = next.get(questaoId) ?? [];
+        next.set(questaoId, [...atual, nova]);
+        return next;
+      });
+    },
+    [user?.id]
+  );
+
+  const handleRemoverGrifo = useCallback(async (anotacaoId: string) => {
+    const ok = await removerAnotacao(anotacaoId);
+    if (!ok) return;
+    setAnotacoes((prev) => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        const filtrados = lista.filter((a) => a.id !== anotacaoId);
+        if (filtrados.length !== lista.length) next.set(qid, filtrados);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTrocarCorGrifo = useCallback(async (anotacaoId: string, cor: CorGrifo) => {
+    const ok = await trocarCorAnotacao(anotacaoId, cor);
+    if (!ok) return;
+    setAnotacoes((prev) => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        next.set(qid, lista.map((a) => (a.id === anotacaoId ? { ...a, cor } : a)));
+      }
+      return next;
+    });
+  }, []);
 
   const handleFinalizar = async () => {
     if (!id || !user?.id || !simulado) return;
@@ -351,7 +446,7 @@ export default function SimuladoPlayerPage() {
   }
 
   // ============================================================
-  // FASE RESULTADO (visual novo)
+  // RESULTADO
   // ============================================================
   if (fase === "resultado") {
     const questoes = simulado.questoes;
@@ -374,7 +469,7 @@ export default function SimuladoPlayerPage() {
       questoes.forEach(q => {
         const resp = respostas[q.numero];
         if (!resp) { naoRespondidas++; return; }
-        const correta = q.alternativas.find(a => a.correta)?.letra;
+        const correta = getCorreta(q);
         if (resp === correta) acertos++;
         else erros++;
       });
@@ -384,7 +479,6 @@ export default function SimuladoPlayerPage() {
 
     return (
       <AppShell breadcrumb="Simulados" title="Resultado do simulado">
-        {/* Cabeçalho */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => navigate("/simulados")}
@@ -403,7 +497,6 @@ export default function SimuladoPlayerPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          {/* Painel do donut */}
           <div className="rf-card flex flex-col items-center p-6 text-center">
             <Donut pct={pct} />
             <div className="mt-4 font-display text-2xl font-semibold tabular-nums">
@@ -416,7 +509,6 @@ export default function SimuladoPlayerPage() {
             )}
           </div>
 
-          {/* Stats + lista de questões */}
           <div className="grid gap-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Stat label="Acertos" value={acertos} tone="ok" />
@@ -430,7 +522,7 @@ export default function SimuladoPlayerPage() {
               <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
                 {questoes.map((q, i) => {
                   const resp = respostasParaExibir[q.numero];
-                  const correta = q.alternativas.find(a => a.correta)?.letra;
+                  const correta = getCorreta(q);
                   const acertou = resp === correta;
                   const status = !resp ? "nao-respondida" : acertou ? "acertou" : "errou";
 
@@ -472,19 +564,18 @@ export default function SimuladoPlayerPage() {
   }
 
   // ============================================================
-  // FASE CORREÇÃO (usando o QuestaoCard com revelar=true)
+  // CORREÇÃO
   // ============================================================
   if (fase === "correcao") {
     const q = simulado.questoes[idx];
     const respostasParaExibir = resultadoSalvo?.respostas || progresso.respostas;
     const resp = respostasParaExibir[q.numero];
-    const correta = q.alternativas.find(a => a.correta)?.letra;
+    const correta = getCorreta(q);
     const acertou = resp === correta;
     const total = simulado.questoes.length;
 
     return (
       <AppShell breadcrumb="Simulados" title={`Gabarito comentado — Questão ${q.numero}`}>
-        {/* Cabeçalho */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setFase("resultado")}
@@ -510,16 +601,28 @@ export default function SimuladoPlayerPage() {
           total={total}
           area={q.area || null}
           enunciado={q.enunciado}
-          alternativas={q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }))}
+          sublinhadosEnunciado={q.sublinhados_enunciado ?? null}
+          negritosEnunciado={q.negritos_enunciado ?? null}
+          italicosEnunciado={q.italicos_enunciado ?? null}
+          imagens={q.imagem_url ? [q.imagem_url] : []}
+          tipo={getTipoQuestao(q)}
+          alternativas={getAlternativasView(q)}
           selecionada={resp ?? null}
           correta={correta ?? null}
           comentario={q.comentario_geral || null}
+          sublinhadosComentario={q.sublinhados_comentario ?? null}
+          negritosComentario={q.negritos_comentario ?? null}
+          italicosComentario={q.italicos_comentario ?? null}
           revelar={true}
           permitirEliminar={false}
           onSelecionar={() => {}}
+          anotacoes={anotacoes.get(q.id) ?? []}
+          onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+          onRemoverGrifo={handleRemoverGrifo}
+          onTrocarCorGrifo={handleTrocarCorGrifo}
+          grifarAtivo={true}
         />
 
-        {/* Painel lateral com sua resposta / resposta correta */}
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="rf-card p-5">
             <h4 className="mb-2 font-display text-sm font-semibold">Status</h4>
@@ -545,7 +648,7 @@ export default function SimuladoPlayerPage() {
   }
 
   // ============================================================
-  // FASE RESOLVENDO
+  // RESOLVENDO
   // ============================================================
   const q = simulado.questoes[idx];
   const elimAtual = progresso.eliminadas[q.numero] || [];
@@ -553,10 +656,10 @@ export default function SimuladoPlayerPage() {
   const respondidas = Object.keys(progresso.respostas).length;
   const total = simulado.questoes.length;
   const progressoPercentual = Math.round(((idx + 1) / total) * 100);
+  const tipo = getTipoQuestao(q);
 
   return (
     <AppShell breadcrumb="Simulados">
-      {/* Cabeçalho */}
       <div className="rf-card mb-4 p-4 sm:p-5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <div className="min-w-0">
@@ -609,21 +712,30 @@ export default function SimuladoPlayerPage() {
         </div>
       </div>
 
-      {/* Questão em página inteira */}
       <QuestaoCard
         numero={idx + 1}
         total={total}
         area={q.area || null}
         enunciado={q.enunciado}
-        alternativas={q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }))}
+        sublinhadosEnunciado={q.sublinhados_enunciado ?? null}
+        negritosEnunciado={q.negritos_enunciado ?? null}
+        italicosEnunciado={q.italicos_enunciado ?? null}
+        imagens={q.imagem_url ? [q.imagem_url] : []}
+        tipo={tipo}
+        alternativas={getAlternativasView(q)}
         selecionada={selecionada ?? null}
         eliminadas={elimAtual}
         marcada={progresso.marcadas.includes(q.numero)}
-        permitirEliminar={true}
+        permitirEliminar={tipo === 'multipla_escolha'}
         revelar={false}
         onSelecionar={(letra) => responder(letra)}
         onEliminar={(letra) => toggleEliminada(letra)}
         onMarcar={toggleMarcar}
+        anotacoes={anotacoes.get(q.id) ?? []}
+        onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+        onRemoverGrifo={handleRemoverGrifo}
+        onTrocarCorGrifo={handleTrocarCorGrifo}
+        grifarAtivo={true}
       />
 
       {elimAtual.length > 0 && (
@@ -643,7 +755,6 @@ export default function SimuladoPlayerPage() {
         </div>
       )}
 
-      {/* Navegação entre questões */}
       <div className="mt-6 flex items-center justify-between gap-2">
         <NavBtn disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))}>
           <ArrowLeft className="h-3.5 w-3.5" /> Anterior
@@ -665,7 +776,6 @@ export default function SimuladoPlayerPage() {
         )}
       </div>
 
-      {/* Painel de questões — overlay */}
       {painel && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" onClick={() => setPainel(false)}>
           <div
@@ -726,9 +836,6 @@ export default function SimuladoPlayerPage() {
   );
 }
 
-// ============================================================
-// Painel de questões
-// ============================================================
 function PainelQuestoes({ total, atual, respostas, marcadas, onPick }: {
   total: number;
   atual: number;

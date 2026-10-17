@@ -9,12 +9,16 @@ import {
 } from "recharts";
 import { AppShell } from "@/components/app-shell";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
+import { usePomodoro } from "@/contexts/PomodoroContext";
+import { PomodoroTimer, PomodoroControls } from "@/components/PomodoroCard";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useStudy } from "@/contexts/StudyContext";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { getDb } from "@/lib/db";
 import type { StudyType, StudyRecord } from "@/contexts/StudyContext";
+import { DailyChallenge } from "@/components/DailyChallenge";
+import { PomodoroStats } from "@/components/PomodoroStats";
 
 const field = "w-full rounded-xl border border-input bg-muted px-3 py-2 text-sm";
 
@@ -225,6 +229,31 @@ export default function SessoesPage() {
   const { records, addRecord, deleteRecord } = useStudy();
   const confirmDialog = useConfirm();
   const toast = useToast();
+  const pomo = usePomodoro();
+
+  // ===== Qual modo está na tela: Cronômetro livre ou Pomodoro =====
+  const [view, setView] = useState<"livre" | "pomodoro">(() => {
+    if (session.status !== "idle") return "livre";
+    if (pomo.status !== "idle") return "pomodoro";
+    try {
+      return localStorage.getItem("revisaflash_sessoes_view") === "pomodoro" ? "pomodoro" : "livre";
+    } catch {
+      return "livre";
+    }
+  });
+
+  const changeView = (v: "livre" | "pomodoro") => {
+    setView(v);
+    try {
+      localStorage.setItem("revisaflash_sessoes_view", v);
+    } catch { /* ignore */ }
+  };
+
+  // Se um dos dois estiver rodando, mostra o que está ativo.
+  useEffect(() => {
+    if (session.status !== "idle") setView("livre");
+    else if (pomo.status !== "idle") setView("pomodoro");
+  }, [session.status, pomo.status]);
 
   // ===== Estado da sessão cronometrada =====
   const [finalType, setFinalType] = useState<StudyType>("teorico");
@@ -244,6 +273,12 @@ export default function SessoesPage() {
   const isIdle = session.status === "idle";
   const isRunning = session.status === "running";
   const isPaused = session.status === "paused";
+
+  // Pomodoro: trava os seletores enquanto um foco está em andamento ou pausado.
+  const pomoFocusLocked = pomo.status !== "idle" && pomo.mode === "focus";
+  const selectorsLocked = !isIdle || pomoFocusLocked;
+  // A chave "Cronômetro livre | Pomodoro" trava se qualquer um dos dois estiver ativo.
+  const viewToggleLocked = !isIdle || pomo.status !== "idle";
 
   const { type: linkType, itemName: linkItemName } = parseLink(session.link);
 
@@ -615,23 +650,57 @@ export default function SessoesPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="space-y-6">
-          {/* ===== CRONÔMETRO ===== */}
+          {/* ===== CRONÔMETRO / POMODORO ===== */}
           <section className="card-lip p-6 [--lip:var(--accent)]">
-            <p className="text-center text-sm text-muted-foreground">
-              {isIdle && "Pronto para começar"}
-              {isRunning && "Estudando agora"}
-              {isPaused && "Pausado"}
-            </p>
-            <p className="my-2 text-center font-display text-6xl font-bold tabular-nums">
-              {formatHMS(session.elapsedSeconds)}
-            </p>
+            {/* Chave: Cronômetro livre | Pomodoro */}
+            <div className="mx-auto mb-5 flex w-full max-w-sm gap-1 rounded-xl bg-muted p-1">
+              <button
+                type="button"
+                onClick={() => changeView("livre")}
+                disabled={viewToggleLocked && view !== "livre"}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  view === "livre"
+                    ? "bg-primary font-semibold text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Cronômetro livre
+              </button>
+              <button
+                type="button"
+                onClick={() => changeView("pomodoro")}
+                disabled={viewToggleLocked && view !== "pomodoro"}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  view === "pomodoro"
+                    ? "bg-primary font-semibold text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Pomodoro
+              </button>
+            </div>
+
+            {view === "livre" ? (
+              <>
+                <p className="text-center text-sm text-muted-foreground">
+                  {isIdle && "Pronto para começar"}
+                  {isRunning && "Estudando agora"}
+                  {isPaused && "Pausado"}
+                </p>
+                <p className="my-2 text-center font-display text-6xl font-bold tabular-nums">
+                  {formatHMS(session.elapsedSeconds)}
+                </p>
+              </>
+            ) : (
+              <PomodoroTimer />
+            )}
 
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
               <select
                 className={field}
                 value={session.discipline}
                 onChange={(e) => handleDisciplineChange(e.target.value)}
-                disabled={!isIdle}
+                disabled={selectorsLocked}
               >
                 <option value="">
                   {disciplinesLoading ? "Carregando..." : "Selecione a disciplina"}
@@ -646,7 +715,7 @@ export default function SessoesPage() {
                   className={field}
                   value={topicSelectValue}
                   onChange={(e) => handleTopicSelectChange(e.target.value)}
-                  disabled={!isIdle || topicsLoading}
+                  disabled={selectorsLocked || topicsLoading}
                 >
                   <option value="">
                     {topicsLoading
@@ -669,7 +738,7 @@ export default function SessoesPage() {
                     placeholder="Digite o tópico"
                     value={session.topic}
                     onChange={(e) => session.setTopic(e.target.value)}
-                    disabled={!isIdle}
+                    disabled={selectorsLocked}
                   />
                 )}
               </div>
@@ -679,7 +748,7 @@ export default function SessoesPage() {
                   className={field}
                   value={linkType}
                   onChange={(e) => handleLinkTypeChange(e.target.value as LinkType)}
-                  disabled={!isIdle}
+                  disabled={selectorsLocked}
                 >
                   {LINK_TYPES.map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -690,7 +759,7 @@ export default function SessoesPage() {
                     className={field}
                     value={linkItemName}
                     onChange={(e) => handleLinkItemChange(e.target.value)}
-                    disabled={!isIdle || linkItemsLoading}
+                    disabled={selectorsLocked || linkItemsLoading}
                   >
                     <option value="">
                       {linkItemsLoading
@@ -711,6 +780,7 @@ export default function SessoesPage() {
               </div>
             </div>
 
+            {view === "livre" ? (
             <div className="flex flex-wrap justify-center gap-3">
               {isIdle && (
                 <button onClick={handleStart} className="btn-sun flex items-center gap-1.5 px-5 py-2.5">
@@ -738,8 +808,12 @@ export default function SessoesPage() {
                 </>
               )}
             </div>
+            ) : (
+              <PomodoroControls />
+            )}
           </section>
-
+{/* ===== POMODORO HOJE ===== */}
+          <PomodoroStats />
           {/* ===== ESTATÍSTICAS REAIS ===== */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Hoje" value={formatMinutes(stats.todayMin)} />
@@ -839,6 +913,7 @@ export default function SessoesPage() {
 
         {/* ===== COLUNA DIREITA: CALENDÁRIO + RECENTES ===== */}
         <div className="space-y-6">
+          <DailyChallenge />
           <section className="rounded-3xl rf-card p-5">
             <div className="mb-3 flex items-center justify-between">
               <button

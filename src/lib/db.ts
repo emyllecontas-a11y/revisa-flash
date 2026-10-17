@@ -508,6 +508,12 @@ const questaoListaSchema = {
     comentario_geral: { type: ['string', 'null'] },
     alternativas: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
     gabarito_ce: { type: ['boolean', 'null'] },
+    sublinhados_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    sublinhados_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isdeleted: { type: 'boolean', default: false },
@@ -609,6 +615,14 @@ const simuladoQuestaoSchema = {
     enunciado: { type: 'string' },
     area: { type: ['string', 'null'] },
     comentario_geral: { type: ['string', 'null'] },
+    imagem_url: { type: ['string', 'null'] },
+    sublinhados_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    sublinhados_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    gabarito_ce: { type: ['boolean', 'null'] },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isdeleted: { type: 'boolean', default: false },
@@ -680,7 +694,26 @@ const resultadoSimuladoSchema = {
   },
   required: ['id', 'simulado_id', 'user_id'],
 };
-
+const anotacaoQuestaoSchema = {
+  title: 'anotacao questao schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    questao_origem: { type: 'string' },
+    questao_id: { type: 'string' },
+    campo_alvo: { type: 'string' },
+    texto_snippet: { type: ['string', 'null'] },
+    cor: { type: 'string' },
+    rects: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'questao_origem', 'questao_id', 'campo_alvo', 'cor'],
+};
 // ============================================================
 // INSTÂNCIA
 // ============================================================
@@ -709,7 +742,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v9';
+    const DB_NAME = 'revisaflash_db_v10';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
@@ -717,15 +750,16 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v6'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v7'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v8'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v9'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
-      const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v9') {
-        console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
-        clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v9');
-      }
+    const markerVersion = localStorage.getItem('revisaflash_db_version');
+if (markerVersion !== 'v10') {
+  console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
+  clearAllLastSync();
+  localStorage.setItem('revisaflash_db_version', 'v10');
+}
     } catch (e) {}
 
     const db = await createRxDatabase({
@@ -762,6 +796,7 @@ export async function getDb(): Promise<RxDatabase> {
       pdf_notes: { schema: pdfNoteSchema },
       pdf_text_boxes: { schema: pdfTextBoxSchema },
       files: { schema: fileSchema },
+      anotacoes_questao: { schema: anotacaoQuestaoSchema },
     });
 
     console.log('✅ Banco local criado com sucesso (v8).');

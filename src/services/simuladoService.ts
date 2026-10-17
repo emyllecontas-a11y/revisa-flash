@@ -420,21 +420,53 @@ export async function importarSimulado(
     const supabaseClient = await getSupabaseWithToken();
     const simuladoId = crypto.randomUUID();
 
-    const questoesFormatadas = dados.questoes.map((q, index) => {
-      const alternativas = q.alternativas.map(a => ({
-        letra: a.letra || String.fromCharCode(65 + (q.alternativas.indexOf(a) % 5)),
-        texto: a.texto || '',
-        correta: a.correta || false,
-        comentario: a.comentario || null,
-      }));
-      return {
+    // Upload de imagens base64 (se houver)
+    const { uploadImagemQuestao } = await import('@/services/listaService');
+
+    const questoesFormatadas: any[] = [];
+    for (let index = 0; index < dados.questoes.length; index++) {
+      const q = dados.questoes[index];
+      const tipo = q.tipo || 'multipla_escolha';
+
+      // Faz upload da imagem base64, se houver
+      let imagemUrl: string | null = q.imagem_url || null;
+      if (q.imagem_base64) {
+        try {
+          const upload = await uploadImagemQuestao(q.imagem_base64, userIdStr);
+          if (upload.success && upload.url) imagemUrl = upload.url;
+        } catch (e) {
+          console.warn('⚠️ Falha ao subir imagem da questão', q.numero, e);
+        }
+      }
+
+      const item: any = {
         numero: q.numero || index + 1,
+        tipo,
         enunciado: q.enunciado || '',
         area: q.area || null,
         comentario_geral: q.comentario_geral || null,
-        alternativas,
+        imagem_url: imagemUrl,
+        sublinhados_enunciado: q.sublinhados_enunciado || null,
+        sublinhados_comentario: q.sublinhados_comentario || null,
+        negritos_enunciado: q.negritos_enunciado || null,
+        negritos_comentario: q.negritos_comentario || null,
+        italicos_enunciado: q.italicos_enunciado || null,
+        italicos_comentario: q.italicos_comentario || null,
       };
-    });
+
+      if (tipo === 'multipla_escolha') {
+        item.alternativas = (q.alternativas || []).map((a, i) => ({
+          letra: a.letra || String.fromCharCode(65 + (i % 5)),
+          texto: a.texto || '',
+          correta: a.correta || false,
+          comentario: a.comentario || null,
+        }));
+      } else {
+        item.correta = q.correta === true;
+      }
+
+      questoesFormatadas.push(item);
+    }
 
     const { data, error } = await supabaseClient
       .rpc('importar_simulado', {
@@ -922,6 +954,244 @@ export async function excluirTodosResultadosSimulado(
     return { success: true };
   } catch (error: any) {
     console.error('Erro ao excluir todos os resultados do simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 20. BUSCAR UMA QUESTÃO DO SIMULADO (com alternativas)
+// ============================================================
+
+export async function buscarQuestaoSimulado(
+  questaoId: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const db = await getDb();
+    const doc = await db.questoes.findOne({ selector: { id: questaoId } }).exec();
+    if (!doc) return { success: false, error: 'Questão não encontrada' };
+
+    const q: any = doc.toJSON();
+    if (q.isdeleted) return { success: false, error: 'Questão não encontrada' };
+
+    const altDocs = await db.alternativas.find({
+      selector: { questao_id: questaoId, isdeleted: false },
+    }).exec();
+    const alternativas = altDocs
+      .map((d: any) => d.toJSON())
+      .sort((a: any, b: any) => (a.letra || '').localeCompare(b.letra || ''));
+
+    return { success: true, data: { ...q, alternativas } };
+  } catch (error: any) {
+    console.error('Erro ao buscar questão do simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 21. CRIAR QUESTÃO NO SIMULADO
+// ============================================================
+
+export async function criarQuestaoNoSimulado(
+  simuladoId: string,
+  userId: string,
+  dados: {
+    tipo: 'multipla_escolha' | 'certo_errado';
+    enunciado: string;
+    area: string | null;
+    imagem_url: string | null;
+    comentario_geral: string | null;
+    sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+    sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+    alternativas: { letra: string; texto: string; correta: boolean; comentario: string | null }[] | null;
+    gabarito_ce: boolean | null;
+  }
+): Promise<{ success: boolean; questaoId?: string; error?: string }> {
+  try {
+    if (!dados.enunciado || dados.enunciado.trim().length === 0) {
+      return { success: false, error: 'Enunciado é obrigatório' };
+    }
+    if (dados.tipo === 'multipla_escolha') {
+      if (!dados.alternativas || dados.alternativas.length < 2) {
+        return { success: false, error: 'Múltipla escolha precisa de pelo menos 2 alternativas' };
+      }
+      const corretas = dados.alternativas.filter((a) => a.correta).length;
+      if (corretas !== 1) return { success: false, error: 'Marque exatamente uma alternativa correta' };
+    }
+
+    const db = await getDb();
+    const questaoId = crypto.randomUUID();
+    const now = nowIso();
+
+    // Descobre o próximo número disponível
+    const existentes = await db.questoes.find({ selector: { simulado_id: simuladoId } }).exec();
+    const nums = existentes.map((d: any) => d.get('numero') || 0);
+    const proximoNumero = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+
+    const questaoDoc = {
+      id: questaoId,
+      simulado_id: simuladoId,
+      numero: proximoNumero,
+      enunciado: dados.enunciado.trim(),
+      area: dados.area?.trim() || null,
+      comentario_geral: dados.comentario_geral?.trim() || null,
+      imagem_url: dados.imagem_url,
+      sublinhados_enunciado: dados.sublinhados_enunciado || null,
+      sublinhados_comentario: dados.sublinhados_comentario || null,
+      gabarito_ce: dados.tipo === 'certo_errado' ? dados.gabarito_ce : null,
+      created_at: now,
+      updated_at: now,
+      isdeleted: false,
+    };
+    await db.questoes.insert(questaoDoc);
+    await enqueueOperation('create', 'questoes', questaoDoc);
+
+    if (dados.tipo === 'multipla_escolha' && dados.alternativas) {
+      for (const alt of dados.alternativas) {
+        const altDoc = {
+          id: crypto.randomUUID(),
+          questao_id: questaoId,
+          letra: alt.letra,
+          texto: alt.texto.trim(),
+          correta: alt.correta,
+          comentario: alt.comentario?.trim() || null,
+          created_at: now,
+          updated_at: now,
+          isdeleted: false,
+        };
+        await db.alternativas.insert(altDoc);
+        await enqueueOperation('create', 'alternativas', altDoc);
+      }
+    }
+
+    return { success: true, questaoId };
+  } catch (error: any) {
+    console.error('Erro ao criar questão no simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 22. ATUALIZAR QUESTÃO DO SIMULADO
+// ============================================================
+
+export async function atualizarQuestaoSimulado(
+  questaoId: string,
+  userId: string,
+  dados: {
+    tipo: 'multipla_escolha' | 'certo_errado';
+    enunciado: string;
+    area: string | null;
+    imagem_url: string | null;
+    comentario_geral: string | null;
+    sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+    sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+    alternativas: { letra: string; texto: string; correta: boolean; comentario: string | null }[] | null;
+    gabarito_ce: boolean | null;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!dados.enunciado || dados.enunciado.trim().length === 0) {
+      return { success: false, error: 'Enunciado é obrigatório' };
+    }
+    if (dados.tipo === 'multipla_escolha') {
+      if (!dados.alternativas || dados.alternativas.length < 2) {
+        return { success: false, error: 'Múltipla escolha precisa de pelo menos 2 alternativas' };
+      }
+      const corretas = dados.alternativas.filter((a) => a.correta).length;
+      if (corretas !== 1) return { success: false, error: 'Marque exatamente uma alternativa correta' };
+    }
+
+    const db = await getDb();
+    const now = nowIso();
+
+    const doc = await db.questoes.findOne({ selector: { id: questaoId } }).exec();
+    if (!doc) return { success: false, error: 'Questão não encontrada' };
+
+    // Atualiza a questão
+    const patch = {
+      tipo: dados.tipo,
+      enunciado: dados.enunciado.trim(),
+      area: dados.area?.trim() || null,
+      comentario_geral: dados.comentario_geral?.trim() || null,
+      imagem_url: dados.imagem_url,
+      sublinhados_enunciado: dados.sublinhados_enunciado || null,
+      sublinhados_comentario: dados.sublinhados_comentario || null,
+      gabarito_ce: dados.tipo === 'certo_errado' ? dados.gabarito_ce : null,
+      updated_at: now,
+    };
+    await doc.patch(patch);
+    await enqueueOperation('update', 'questoes', { id: questaoId, ...patch });
+
+    // Remove alternativas antigas (soft delete) e recria se multipla_escolha
+    const antigas = await db.alternativas.find({
+      selector: { questao_id: questaoId, isdeleted: false },
+    }).exec();
+    for (const a of antigas) {
+      await a.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'alternativas', {
+        id: a.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+
+    if (dados.tipo === 'multipla_escolha' && dados.alternativas) {
+      for (const alt of dados.alternativas) {
+        const altDoc = {
+          id: crypto.randomUUID(),
+          questao_id: questaoId,
+          letra: alt.letra,
+          texto: alt.texto.trim(),
+          correta: alt.correta,
+          comentario: alt.comentario?.trim() || null,
+          created_at: now,
+          updated_at: now,
+          isdeleted: false,
+        };
+        await db.alternativas.insert(altDoc);
+        await enqueueOperation('create', 'alternativas', altDoc);
+      }
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao atualizar questão do simulado:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 23. REMOVER QUESTÃO DO SIMULADO
+// ============================================================
+
+export async function removerQuestaoDoSimulado(
+  simuladoId: string,
+  questaoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const now = nowIso();
+
+    const qDoc = await db.questoes.findOne({ selector: { id: questaoId } }).exec();
+    if (!qDoc) return { success: false, error: 'Questão não encontrada' };
+
+    await qDoc.patch({ isdeleted: true, updated_at: now });
+    await enqueueOperation('update', 'questoes', {
+      id: questaoId, isdeleted: true, updated_at: now,
+    });
+
+    const alts = await db.alternativas.find({
+      selector: { questao_id: questaoId, isdeleted: false },
+    }).exec();
+    for (const a of alts) {
+      await a.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'alternativas', {
+        id: a.get('id'), isdeleted: true, updated_at: now,
+      });
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao remover questão do simulado:', error);
     return { success: false, error: error.message };
   }
 }

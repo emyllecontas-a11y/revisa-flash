@@ -365,19 +365,27 @@ export async function importarLista(
       return { success: false, error: `Erro na imagem da questão ${q.numero || erroUploadIdx + 1}: ${uploads[erroUploadIdx].erro}` };
     }
 
-    const questoesFormatadas = dados.questoes.map((q, i) => {
-      const qf: any = {
-        numero: q.numero || i + 1,
-        tipo: q.tipo,
-        enunciado: q.enunciado,
-        area: q.area || null,
-        imagem_url: uploads[i].url,
-        comentario_geral: q.comentario_geral || null,
-      };
-      if (q.tipo === 'multipla_escolha') qf.alternativas = q.alternativas || [];
-      else if (q.tipo === 'certo_errado') qf.correta = q.correta === true;
-      return qf;
-    });
+const questoesFormatadas = dados.questoes.map((q, i) => {
+  const qf: any = {
+    numero: q.numero || i + 1,
+    tipo: q.tipo,
+    enunciado: q.enunciado,
+    area: q.area || null,
+    imagem_url: uploads[i].url,
+    comentario_geral: q.comentario_geral || null,
+  };
+  if (q.tipo === 'multipla_escolha') qf.alternativas = q.alternativas || [];
+  else if (q.tipo === 'certo_errado') qf.correta = q.correta === true;
+
+  if (q.sublinhados_enunciado?.length) qf.sublinhados_enunciado = q.sublinhados_enunciado;
+  if (q.sublinhados_comentario?.length) qf.sublinhados_comentario = q.sublinhados_comentario;
+  if (q.negritos_enunciado?.length) qf.negritos_enunciado = q.negritos_enunciado;
+  if (q.negritos_comentario?.length) qf.negritos_comentario = q.negritos_comentario;
+  if (q.italicos_enunciado?.length) qf.italicos_enunciado = q.italicos_enunciado;
+  if (q.italicos_comentario?.length) qf.italicos_comentario = q.italicos_comentario;
+
+  return qf;
+});
 
     const { data, error } = await client.rpc('importar_lista', {
       p_lista_id: listaId,

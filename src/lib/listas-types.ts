@@ -51,6 +51,12 @@ export interface QuestaoLista {
   comentario_geral: string | null;
   alternativas: AlternativaLista[] | null;
   gabarito_ce: boolean | null;
+  sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+  sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+  negritos_enunciado?: { inicio: number; fim: number }[] | null;
+  negritos_comentario?: { inicio: number; fim: number }[] | null;
+  italicos_enunciado?: { inicio: number; fim: number }[] | null;
+  italicos_comentario?: { inicio: number; fim: number }[] | null;
   created_at: string;
   isdeleted: boolean;
 }
@@ -94,22 +100,17 @@ export interface QuestaoImportLista {
   tipo: TipoQuestaoLista;
   enunciado: string;
   area?: string;
-  /**
-   * NOME do arquivo de imagem (ex: "charge1.jpg").
-   * O arquivo deve ser selecionado no modal junto com o JSON.
-   * Formato novo e recomendado.
-   */
   imagem?: string;
-  /**
-   * Formato antigo: imagem embutida como base64.
-   * Mantido apenas para compatibilidade com JSONs já existentes.
-   */
   imagem_base64?: string;
   comentario_geral?: string;
-  // Só para múltipla escolha
   alternativas?: AlternativaLista[];
-  // Só para certo/errado
   correta?: boolean;
+  sublinhados_enunciado?: { inicio: number; fim: number }[];
+  sublinhados_comentario?: { inicio: number; fim: number }[];
+  negritos_enunciado?: { inicio: number; fim: number }[];
+  negritos_comentario?: { inicio: number; fim: number }[];
+  italicos_enunciado?: { inicio: number; fim: number }[];
+  italicos_comentario?: { inicio: number; fim: number }[];
 }
 
 export interface ListaImport {

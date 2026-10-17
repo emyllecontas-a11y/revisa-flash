@@ -23,6 +23,14 @@ export interface Questao {
   enunciado: string;
   area: string | null;
   comentario_geral: string | null;
+  imagem_url: string | null;
+  sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+  sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+  negritos_enunciado?: { inicio: number; fim: number }[] | null;
+  negritos_comentario?: { inicio: number; fim: number }[] | null;
+  italicos_enunciado?: { inicio: number; fim: number }[] | null;
+  italicos_comentario?: { inicio: number; fim: number }[] | null;
+  gabarito_ce: boolean | null;
   created_at: string;
   isDeleted: boolean;
 }
@@ -61,10 +69,20 @@ export interface AlternativaImport {
 
 export interface QuestaoImport {
   numero: number;
+  tipo?: 'multipla_escolha' | 'certo_errado';
   enunciado: string;
   area?: string;
+  imagem_url?: string | null;
+  imagem_base64?: string | null;
   comentario_geral?: string;
-  alternativas: AlternativaImport[];
+  sublinhados_enunciado?: { inicio: number; fim: number }[];
+  sublinhados_comentario?: { inicio: number; fim: number }[];
+  negritos_enunciado?: { inicio: number; fim: number }[];
+  negritos_comentario?: { inicio: number; fim: number }[];
+  italicos_enunciado?: { inicio: number; fim: number }[];
+  italicos_comentario?: { inicio: number; fim: number }[];
+  alternativas?: AlternativaImport[];
+  correta?: boolean;
 }
 
 export interface SimuladoImport {
