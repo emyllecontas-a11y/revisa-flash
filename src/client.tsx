@@ -1,4 +1,5 @@
 // src/client.tsx
+import 'core-js/actual/iterator'; // Ensina o Safari a usar o Iterator
 import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ClerkProvider } from '@clerk/clerk-react';

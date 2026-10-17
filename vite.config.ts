@@ -34,6 +34,7 @@ export default defineConfig({
   },
   build: {
     ssr: false,
+    target: 'safari13', // <-- ADICIONADO AQUI PARA O CELULAR ENTENDER O CÓDIGO
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
