@@ -11,6 +11,10 @@ export interface AlternativaLista {
   texto: string;
   correta: boolean;
   comentario: string | null;
+  // NOVOS CAMPOS OPCIONAIS PARA FORMATAÇÃO
+  sublinhados?: { inicio: number; fim: number }[] | null;
+  negritos?: { inicio: number; fim: number }[] | null;
+  italicos?: { inicio: number; fim: number }[] | null;
 }
 
 // Pasta de listas (tabela listas_pastas)

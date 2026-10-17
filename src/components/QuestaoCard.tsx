@@ -15,6 +15,10 @@ import type {
 export interface AlternativaView {
   letra: string;
   texto: string;
+  // NOVOS CAMPOS PARA RECEBER AS MARCAS DO BANCO
+  sublinhados?: { inicio: number; fim: number }[] | null;
+  negritos?: { inicio: number; fim: number }[] | null;
+  italicos?: { inicio: number; fim: number }[] | null;
 }
 
 export interface Intervalo {
@@ -340,7 +344,12 @@ export function QuestaoCard({
                             cut ? "text-muted-foreground line-through opacity-60" : ""
                           }
                         >
-                          {a.texto}
+                          <TextoFormatado 
+                            texto={a.texto} 
+                            sublinhados={a.sublinhados} 
+                            negritos={a.negritos} 
+                            italicos={a.italicos} 
+                          />
                         </span>
                       </TextoGrifavel>
                     ) : (
@@ -349,7 +358,12 @@ export function QuestaoCard({
                           cut ? "text-muted-foreground line-through opacity-60" : ""
                         }
                       >
-                        {a.texto}
+                        <TextoFormatado 
+                          texto={a.texto} 
+                          sublinhados={a.sublinhados} 
+                          negritos={a.negritos} 
+                          italicos={a.italicos} 
+                        />
                       </span>
                     )}
                   </div>
@@ -410,7 +424,12 @@ export function QuestaoCard({
                             : "text-foreground/70"
                         }`}
                       >
-                        {a.texto}
+                        <TextoFormatado 
+                          texto={a.texto} 
+                          sublinhados={a.sublinhados} 
+                          negritos={a.negritos} 
+                          italicos={a.italicos} 
+                        />
                       </div>
                     </TextoGrifavel>
                   ) : (
@@ -425,7 +444,12 @@ export function QuestaoCard({
                           : "text-foreground/70"
                       }`}
                     >
-                      {a.texto}
+                      <TextoFormatado 
+                        texto={a.texto} 
+                        sublinhados={a.sublinhados} 
+                        negritos={a.negritos} 
+                        italicos={a.italicos} 
+                      />
                     </div>
                   )}
                   {isSel && !revelar && (

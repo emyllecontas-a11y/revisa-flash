@@ -52,6 +52,7 @@ function getCorreta(q: QuestaoListaPlayer): string | null {
   return null;
 }
 
+// AQUI ESTÁ A CORREÇÃO! Agora repassamos sublinhados, negritos e italicos!
 function getAlternativasView(q: QuestaoListaPlayer) {
   if (q.tipo === "certo_errado") {
     return [
@@ -59,7 +60,13 @@ function getAlternativasView(q: QuestaoListaPlayer) {
       { letra: "E", texto: "Errado" },
     ];
   }
-  return (q.alternativas || []).map(a => ({ letra: a.letra, texto: a.texto }));
+  return (q.alternativas || []).map(a => ({ 
+    letra: a.letra, 
+    texto: a.texto,
+    sublinhados: a.sublinhados,
+    negritos: a.negritos,
+    italicos: a.italicos
+  }));
 }
 
 export default function ListaPlayerPage() {

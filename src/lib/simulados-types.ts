@@ -42,6 +42,10 @@ export interface Alternativa {
   texto: string;
   correta: boolean;
   comentario: string | null;
+  // NOVOS CAMPOS
+  sublinhados?: { inicio: number; fim: number }[] | null;
+  negritos?: { inicio: number; fim: number }[] | null;
+  italicos?: { inicio: number; fim: number }[] | null;
   created_at: string;
   isDeleted: boolean;
 }
@@ -65,6 +69,10 @@ export interface AlternativaImport {
   texto: string;
   correta: boolean;
   comentario?: string;
+  // NOVOS CAMPOS
+  sublinhados?: { inicio: number; fim: number }[] | null;
+  negritos?: { inicio: number; fim: number }[] | null;
+  italicos?: { inicio: number; fim: number }[] | null;
 }
 
 export interface QuestaoImport {

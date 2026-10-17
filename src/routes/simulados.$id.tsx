@@ -50,14 +50,21 @@ function getCorreta(q: QuestaoPlayer): string | null {
   return null;
 }
 
-function getAlternativasView(q: QuestaoPlayer): { letra: string; texto: string }[] {
+// AQUI ESTÁ A CORREÇÃO DO RENDER!
+function getAlternativasView(q: QuestaoPlayer): { letra: string; texto: string; sublinhados?: any; negritos?: any; italicos?: any }[] {
   if (getTipoQuestao(q) === 'certo_errado') {
     return [
       { letra: 'C', texto: 'Certo' },
       { letra: 'E', texto: 'Errado' },
     ];
   }
-  return q.alternativas.map((a: Alternativa) => ({ letra: a.letra, texto: a.texto }));
+  return q.alternativas.map((a: Alternativa) => ({ 
+    letra: a.letra, 
+    texto: a.texto,
+    sublinhados: a.sublinhados,
+    negritos: a.negritos,
+    italicos: a.italicos
+  }));
 }
 
 export default function SimuladoPlayerPage() {

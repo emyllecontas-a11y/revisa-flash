@@ -460,6 +460,9 @@ export async function importarSimulado(
           texto: a.texto || '',
           correta: a.correta || false,
           comentario: a.comentario || null,
+          sublinhados: a.sublinhados || null,
+          negritos: a.negritos || null,
+          italicos: a.italicos || null,
         }));
       } else {
         item.correta = q.correta === true;
@@ -1002,7 +1005,15 @@ export async function criarQuestaoNoSimulado(
     comentario_geral: string | null;
     sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
     sublinhados_comentario?: { inicio: number; fim: number }[] | null;
-    alternativas: { letra: string; texto: string; correta: boolean; comentario: string | null }[] | null;
+    alternativas: { 
+      letra: string; 
+      texto: string; 
+      correta: boolean; 
+      comentario: string | null;
+      sublinhados?: { inicio: number; fim: number }[] | null; // <-- ADICIONE
+      negritos?: { inicio: number; fim: number }[] | null;    // <-- ADICIONE
+      italicos?: { inicio: number; fim: number }[] | null;    // <-- ADICIONE
+    }[] | null;
     gabarito_ce: boolean | null;
   }
 ): Promise<{ success: boolean; questaoId?: string; error?: string }> {
@@ -1054,6 +1065,9 @@ export async function criarQuestaoNoSimulado(
           texto: alt.texto.trim(),
           correta: alt.correta,
           comentario: alt.comentario?.trim() || null,
+          sublinhados: alt.sublinhados || null,
+          negritos: alt.negritos || null,
+          italicos: alt.italicos || null,
           created_at: now,
           updated_at: now,
           isdeleted: false,
@@ -1085,7 +1099,15 @@ export async function atualizarQuestaoSimulado(
     comentario_geral: string | null;
     sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
     sublinhados_comentario?: { inicio: number; fim: number }[] | null;
-    alternativas: { letra: string; texto: string; correta: boolean; comentario: string | null }[] | null;
+    alternativas: { 
+      letra: string; 
+      texto: string; 
+      correta: boolean; 
+      comentario: string | null;
+      sublinhados?: { inicio: number; fim: number }[] | null; // <-- ADICIONE
+      negritos?: { inicio: number; fim: number }[] | null;    // <-- ADICIONE
+      italicos?: { inicio: number; fim: number }[] | null;    // <-- ADICIONE
+    }[] | null;
     gabarito_ce: boolean | null;
   }
 ): Promise<{ success: boolean; error?: string }> {
@@ -1142,6 +1164,9 @@ export async function atualizarQuestaoSimulado(
           texto: alt.texto.trim(),
           correta: alt.correta,
           comentario: alt.comentario?.trim() || null,
+          sublinhados: alt.sublinhados || null,
+          negritos: alt.negritos || null,
+          italicos: alt.italicos || null,
           created_at: now,
           updated_at: now,
           isdeleted: false,
