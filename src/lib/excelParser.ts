@@ -1,6 +1,6 @@
 // src/lib/excelParser.ts
 // Substitui o csvParser.ts. Lê o Modelo_Plano_Estudos.xlsx e devolve PlanoSemana[].
-import * as XLSX from "xlsx";
+// Import dinâmico para não pesar no celular.
 import type { PlanoBloco, PlanoSemana } from "./planoEnareData";
 
 export interface ResultadoImportacao {
@@ -90,7 +90,10 @@ const diasVazios = (): PlanoBloco[][] => Array.from({ length: 7 }, () => []);
 export async function lerPlanoExcel(file: File): Promise<ResultadoImportacao> {
   const avisos: string[] = [];
 
-  let wb: XLSX.WorkBook;
+  // AQUI ESTÁ A CORREÇÃO: Importando o xlsx só quando o usuário realmente clica em importar
+  const XLSX = await import("xlsx");
+
+  let wb: any; // Usando 'any' para evitar erro de tipagem do import dinâmico
   try {
     wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
   } catch {
@@ -98,7 +101,7 @@ export async function lerPlanoExcel(file: File): Promise<ResultadoImportacao> {
   }
 
   // Procura a aba "Plano"; se não existir, usa a primeira
-  const nomeAba = wb.SheetNames.find((n) => normalizar(n) === "plano") ?? wb.SheetNames[0];
+  const nomeAba = wb.SheetNames.find((n: string) => normalizar(n) === "plano") ?? wb.SheetNames[0];
   if (!nomeAba) throw new Error("O arquivo Excel está vazio.");
   if (normalizar(nomeAba) !== "plano") {
     avisos.push(`Não achei a aba "Plano", então usei a aba "${nomeAba}".`);
@@ -162,7 +165,7 @@ export async function lerPlanoExcel(file: File): Promise<ResultadoImportacao> {
   }
 
   // Monta 1..última semana, preenchendo buracos com semanas vazias
-  const ultima = Math.max(...porSemana.keys());
+  const ultima = Math.max(...Array.from(porSemana.keys()));
   const semanas: PlanoSemana[] = [];
   const buracos: number[] = [];
   let totalBlocos = 0;
