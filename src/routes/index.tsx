@@ -1,8 +1,9 @@
+// src/routes/index.tsx
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
-  Check, Plus, Clock, ArrowUpRight, Flame, Target, BookOpen, AlertTriangle, X, RefreshCw, Loader2, Calendar, Layers, ChevronRight
+  Clock, Flame, Target, BookOpen, AlertTriangle, RefreshCw, Loader2, Calendar, Layers
 } from "lucide-react";
 import { useStudy } from "@/contexts/StudyContext";
 import { useErrors } from "@/contexts/ErrorContext";
@@ -11,12 +12,7 @@ import { useAppUser } from "@/contexts/UserContext";
 import { getDb, syncWithSupabase, readLastSync } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { OnboardingTour } from "@/components/OnboardingTour";
-
-interface ChecklistItem {
-  id: string;
-  titulo: string;
-  feito: boolean;
-}
+import { PlanoDiaCard } from "@/components/PlanoDiaCard";
 
 interface ProximaRevisao {
   id: string;
@@ -31,9 +27,6 @@ export default function DashboardPage() {
   const { user, isLoaded } = useAppUser();
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("Usuário");
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
-  const [isAddingChecklist, setIsAddingChecklist] = useState(false);
-  const [newChecklistText, setNewChecklistText] = useState("");
   const [streak, setStreak] = useState(0);
   const [disciplinasProgresso, setDisciplinasProgresso] = useState<{ nome: string; progresso: number }[]>([]);
   const [totalErros, setTotalErros] = useState(0);
@@ -195,7 +188,7 @@ export default function DashboardPage() {
             if (!r.nextReviewDate || r.completedAt) return;
             const date = new Date(r.nextReviewDate);
             const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-            
+
             const diffDias = Math.ceil((date.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
             let quando: string;
             if (diffDias < 0) {
@@ -281,80 +274,6 @@ export default function DashboardPage() {
     }
   }, [userId, isSyncing]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('dashboard_checklist');
-    const initialized = localStorage.getItem('dashboard_checklist_initialized');
-
-    if (initialized && saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setChecklist(parsed);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!initialized) {
-      setChecklist([]);
-      localStorage.setItem('dashboard_checklist', JSON.stringify([]));
-      localStorage.setItem('dashboard_checklist_initialized', 'true');
-    } else {
-      setChecklist([]);
-      localStorage.setItem('dashboard_checklist', JSON.stringify([]));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('dashboard_checklist', JSON.stringify(checklist));
-  }, [checklist]);
-
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'dashboard_checklist' && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) {
-            setChecklist(parsed);
-          }
-        } catch {
-          // ignore
-        }
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
-  const toggleChecklist = useCallback((id: string) => {
-    setChecklist(prev => prev.map(item =>
-      item.id === id ? { ...item, feito: !item.feito } : item
-    ));
-  }, []);
-
-  const addChecklistItem = useCallback(() => {
-    if (!newChecklistText.trim()) return;
-    const newItem: ChecklistItem = {
-      id: crypto.randomUUID(),
-      titulo: newChecklistText.trim(),
-      feito: false,
-    };
-    setChecklist(prev => [...prev, newItem]);
-    setNewChecklistText("");
-    setIsAddingChecklist(false);
-  }, [newChecklistText]);
-
-  const removeChecklistItem = useCallback((id: string) => {
-    setChecklist(prev => {
-      const newList = prev.filter(item => item.id !== id);
-      localStorage.setItem('dashboard_checklist', JSON.stringify(newList));
-      return newList;
-    });
-  }, []);
-
-  const tarefasRestantes = checklist.filter(c => !c.feito).length;
   const novos = dueCards.filter(c => c.reps === 0).length;
   const revisar = dueCards.filter(c => c.reps > 0).length;
   const atrasados = revisoesAtrasadas.length;
@@ -373,7 +292,7 @@ export default function DashboardPage() {
     <AppShell breadcrumb="Início">
       <OnboardingTour />
 
-      {/* CABEÇALHO: TÍTULO + BOTÃO REGISTRAR ESTUDO (sem card) */}
+      {/* CABEÇALHO: TÍTULO + BOTÃO REGISTRAR ESTUDO */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Início</h1>
         <Link
@@ -384,21 +303,12 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* CARD PRINCIPAL: DATA + SAUDAÇÃO + TAREFAS + PÍLULAS */}
+      {/* CARD PRINCIPAL: DATA + SAUDAÇÃO + PÍLULAS */}
       <div className="card-lip mb-6 p-6 sm:p-7">
         <p className="text-sm font-medium text-muted-foreground">{getDataPorExtenso()}</p>
         <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl text-foreground">
           {getSaudacao()}, {userName.split(" ")[0]}.
         </h1>
-        {tarefasRestantes > 0 && (
-          <p className="mt-3 font-display text-xl font-semibold tracking-tight sm:text-2xl text-foreground">
-            {tarefasRestantes === 1 ? (
-              <>Falta <span className="highlight">1 tarefa</span> para fechar o seu dia.</>
-            ) : (
-              <>Faltam <span className="highlight">{tarefasRestantes} tarefas</span> para fechar o seu dia.</>
-            )}
-          </p>
-        )}
 
         <div className="mt-6 flex flex-wrap items-center gap-2.5">
           <MiniStat icon={<Flame className="h-5 w-5" />} label="Sequência" value={`${streak} dias`} />
@@ -409,56 +319,8 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
 
-        <section className="card-lip p-5" style={{ '--lip': 'var(--primary)' } as React.CSSProperties}>
-          <header className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="font-display text-base font-semibold text-foreground">Checklist de hoje</h2>
-              <p className="text-xs text-muted-foreground">{checklist.filter(c => c.feito).length}/{checklist.length} concluídos</p>
-            </div>
-            <button
-              onClick={() => setIsAddingChecklist(true)}
-              className="grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-              aria-label="Adicionar"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </header>
-
-          {checklist.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              Nenhuma tarefa por aqui. Clique em + para adicionar.
-            </p>
-          ) : (
-            <ul className="space-y-2.5">
-              {checklist.map((c) => (
-                <li key={c.id} className="group flex items-center gap-3 rounded-xl bg-background/60 px-3 py-2.5">
-                  <button
-                    onClick={() => toggleChecklist(c.id)}
-                    className={[
-                      "grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors",
-                      c.feito ? "border-primary bg-primary" : "border-foreground/30 group-hover:border-primary/60",
-                    ].join(" ")}
-                  >
-                    {c.feito && <Check className="h-3 w-3 text-primary-foreground" strokeWidth={3} />}
-                  </button>
-                  <span className={["text-sm flex-1 text-foreground", c.feito ? "opacity-40 line-through" : ""].join(" ")}>
-                    {c.titulo}
-                  </span>
-                  <button
-                    onClick={() => removeChecklistItem(c.id)}
-                    className="text-foreground/30 hover:text-destructive transition-colors md:opacity-0 md:group-hover:opacity-100"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-4 h-1 overflow-hidden rounded-full bg-foreground/10">
-            <div className="h-full rounded-full bg-progress transition-all" style={{ width: `${checklist.length > 0 ? (checklist.filter(c => c.feito).length / checklist.length) * 100 : 0}%` }} />
-          </div>
-        </section>
+        {/* NOVO: Plano de hoje (substitui o checklist manual) */}
+        <PlanoDiaCard />
 
         <section className="card-lip p-5 flex flex-col" style={{ '--lip': 'var(--primary)' } as React.CSSProperties}>
           <header className="mb-4">
@@ -578,37 +440,6 @@ export default function DashboardPage() {
           Sincronizar agora
         </button>
       </div>
-
-      {isAddingChecklist && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">Adicionar item ao checklist</h3>
-            <input
-              type="text"
-              placeholder="Digite o item..."
-              value={newChecklistText}
-              onChange={(e) => setNewChecklistText(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground mb-4"
-              onKeyDown={(e) => { if (e.key === 'Enter') addChecklistItem(); }}
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => { setIsAddingChecklist(false); setNewChecklistText(""); }}
-                className="flex-1 rounded-full border border-border bg-background py-2 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={addChecklistItem}
-                className="flex-1 rounded-full bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-colors"
-              >
-                Adicionar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </AppShell>
   );
 }

@@ -17,6 +17,7 @@ import { enqueueOperation } from "@/services/queueService";
 import { deletePdfBlob, ensureCached, listCachedPdfIds } from "@/services/pdfCache";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
+import { SubtopicoCard } from "@/components/SubtopicoCard";
 
 interface Disciplina {
   id: string;
@@ -53,6 +54,7 @@ interface Revisao {
   createdAt: string;
   updatedAt: string;
 }
+
 function getTopicIcon(status: string) {
   switch (status) {
     case "estudando":
@@ -102,7 +104,6 @@ export default function ConteudoPage() {
 
   const [userId, setUserId] = useState<string | null>(null);
 
-  // IDs dos PDFs já disponíveis offline (cache local)
   const [cachedFileIds, setCachedFileIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -1110,40 +1111,39 @@ export default function ConteudoPage() {
                                 onClick={() => abrirTopico(t.id)}
                                 aria-label={`Abrir tópico: ${t.name}`}
                               >
-                            <span className="trail-circle">
-  {(() => {
-    const IconeTopico = getTopicIcon(t.status);
-    return <IconeTopico aria-hidden="true" />;
-  })()}
-  {isCurrent && (
-    <span className="trail-check">
-      <Check />
-    </span>
-  )}
-</span>
-<span className="trail-label">{t.name}</span>
+                                <span className="trail-circle">
+                                  {(() => {
+                                    const IconeTopico = getTopicIcon(t.status);
+                                    return <IconeTopico aria-hidden="true" />;
+                                  })()}
+                                  {isCurrent && (
+                                    <span className="trail-check">
+                                      <Check />
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="trail-label">{t.name}</span>
                               </button>
-                             {/* Botões de mover — ao lado do círculo, aparecem no hover */}
-<div className="trail-step-arrows pointer-events-none absolute top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity">
-  <button
-    type="button"
-    onClick={() => moveTopic(t.id, "up")}
-    disabled={isFirst}
-    className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-    aria-label="Mover para cima"
-  >
-    <ChevronUp className="h-3.5 w-3.5" />
-  </button>
-  <button
-    type="button"
-    onClick={() => moveTopic(t.id, "down")}
-    disabled={isLast}
-    className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-    aria-label="Mover para baixo"
-  >
-    <ChevronDown className="h-3.5 w-3.5" />
-  </button>
-</div>
+                              <div className="trail-step-arrows pointer-events-none absolute top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() => moveTopic(t.id, "up")}
+                                  disabled={isFirst}
+                                  className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                  aria-label="Mover para cima"
+                                >
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveTopic(t.id, "down")}
+                                  disabled={isLast}
+                                  className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                  aria-label="Mover para baixo"
+                                >
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             </div>
                           </li>
                         );
@@ -1277,8 +1277,11 @@ export default function ConteudoPage() {
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 lg:grid-cols-3 min-w-0">
           <section className="space-y-6 lg:col-span-2">
+            {/* NOVO: Card de subtópicos */}
+            <SubtopicoCard topicoId={topico.id} userId={userId} />
+
             <div className="rf-card p-6">
               <header className="mb-4 flex items-center justify-between">
                 <div>

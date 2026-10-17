@@ -1,17 +1,27 @@
+// src/routes/calendario.tsx
 import { AppShell } from "@/components/app-shell";
 import {
   ChevronLeft, ChevronRight, Plus, Clock, BookOpen, Brain,
   FileText, Trash2, X, CheckCircle, Sparkles, Loader2
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStudy } from "@/contexts/StudyContext";
 import { getDb } from "@/lib/db";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { updateTopicStatusAndRevisions } from "@/services/topicService";
+import {
+  concluirRevisaoSubtopico,
+  listarSubtopicos,
+  atualizarStatusSubtopico,
+  type Subtopico,
+} from "@/services/subtopicService";
 import { enqueueOperation } from "@/services/queueService";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
+import { PlanoDiaCard } from "@/components/PlanoDiaCard";
+import { PlanoGerenciamentoView } from "@/components/PlanoGerenciamentoView"; // <-- IMPORT ADICIONADO
+import { useRevisoesSubtopico } from "@/hooks/useRevisoesSubtopico";
 
 interface Revisao {
   id: string;
@@ -27,6 +37,15 @@ interface Revisao {
   updated_at: string;
 }
 
+interface RevisaoUnificada {
+  id: string;
+  kind: 'topico' | 'subtopico';
+  topicName: string;
+  review_level: number;
+  nextReviewDate: string;
+  completedAt: string | null;
+}
+
 const REVISAO_CORES: Record<number, string> = {
   1: "#FE7802",
   2: "#E8A87C",
@@ -35,10 +54,16 @@ const REVISAO_CORES: Record<number, string> = {
   5: "#C97FA8",
 };
 
+function isoToDateKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export default function CalendarioPage() {
   const confirmDialog = useConfirm();
   const toast = useToast();
   const [modo, setModo] = useState<"calendario" | "registrar">("calendario");
+  const [visao, setVisao] = useState<"agenda" | "plano">("agenda");
   const [tipo, setTipo] = useState<"teorico" | "pratico">("teorico");
   const [salvo, setSalvo] = useState(false);
 
@@ -53,6 +78,10 @@ export default function CalendarioPage() {
   const [topicos, setTopicos] = useState<{ id: string; name: string; discipline_id: string; status: string }[]>([]);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
+
+  const [subtopicosDisponiveis, setSubtopicosDisponiveis] = useState<Subtopico[]>([]);
+  const [subtopicosLoading, setSubtopicosLoading] = useState(false);
+  const [selectedSubtopicId, setSelectedSubtopicId] = useState<string>('');
 
   const [isSaving, setIsSaving] = useState(false);
   const [concluindoRevisaoId, setConcluindoRevisaoId] = useState<string | null>(null);
@@ -76,6 +105,8 @@ export default function CalendarioPage() {
 
   const studyContext = useStudy();
   const { records, addRecord, deleteRecord, getRecordsForDate, getMonthStats } = studyContext;
+
+  const { revisoes: revisoesSub, reload: reloadRevisoesSub } = useRevisoesSubtopico(userId);
 
   useEffect(() => {
     const loadUserId = async () => {
@@ -119,6 +150,29 @@ export default function CalendarioPage() {
   useEffect(() => {
     if (userId) { loadRevisoes(); loadContentData(); }
   }, [userId, loadRevisoes, loadContentData]);
+
+  const loadSubtopicosDoTopico = useCallback(async (topicoId: string) => {
+    if (!userId) return;
+    setSubtopicosLoading(true);
+    try {
+      const list = await listarSubtopicos(topicoId, userId);
+      setSubtopicosDisponiveis(list);
+    } catch {
+      setSubtopicosDisponiveis([]);
+    } finally {
+      setSubtopicosLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (!selectedTopicId) {
+      setSubtopicosDisponiveis([]);
+      setSelectedSubtopicId('');
+      return;
+    }
+    setSelectedSubtopicId('');
+    loadSubtopicosDoTopico(selectedTopicId);
+  }, [selectedTopicId, loadSubtopicosDoTopico]);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
@@ -225,6 +279,21 @@ export default function CalendarioPage() {
     }
   }, [userId, loadRevisoes, concluindoRevisaoId]);
 
+  const handleConcluirRevisaoSubtopico = useCallback(async (revisaoId: string) => {
+    if (concluindoRevisaoId === revisaoId) return;
+    if (!userId) return;
+    setConcluindoRevisaoId(revisaoId);
+    try {
+      await concluirRevisaoSubtopico(revisaoId, userId);
+      await reloadRevisoesSub();
+    } catch (error) {
+      console.error('❌ Erro ao concluir revisão de subtópico:', error);
+      toast.error('Não foi possível concluir a revisão.');
+    } finally {
+      setConcluindoRevisaoId(null);
+    }
+  }, [userId, concluindoRevisaoId, reloadRevisoesSub, toast]);
+
   const mesAnterior = () => {
     if (mesVisivel === 0) { setMesVisivel(11); setAnoVisivel(anoVisivel - 1); }
     else setMesVisivel(mesVisivel - 1);
@@ -275,14 +344,32 @@ export default function CalendarioPage() {
     ? new Date(dataSelecionada).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 
-  const revisoesDoDia = dataSelecionada
-    ? revisoes.filter(r => {
-        if (!r.nextReviewDate || r.completedAt) return false;
-        const date = new Date(r.nextReviewDate);
-        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-        return dateStr === dataSelecionada;
-      })
-    : [];
+  const revisoesDoDia: RevisaoUnificada[] = useMemo(() => {
+    if (!dataSelecionada) return [];
+    const lista: RevisaoUnificada[] = [
+      ...revisoes
+        .filter(r => !r.completedAt && r.nextReviewDate && isoToDateKey(r.nextReviewDate) === dataSelecionada)
+        .map<RevisaoUnificada>(r => ({
+          id: r.id,
+          kind: 'topico',
+          topicName: r.topicName,
+          review_level: r.review_level,
+          nextReviewDate: r.nextReviewDate,
+          completedAt: r.completedAt,
+        })),
+      ...revisoesSub
+        .filter(r => !r.completedAt && r.nextReviewDate && isoToDateKey(r.nextReviewDate) === dataSelecionada)
+        .map<RevisaoUnificada>(r => ({
+          id: r.id,
+          kind: 'subtopico',
+          topicName: r.topicName,
+          review_level: r.review_level,
+          nextReviewDate: r.nextReviewDate,
+          completedAt: r.completedAt,
+        })),
+    ];
+    return lista.sort((a, b) => a.review_level - b.review_level);
+  }, [revisoes, revisoesSub, dataSelecionada]);
 
   const handleSalvar = async () => {
     if (isSaving) return;
@@ -291,13 +378,18 @@ export default function CalendarioPage() {
     const topic = topicos.find(t => t.id === selectedTopicId);
     if (!topic) { toast.error('Tópico não encontrado.'); return; }
 
+    const subtopicoSelecionado = subtopicosDisponiveis.find(s => s.id === selectedSubtopicId);
     const disciplina = disciplinas.find(d => d.id === selectedDisciplineId);
+
+    const topicFieldValue = subtopicoSelecionado
+      ? `${topic.name} › ${subtopicoSelecionado.name}`
+      : topic.name;
 
     const recordData = {
       date: formData.date,
       type: tipo,
       discipline: disciplina?.name || '',
-      topic: topic.name,
+      topic: topicFieldValue,
       duration: formData.duration,
       observations: formData.observations,
       ...(tipo === 'teorico'
@@ -325,6 +417,16 @@ export default function CalendarioPage() {
             await loadContentData();
           } catch (error) {
             console.error('⚠️ Erro ao atualizar tópico, mas o registro foi salvo:', error);
+          }
+        }
+
+        if (subtopicoSelecionado && subtopicoSelecionado.status === 'nao_estudado') {
+          try {
+            await atualizarStatusSubtopico(subtopicoSelecionado.id, 'estudando');
+            await loadSubtopicosDoTopico(selectedTopicId);
+            await reloadRevisoesSub();
+          } catch (error) {
+            console.warn('⚠️ Erro ao marcar subtópico como estudando:', error);
           }
         }
       }
@@ -363,213 +465,258 @@ export default function CalendarioPage() {
 
     return (
       <AppShell breadcrumb="Calendário" title="Agenda de estudos">
-        <div id="calendario-header">
-          {salvo && (
-            <div className="mb-4 rounded-xl border border-success/20 bg-success/10 p-3 text-sm text-success">
-              ✅ Estudo registrado com sucesso!
+        {/* SUB-ABAS DO CALENDÁRIO */}
+        <div className="mb-6 flex border-b border-border gap-6">
+          <button
+            onClick={() => setVisao("agenda")}
+            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${
+              visao === "agenda" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Agenda
+          </button>
+          <button
+            onClick={() => setVisao("plano")}
+            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${
+              visao === "plano" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Plano de Estudos
+          </button>
+        </div>
+
+        {visao === "plano" ? (
+          userId ? (
+            <PlanoGerenciamentoView 
+              userId={userId} 
+              onBackToAgenda={() => setVisao("agenda")} 
+              onPlanoAlterado={() => { /* Opcional: recarregar dados aqui */ }} 
+            />
+          ) : (
+            <p>Carregando...</p>
+          )
+        ) : (
+          // TELA DA AGENDA (CALENDÁRIO NORMAL)
+          <div id="calendario-header">
+            {salvo && (
+              <div className="mb-4 rounded-xl border border-success/20 bg-success/10 p-3 text-sm text-success">
+                ✅ Estudo registrado com sucesso!
+              </div>
+            )}
+
+            <div className="mb-4 flex justify-end">
+              <button
+                onClick={() => setModo("registrar")}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                <Plus className="h-4 w-4" /> Registrar estudo
+              </button>
             </div>
-          )}
 
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => setModo("registrar")}
-              className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              <Plus className="h-4 w-4" /> Registrar estudo
-            </button>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <section className="rf-card p-5 lg:col-span-2">
-              <header className="mb-5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h2 className="font-display text-lg font-bold">{tituloMes}</h2>
-                  <div className="flex items-center gap-1">
-                    <button onClick={mesAnterior} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Mês anterior">
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={mesSeguinte} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Próximo mês">
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={irParaHoje} className="ml-1 rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground/60 hover:bg-white/5">
-                      Hoje
-                    </button>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <section className="rf-card p-5 lg:col-span-2">
+                <header className="mb-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <h2 className="font-display text-lg font-bold">{tituloMes}</h2>
+                    <div className="flex items-center gap-1">
+                      <button onClick={mesAnterior} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Mês anterior">
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={mesSeguinte} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Próximo mês">
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={irParaHoje} className="ml-1 rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground/60 hover:bg-white/5">
+                        Hoje
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </header>
+                </header>
 
-              <div className="grid grid-cols-7 gap-2">
-                {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
-                  <div key={i} className="px-2 py-2 text-center text-[10px] font-medium tracking-widest text-foreground/40">
-                    {d}
-                  </div>
-                ))}
-                {cells.map((d, i) => {
-                  if (!d) return <div key={i} className="aspect-square sm:aspect-auto sm:h-[68px]" />;
-                  const e = daysWithStudy[d];
-                  const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
-                  const isSelecionado = d === diaSelecionado;
+                <div className="grid grid-cols-7 gap-2">
+                  {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
+                    <div key={i} className="px-2 py-2 text-center text-[10px] font-medium tracking-widest text-foreground/40">
+                      {d}
+                    </div>
+                  ))}
+                  {cells.map((d, i) => {
+                    if (!d) return <div key={i} className="aspect-square sm:aspect-auto sm:h-[68px]" />;
+                    const e = daysWithStudy[d];
+                    const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
+                    const isSelecionado = d === diaSelecionado;
 
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => setDiaSelecionado(d)}
-                      className={[
-                        "relative rounded-2xl p-2 transition-all aspect-square sm:aspect-auto sm:h-[68px] w-full text-left",
-                        isSelecionado
-                          ? "bg-primary text-primary-foreground"
-                          : isHoje
-                          ? "bg-surface-2/60 ring-1 ring-inset ring-primary/50 hover:bg-accent/40 text-foreground/80"
-                          : "bg-surface-2/60 hover:bg-accent/40 text-foreground/80",
-                      ].join(" ")}
-                    >
-                      <span
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setDiaSelecionado(d)}
                         className={[
-                          "text-xs font-medium tabular-nums",
-                          isSelecionado ? "" : "text-foreground/80",
+                          "relative rounded-2xl p-2 transition-all aspect-square sm:aspect-auto sm:h-[68px] w-full text-left",
+                          isSelecionado
+                            ? "bg-primary text-primary-foreground"
+                            : isHoje
+                            ? "bg-surface-2/60 ring-1 ring-inset ring-primary/50 hover:bg-accent/40 text-foreground/80"
+                            : "bg-surface-2/60 hover:bg-accent/40 text-foreground/80",
                         ].join(" ")}
                       >
-                        {d}
-                      </span>
-                      {e && (
-                        <div className="absolute bottom-1.5 left-2 flex gap-1">
-                          {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
-                          {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
+                        <span
+                          className={[
+                            "text-xs font-medium tabular-nums",
+                            isSelecionado ? "" : "text-foreground/80",
+                          ].join(" ")}
+                        >
+                          {d}
+                        </span>
+                        {e && (
+                          <div className="absolute bottom-1.5 left-2 flex gap-1">
+                            {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
+                            {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-foreground/50">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Teórico
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent" /> Prático
+                  </span>
+                  <span className="ml-auto text-foreground/40">
+                    Clique em um dia para ver os registros
+                  </span>
+                </div>
+              </section>
+
+              <aside className="space-y-4">
+                {/* AQUI ESTÁ A CORREÇÃO DO PLANO DIA CARD COM A NOVA PROP */}
+                <PlanoDiaCard 
+                  data={dataSelecionada ?? undefined} 
+                  onAbrirGerenciamento={() => setVisao("plano")} 
+                />
+
+                <div className="rf-card p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-display text-sm font-bold">
+                      {diaSelecionado !== null ? tituloSidebar : "Selecione um dia"}
+                    </h3>
+                    {diaSelecionado !== null && (
+                      <button onClick={() => setDiaSelecionado(null)} className="text-foreground/40 hover:text-foreground transition-colors" aria-label="Limpar seleção">
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {diaSelecionado !== null ? (
+                    <>
+                      {revisoesDoDia.length > 0 && (
+                        <ul className="space-y-2">
+                          {revisoesDoDia.map((rev) => {
+                            const cor = REVISAO_CORES[rev.review_level] || "#E8A87C";
+                            const onClick = rev.kind === 'topico'
+                              ? () => handleConcluirRevisao(rev.id)
+                              : () => handleConcluirRevisaoSubtopico(rev.id);
+                            return (
+                              <li key={`${rev.kind}-${rev.id}`}>
+                                <button
+                                  onClick={onClick}
+                                  disabled={concluindoRevisaoId === rev.id}
+                                  className="w-full flex items-center justify-between gap-3 rounded-full bg-background/40 px-4 py-2.5 hover:bg-background/60 transition-colors text-left disabled:opacity-50"
+                                >
+                                  <span className="truncate text-sm font-medium">
+                                    {rev.topicName}
+                                  </span>
+                                  <span
+                                    className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
+                                    style={{ backgroundColor: cor, color: '#290E1F' }}
+                                    title={rev.kind === 'subtopico' ? 'Revisão de subtópico' : 'Revisão de tópico'}
+                                  >
+                                    {concluindoRevisaoId === rev.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      `Revisão D${rev.review_level}`
+                                    )}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+
+                      {registrosDoDia.length > 0 && (
+                        <div className={revisoesDoDia.length > 0 ? "border-t border-border/60 pt-4 mt-4" : ""}>
+                          <p className="text-xs text-foreground/45 mb-2 flex items-center gap-1.5">
+                            <BookOpen className="h-3 w-3" />
+                            {registrosDoDia.length} registro{registrosDoDia.length !== 1 ? 's' : ''} de estudo
+                          </p>
+                          <ul className="space-y-2">
+                            {registrosDoDia.map((r) => (
+                              <li
+                                key={r.id}
+                                className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/40 p-3 group"
+                              >
+                                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                                  {r.discipline.slice(0, 2).toUpperCase()}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-medium">{r.discipline}</div>
+                                  <div className="truncate text-[11px] text-foreground/45">
+                                    {new Date(r.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                    {r.questionsCount ? ` · ${r.questionsCount} questões` : ''}
+                                    {r.duration ? ` · ${r.duration}min` : ''}
+                                  </div>
+                                  {r.topic && (
+                                    <div className="truncate text-[11px] text-foreground/55">
+                                      {r.topic}
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={() => handleDeleteRecord(r.id)}
+                                  className="text-foreground/30 hover:text-destructive transition-colors md:opacity-0 md:group-hover:opacity-100"
+                                  aria-label="Excluir registro"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
-                    </button>
-                  );
-                })}
-              </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-foreground/50">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Teórico
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent" /> Prático
-                </span>
-                <span className="ml-auto text-foreground/40">
-                  Clique em um dia para ver os registros
-                </span>
-              </div>
-            </section>
-
-            <aside className="space-y-4">
-              <div className="rf-card p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-display text-sm font-bold">
-                    {diaSelecionado !== null ? tituloSidebar : "Selecione um dia"}
-                  </h3>
-                  {diaSelecionado !== null && (
-                    <button onClick={() => setDiaSelecionado(null)} className="text-foreground/40 hover:text-foreground transition-colors" aria-label="Limpar seleção">
-                      <X className="h-4 w-4" />
-                    </button>
+                      {revisoesDoDia.length === 0 && registrosDoDia.length === 0 && (
+                        <p className="text-center text-sm text-foreground/40 py-6">
+                          Nenhum estudo ou revisão neste dia.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex min-h-[100px] items-center justify-center text-center">
+                      <p className="text-sm text-foreground/40">
+                        Clique em um dia no calendário<br />
+                        para ver os registros e revisões.
+                      </p>
+                    </div>
                   )}
                 </div>
 
-                {diaSelecionado !== null ? (
-                  <>
-                    {revisoesDoDia.length > 0 && (
-                      <ul className="space-y-2">
-                        {revisoesDoDia.map((rev) => {
-                          const cor = REVISAO_CORES[rev.review_level] || "#E8A87C";
-                          return (
-                            <li key={rev.id}>
-                              <button
-                                onClick={() => handleConcluirRevisao(rev.id)}
-                                disabled={concluindoRevisaoId === rev.id}
-                                className="w-full flex items-center justify-between gap-3 rounded-full bg-background/40 px-4 py-2.5 hover:bg-background/60 transition-colors text-left disabled:opacity-50"
-                              >
-                                <span className="truncate text-sm font-medium">
-                                  {rev.topicName}
-                                </span>
-                                <span
-                                  className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
-                                  style={{
-                                    backgroundColor: cor,
-                                    color: '#290E1F',
-                                  }}
-                                >
-                                  {concluindoRevisaoId === rev.id ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    `Revisão D${rev.review_level}`
-                                  )}
-                                </span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-
-                    {registrosDoDia.length > 0 && (
-                      <div className={revisoesDoDia.length > 0 ? "border-t border-border/60 pt-4 mt-4" : ""}>
-                        <p className="text-xs text-foreground/45 mb-2 flex items-center gap-1.5">
-                          <BookOpen className="h-3 w-3" />
-                          {registrosDoDia.length} registro{registrosDoDia.length !== 1 ? 's' : ''} de estudo
-                        </p>
-                        <ul className="space-y-2">
-                          {registrosDoDia.map((r) => (
-                            <li
-                              key={r.id}
-                              className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/40 p-3 group"
-                            >
-                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                                {r.discipline.slice(0, 2).toUpperCase()}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium">{r.discipline}</div>
-                                <div className="truncate text-[11px] text-foreground/45">
-                                  {new Date(r.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                  {r.questionsCount ? ` · ${r.questionsCount} questões` : ''}
-                                  {r.duration ? ` · ${r.duration}min` : ''}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleDeleteRecord(r.id)}
-                                className="text-foreground/30 hover:text-destructive transition-colors md:opacity-0 md:group-hover:opacity-100"
-                                aria-label="Excluir registro"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {revisoesDoDia.length === 0 && registrosDoDia.length === 0 && (
-                      <p className="text-center text-sm text-foreground/40 py-6">
-                        Nenhum estudo ou revisão neste dia.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex min-h-[100px] items-center justify-center text-center">
-                    <p className="text-sm text-foreground/40">
-                      Clique em um dia no calendário<br />
-                      para ver os registros e revisões.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="rf-card p-5">
-                <h3 className="mb-3 font-display text-sm font-semibold">
-                  Resumo de {nomeMes}
-                </h3>
-                <dl className="grid grid-cols-2 gap-3 text-center">
-                  <Stat label="Dias estudados" value={String(monthStats.totalDays)} />
-                  <Stat label="Horas totais" value={`${monthStats.totalHours}h`} />
-                  <Stat label="Questões" value={String(monthStats.totalQuestions)} />
-                  <Stat label="Acertos" value={`${monthStats.averageCorrectRate}%`} />
-                </dl>
-              </div>
-            </aside>
+                <div className="rf-card p-5">
+                  <h3 className="mb-3 font-display text-sm font-semibold">
+                    Resumo de {nomeMes}
+                  </h3>
+                  <dl className="grid grid-cols-2 gap-3 text-center">
+                    <Stat label="Dias estudados" value={String(monthStats.totalDays)} />
+                    <Stat label="Horas totais" value={`${monthStats.totalHours}h`} />
+                    <Stat label="Questões" value={String(monthStats.totalQuestions)} />
+                    <Stat label="Acertos" value={`${monthStats.averageCorrectRate}%`} />
+                  </dl>
+                </div>
+              </aside>
+            </div>
           </div>
-        </div>
+        )}
       </AppShell>
     );
   }
@@ -613,6 +760,10 @@ export default function CalendarioPage() {
                 disciplinas={disciplinas} topicos={topicos}
                 selectedDisciplineId={selectedDisciplineId} setSelectedDisciplineId={setSelectedDisciplineId}
                 selectedTopicId={selectedTopicId} setSelectedTopicId={setSelectedTopicId}
+                subtopicosDisponiveis={subtopicosDisponiveis}
+                subtopicosLoading={subtopicosLoading}
+                selectedSubtopicId={selectedSubtopicId}
+                setSelectedSubtopicId={setSelectedSubtopicId}
               />
             ) : (
               <PraticoForm
@@ -623,6 +774,10 @@ export default function CalendarioPage() {
                 disciplinas={disciplinas} topicos={topicos}
                 selectedDisciplineId={selectedDisciplineId} setSelectedDisciplineId={setSelectedDisciplineId}
                 selectedTopicId={selectedTopicId} setSelectedTopicId={setSelectedTopicId}
+                subtopicosDisponiveis={subtopicosDisponiveis}
+                subtopicosLoading={subtopicosLoading}
+                selectedSubtopicId={selectedSubtopicId}
+                setSelectedSubtopicId={setSelectedSubtopicId}
               />
             )}
           </section>
@@ -636,7 +791,15 @@ export default function CalendarioPage() {
                 <Row k="Tipo" v={tipo === "teorico" ? "Teórico" : "Prático"} />
                 <Row k="Data" v={formData.date} />
                 <Row k="Disciplina" v={disciplinas.find(d => d.id === selectedDisciplineId)?.name || '—'} />
-                <Row k="Tópico" v={topicos.find(t => t.id === selectedTopicId)?.name || '—'} />
+                <Row
+                  k="Tópico"
+                  v={(() => {
+                    const top = topicos.find(t => t.id === selectedTopicId)?.name || '—';
+                    if (!selectedSubtopicId) return top;
+                    const sub = subtopicosDisponiveis.find(s => s.id === selectedSubtopicId)?.name;
+                    return sub ? `${top} › ${sub}` : top;
+                  })()}
+                />
                 {tipo === "teorico" ? (
                   <Row k="Duração" v={`${formData.duration} min`} />
                 ) : (
@@ -714,6 +877,8 @@ function TeoricoForm({
   disciplinas, topicos,
   selectedDisciplineId, setSelectedDisciplineId,
   selectedTopicId, setSelectedTopicId,
+  subtopicosDisponiveis, subtopicosLoading,
+  selectedSubtopicId, setSelectedSubtopicId,
 }: any) {
   return (
     <div className="rf-card p-6">
@@ -749,6 +914,27 @@ function TeoricoForm({
           </select>
         </Field>
       </div>
+
+      {selectedTopicId && (subtopicosLoading || subtopicosDisponiveis.length > 0) && (
+        <div className="mt-4">
+          <Field label="Subtópico (opcional)">
+            <select
+              value={selectedSubtopicId}
+              onChange={(e) => setSelectedSubtopicId(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary disabled:opacity-50"
+              disabled={subtopicosLoading}
+            >
+              <option value="">
+                {subtopicosLoading ? "Carregando..." : "Sem subtópico específico"}
+              </option>
+              {subtopicosDisponiveis.map((s: Subtopico) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
       <div className="mt-4">
         <Field label="Material consultado">
           <input type="text" value={formMaterial} onChange={(e) => setFormMaterial(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
@@ -767,6 +953,8 @@ function PraticoForm({
   formData, setFormData, formQuestions, setFormQuestions, formCorrect, setFormCorrect,
   formWrong, setFormWrong, disciplinas, topicos,
   selectedDisciplineId, setSelectedDisciplineId, selectedTopicId, setSelectedTopicId,
+  subtopicosDisponiveis, subtopicosLoading,
+  selectedSubtopicId, setSelectedSubtopicId,
 }: any) {
   const handleNumberChange = (value: string, setter: (v: number | string) => void) => {
     if (value === '') setter('');
@@ -807,6 +995,26 @@ function PraticoForm({
           </select>
         </Field>
       </div>
+
+      {selectedTopicId && (subtopicosLoading || subtopicosDisponiveis.length > 0) && (
+        <div className="mt-4">
+          <Field label="Subtópico (opcional)">
+            <select
+              value={selectedSubtopicId}
+              onChange={(e) => setSelectedSubtopicId(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary disabled:opacity-50"
+              disabled={subtopicosLoading}
+            >
+              <option value="">
+                {subtopicosLoading ? "Carregando..." : "Sem subtópico específico"}
+              </option>
+              {subtopicosDisponiveis.map((s: Subtopico) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <Field label="Questões feitas">

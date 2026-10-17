@@ -402,10 +402,7 @@ const pdfHighlightSchema = {
     page_number: { type: 'number' },
     text_snippet: { type: 'string' },
     color: { type: 'string' },
-    rects: {
-      type: 'array',
-      items: { type: 'object', additionalProperties: true },
-    },
+    rects: { type: 'array', items: { type: 'object', additionalProperties: true } },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isDeleted: { type: 'boolean', default: false },
@@ -694,6 +691,7 @@ const resultadoSimuladoSchema = {
   },
   required: ['id', 'simulado_id', 'user_id'],
 };
+
 const anotacaoQuestaoSchema = {
   title: 'anotacao questao schema',
   version: 0,
@@ -714,6 +712,112 @@ const anotacaoQuestaoSchema = {
   },
   required: ['id', 'user_id', 'questao_origem', 'questao_id', 'campo_alvo', 'cor'],
 };
+
+// ============================================================
+// NOVOS SCHEMAS (plano + subtópicos) — v11
+// ============================================================
+
+const planoSchema = {
+  title: 'plano schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    nome: { type: 'string' },
+    data_inicio: { type: 'string' },
+    ativo: { type: 'boolean', default: true },
+    semanas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          n: { type: 'number' },
+          dias: {
+            type: 'array',
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  k: { type: 'string' },
+                  t: { type: 'string' },
+                  d: { type: 'string' },
+                },
+                required: ['k', 't'],
+              },
+            },
+          },
+        },
+        required: ['n', 'dias'],
+      },
+    },
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'nome', 'data_inicio', 'semanas'],
+};
+
+const planoFeitoSchema = {
+  title: 'plano feito schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    plano_id: { type: 'string' },
+    chave: { type: 'string' },
+    concluidoEm: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'plano_id', 'chave'],
+};
+
+const subtopicoSchema = {
+  title: 'subtopico schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    topico_id: { type: 'string' },
+    name: { type: 'string' },
+    status: { type: 'string' },
+    order: { type: 'number', default: 0 },
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'topico_id', 'name'],
+};
+
+const revisaoSubtopicoSchema = {
+  title: 'revisao subtopico schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    subtopico_id: { type: 'string' },
+    topicName: { type: 'string' },
+    discipline: { type: 'string' },
+    review_level: { type: 'number' },
+    nextReviewDate: { type: 'string' },
+    lastStudyDate: { type: 'string' },
+    completedAt: { type: ['string', 'null'] },
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'subtopico_id'],
+};
+
 // ============================================================
 // INSTÂNCIA
 // ============================================================
@@ -727,9 +831,7 @@ export async function getDb(): Promise<RxDatabase> {
       return dbInstance;
     } else {
       console.warn('⚠️ Instância do banco incompleta. Recriando...');
-      try {
-        await dbInstance.destroy();
-      } catch (e) {}
+      try { await dbInstance.destroy(); } catch (e) {}
       dbInstance = null;
     }
   }
@@ -742,8 +844,9 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v10';
+    const DB_NAME = 'revisaflash_db_v11';
 
+    // Limpa versões antigas (mantém a v10 órfã, o Dexie ignora).
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v5'); } catch (e) {}
@@ -751,15 +854,16 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v7'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v8'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v9'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v10'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
-    const markerVersion = localStorage.getItem('revisaflash_db_version');
-if (markerVersion !== 'v10') {
-  console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
-  clearAllLastSync();
-  localStorage.setItem('revisaflash_db_version', 'v10');
-}
+      const markerVersion = localStorage.getItem('revisaflash_db_version');
+      if (markerVersion !== 'v11') {
+        console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
+        clearAllLastSync();
+        localStorage.setItem('revisaflash_db_version', 'v11');
+      }
     } catch (e) {}
 
     const db = await createRxDatabase({
@@ -797,9 +901,14 @@ if (markerVersion !== 'v10') {
       pdf_text_boxes: { schema: pdfTextBoxSchema },
       files: { schema: fileSchema },
       anotacoes_questao: { schema: anotacaoQuestaoSchema },
+      // NOVAS:
+      planos: { schema: planoSchema },
+      plano_feitos: { schema: planoFeitoSchema },
+      subtopicos: { schema: subtopicoSchema },
+      revisoes_subtopico: { schema: revisaoSubtopicoSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v8).');
+    console.log('✅ Banco local criado com sucesso (v11).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -850,6 +959,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
       'files',
+      'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
     ];
     const emptyCollections = new Set<string>();
     for (const name of collectionsToCheck) {
@@ -863,9 +973,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // LOOP PADRÃO
-    // ============================================================
     const collections = [
       'decks', 'flashcards', 'disciplines', 'topics', 'errors',
       'revisoes', 'study_records', 'user_settings',
@@ -873,6 +980,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'progresso_lista', 'progresso_simulado',
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
+      'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
     ];
 
     for (const name of collections) {
@@ -958,22 +1066,16 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // FILES (metadados dos PDFs) — somente pull
-    // ============================================================
+    // files — somente pull
     {
       const collection = database.collections.files;
       if (collection) {
-        const pullFrom = emptyCollections.has('files')
-          ? '1970-01-01T00:00:00Z'
-          : lastSyncGlobal;
-
+        const pullFrom = emptyCollections.has('files') ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
         const { data, error } = await supabaseClient
           .from('files')
           .select('*')
           .eq('user_id', userIdStr)
           .gte('created_at', pullFrom);
-
         if (error) {
           console.error('❌ Pull files:', error);
           houveErro = true;
@@ -982,10 +1084,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           for (const doc of data) {
             const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
             if (!existing) {
-              await collection.insert({
-                ...doc,
-                updated_at: doc.updated_at || doc.created_at,
-              });
+              await collection.insert({ ...doc, updated_at: doc.updated_at || doc.created_at });
               added++;
             }
           }
@@ -994,39 +1093,26 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // RESULTADOS_LISTA — puxa tudo
-    // ============================================================
+    // resultados_lista — puxa tudo
     {
       const collection = database.collections.resultados_lista;
-
       const { data, error } = await supabaseClient
         .from('resultados_lista')
         .select('*')
         .eq('user_id', userIdStr);
-
-      if (error) {
-        console.error('❌ Pull resultados_lista:', error);
-        houveErro = true;
-      } else if (data) {
+      if (error) { console.error('❌ Pull resultados_lista:', error); houveErro = true; }
+      else if (data) {
         let atualizados = 0;
         for (const doc of data) {
           const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
           if (existing) {
             const remoteTs = doc.updated_at || doc.created_at;
             const localTs = existing.get('updated_at') || existing.get('created_at') || '1970-01-01T00:00:00Z';
-            if (remoteTs > localTs) {
-              await existing.patch(doc);
-              atualizados++;
-            }
-          } else {
-            await collection.insert(doc);
-            atualizados++;
-          }
+            if (remoteTs > localTs) { await existing.patch(doc); atualizados++; }
+          } else { await collection.insert(doc); atualizados++; }
         }
-        console.log(`✅ Pull resultados_lista: ${atualizados} novos/atualizados (total remoto: ${data.length})`);
+        console.log(`✅ Pull resultados_lista: ${atualizados} novos/atualizados`);
       }
-
       const localDocs = await collection.find({
         selector: { user_id: userIdStr, updated_at: { $gt: lastSyncGlobal } }
       }).exec();
@@ -1043,39 +1129,26 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // RESULTADOS_SIMULADO — puxa tudo
-    // ============================================================
+    // resultados_simulado — puxa tudo
     {
       const collection = database.collections.resultados_simulado;
-
       const { data, error } = await supabaseClient
         .from('resultados_simulado')
         .select('*')
         .eq('user_id', userIdStr);
-
-      if (error) {
-        console.error('❌ Pull resultados_simulado:', error);
-        houveErro = true;
-      } else if (data) {
+      if (error) { console.error('❌ Pull resultados_simulado:', error); houveErro = true; }
+      else if (data) {
         let atualizados = 0;
         for (const doc of data) {
           const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
           if (existing) {
             const remoteTs = doc.updated_at || doc.created_at;
             const localTs = existing.get('updated_at') || existing.get('created_at') || '1970-01-01T00:00:00Z';
-            if (remoteTs > localTs) {
-              await existing.patch(doc);
-              atualizados++;
-            }
-          } else {
-            await collection.insert(doc);
-            atualizados++;
-          }
+            if (remoteTs > localTs) { await existing.patch(doc); atualizados++; }
+          } else { await collection.insert(doc); atualizados++; }
         }
-        console.log(`✅ Pull resultados_simulado: ${atualizados} novos/atualizados (total remoto: ${data.length})`);
+        console.log(`✅ Pull resultados_simulado: ${atualizados} novos/atualizados`);
       }
-
       const localDocs = await collection.find({
         selector: { user_id: userIdStr, updated_at: { $gt: lastSyncGlobal } }
       }).exec();
@@ -1092,13 +1165,10 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // LISTAS_QUESTOES (link)
-    // ============================================================
+    // listas_questoes (link)
     {
       const collection = database.collections.listas_questoes;
       const listasCollection = database.collections.listas;
-
       const userListas = await listasCollection.find({
         selector: { user_id: userIdStr, isdeleted: false }
       }).exec();
@@ -1110,35 +1180,25 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
           return chunks;
         };
-
         const chunks = chunkArray(listaIds, 100);
         for (const chunk of chunks) {
           const { data, error } = await supabaseClient
             .from('listas_questoes')
             .select('*')
             .in('lista_id', chunk);
-
           if (error) { console.error('❌ Pull listas_questoes (chunk):', error); houveErro = true; continue; }
           if (!data) continue;
-
           for (const doc of data) {
             const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
             if (existing) {
               if (existing.get('ordem') !== doc.ordem) {
                 await existing.patch({ ordem: doc.ordem });
               }
-            } else {
-              await collection.insert(doc);
-            }
+            } else { await collection.insert(doc); }
           }
         }
-        console.log(`✅ Pull listas_questoes: ${userListas.length} listas verificadas`);
-
-        const localLinks = await collection.find({
-          selector: { lista_id: { $in: listaIds } }
-        }).exec();
+        const localLinks = await collection.find({ selector: { lista_id: { $in: listaIds } } }).exec();
         const toPush = localLinks.map(d => d.toJSON());
-
         if (toPush.length > 0) {
           try {
             const result = await pushWithConflictCheck(supabaseClient, 'listas_questoes', collection, toPush);
@@ -1153,27 +1213,20 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // ============================================================
-    // SIMULADOS → QUESTOES → ALTERNATIVAS (somente leitura)
-    // ============================================================
+    // simulados → questoes → alternativas
     {
       const chunkArray = <T,>(arr: T[], size: number): T[][] => {
         const chunks: T[][] = [];
-        for (let i = 0; i < arr.length; i += size) {
-          chunks.push(arr.slice(i, i + size));
-        }
+        for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
         return chunks;
       };
-
       const simuladosCollection = database.collections.simulados;
       const pullFrom = emptyCollections.has('simulados') ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
-
       const { data: simData, error: simErr } = await supabaseClient
         .from('simulados')
         .select('*')
         .eq('isdeleted', false)
         .gte('updated_at', pullFrom);
-
       if (!simErr && simData) {
         for (const doc of simData) {
           const existing = await simuladosCollection.findOne({ selector: { id: doc.id } }).exec();
@@ -1181,9 +1234,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
             if (doc.updated_at > (existing.get('updated_at') || '1970-01-01T00:00:00Z')) {
               await existing.patch(doc);
             }
-          } else {
-            await simuladosCollection.insert(doc);
-          }
+          } else { await simuladosCollection.insert(doc); }
         }
         if (simData.length > 0) console.log(`✅ Pull simulados: ${simData.length}`);
       } else if (simErr) {
@@ -1197,79 +1248,46 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
 
       if (simIds.length > 0) {
         const simIdChunks = chunkArray(simIds, 100);
-        let totalQuestoes = 0;
-
         for (const chunk of simIdChunks) {
           const { data: qData, error: qErr } = await supabaseClient
             .from('questoes')
             .select('*')
             .in('simulado_id', chunk)
             .eq('isdeleted', false);
-
-          if (qErr) {
-            console.error('❌ Pull questoes (chunk):', qErr);
-            houveErro = true;
-            continue;
-          }
+          if (qErr) { console.error('❌ Pull questoes (chunk):', qErr); houveErro = true; continue; }
           if (!qData) continue;
-
           for (const doc of qData) {
             const existing = await questoesCollection.findOne({ selector: { id: doc.id } }).exec();
-            if (!existing) {
-              await questoesCollection.insert(doc);
-              totalQuestoes++;
-            }
+            if (!existing) { await questoesCollection.insert(doc); }
           }
         }
-        if (totalQuestoes > 0) console.log(`✅ Pull questoes: ${totalQuestoes}`);
 
         const altCollection = database.collections.alternativas;
         const localQ = await questoesCollection.find({ selector: {} }).exec();
         const qIds = localQ.map(d => d.get('id'));
-
         if (qIds.length > 0) {
           const qIdChunks = chunkArray(qIds, 100);
-          let totalAlt = 0;
-
           for (const chunk of qIdChunks) {
             let freshClient;
-            try {
-              freshClient = await getSupabaseWithToken();
-            } catch (tokenErr) {
-              console.error('❌ Não foi possível obter token fresco para alternativas:', tokenErr);
-              houveErro = true;
-              continue;
-            }
-
+            try { freshClient = await getSupabaseWithToken(); }
+            catch (tokenErr) { console.error('❌ Token alternativas:', tokenErr); houveErro = true; continue; }
             const { data: aData, error: aErr } = await freshClient
               .from('alternativas')
               .select('*')
               .in('questao_id', chunk)
               .eq('isdeleted', false);
-
-            if (aErr) {
-              console.error('❌ Pull alternativas (chunk):', aErr);
-              houveErro = true;
-              continue;
-            }
+            if (aErr) { console.error('❌ Pull alternativas (chunk):', aErr); houveErro = true; continue; }
             if (!aData) continue;
-
             for (const doc of aData) {
               const existing = await altCollection.findOne({ selector: { id: doc.id } }).exec();
-              if (!existing) {
-                await altCollection.insert(doc);
-                totalAlt++;
-              }
+              if (!existing) { await altCollection.insert(doc); }
             }
           }
-          if (totalAlt > 0) console.log(`✅ Pull alternativas: ${totalAlt}`);
         }
       }
     }
 
-    // ============================================================
-    // STUDY_SESSIONS
-    // ============================================================
+    // study_sessions
     try {
       const decksCollection = database.collections.decks;
       const userDecks = await decksCollection.find({
@@ -1280,17 +1298,13 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       if (deckIds.length > 0) {
         const sessionsPullFrom = emptyCollections.has('study_sessions')
           ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
-
         const { data: sessionsData, error } = await supabaseClient
           .from('study_sessions')
           .select('*')
           .in('deckId', deckIds)
           .gte('updated_at', sessionsPullFrom);
-
-        if (error) {
-          console.error('❌ Pull study_sessions:', error);
-          houveErro = true;
-        } else if (sessionsData && sessionsData.length > 0) {
+        if (error) { console.error('❌ Pull study_sessions:', error); houveErro = true; }
+        else if (sessionsData && sessionsData.length > 0) {
           const collection = database.collections.study_sessions;
           for (const doc of sessionsData) {
             const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
@@ -1298,11 +1312,8 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
               if (doc.updated_at > (existing.get('updated_at') || '1970-01-01T00:00:00Z')) {
                 await existing.patch(doc);
               }
-            } else {
-              await collection.insert(doc);
-            }
+            } else { await collection.insert(doc); }
           }
-          console.log(`✅ Pull study_sessions: ${sessionsData.length}`);
         }
 
         const collection = database.collections.study_sessions;
@@ -1329,9 +1340,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       houveErro = true;
     }
 
-    // ============================================================
-    // ATUALIZA TIMESTAMP — só se não houve erro
-    // ============================================================
     if (houveErro) {
       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
     } else {

@@ -648,8 +648,8 @@ export default function SessoesPage() {
         </button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px] min-w-0">
+        <div className="space-y-6 min-w-0">
           {/* ===== CRONÔMETRO / POMODORO ===== */}
           <section className="card-lip p-6 [--lip:var(--accent)]">
             {/* Chave: Cronômetro livre | Pomodoro */}
