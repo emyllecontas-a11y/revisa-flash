@@ -1,6 +1,7 @@
 // src/components/SubtopicoCard.tsx
 // Card de subtópicos que aparece dentro do detalhe de um tópico.
 // Mostra a lista com status (editável inline) e botão "Gerenciar" (abre o modal).
+// Correção mobile: padding responsivo, header com flex-wrap, min-w-0.
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Settings, Loader2 } from "lucide-react";
@@ -102,9 +103,11 @@ export function SubtopicoCard({
 
   return (
     <>
-      <div className="rf-card p-6">
-        <header className="mb-4 flex items-center justify-between">
-          <div>
+      {/* MUDANÇA: p-4 no mobile, p-6 a partir de sm + min-w-0 */}
+      <div className="rf-card min-w-0 p-4 sm:p-6">
+        {/* MUDANÇA: flex-wrap + gap para o botão "Gerenciar" descer quando faltar espaço */}
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-xs font-medium uppercase tracking-widest text-foreground/40">
               Subtópicos
             </h3>
@@ -117,7 +120,7 @@ export function SubtopicoCard({
           <button
             type="button"
             onClick={() => setGerenciando(true)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/15 transition-colors"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/15 transition-colors"
           >
             <Settings className="h-3.5 w-3.5" /> Gerenciar
           </button>
@@ -146,7 +149,7 @@ export function SubtopicoCard({
                   {s.name}
                 </div>
                 {changingId === s.id && (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/40" />
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-foreground/40" />
                 )}
                 <select
                   value={s.status}

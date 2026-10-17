@@ -1,5 +1,6 @@
 // src/routes/sessoes.tsx
 // Etapa 7 + ajuste de eixos: gráficos mostram horas em vez de minutos.
+// Correção mobile: grid com coluna definida (grid-cols-1 / minmax(0,1fr)), min-w-0 e paddings responsivos.
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Play, Pause, Square, Plus, X, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
@@ -20,7 +21,8 @@ import type { StudyType, StudyRecord } from "@/contexts/StudyContext";
 import { DailyChallenge } from "@/components/DailyChallenge";
 import { PomodoroStats } from "@/components/PomodoroStats";
 
-const field = "w-full rounded-xl border border-input bg-muted px-3 py-2 text-sm";
+// MUDANÇA: adicionado min-w-0 (select/input não podem impor largura própria no mobile)
+const field = "w-full min-w-0 rounded-xl border border-input bg-muted px-3 py-2 text-sm";
 
 type LinkType = "Sem vínculo" | "Flashcards" | "Lista de questões" | "Simulado" | "PDF";
 
@@ -203,7 +205,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl rf-card p-4">
+    <div className="min-w-0 rounded-2xl rf-card p-4">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="font-display text-xl font-bold">{value}</p>
     </div>
@@ -648,10 +650,12 @@ export default function SessoesPage() {
         </button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px] min-w-0">
-        <div className="space-y-6 min-w-0">
+      {/* MUDANÇA: grid-cols-1 no mobile e minmax(0,1fr) no desktop (a coluna nunca passa da tela) */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-6">
           {/* ===== CRONÔMETRO / POMODORO ===== */}
-          <section className="card-lip p-6 [--lip:var(--accent)]">
+          {/* MUDANÇA: p-4 no mobile, p-6 a partir de sm */}
+          <section className="card-lip min-w-0 p-4 sm:p-6 [--lip:var(--accent)]">
             {/* Chave: Cronômetro livre | Pomodoro */}
             <div className="mx-auto mb-5 flex w-full max-w-sm gap-1 rounded-xl bg-muted p-1">
               <button
@@ -687,7 +691,8 @@ export default function SessoesPage() {
                   {isRunning && "Estudando agora"}
                   {isPaused && "Pausado"}
                 </p>
-                <p className="my-2 text-center font-display text-6xl font-bold tabular-nums">
+                {/* MUDANÇA: text-5xl no mobile, text-6xl a partir de sm */}
+                <p className="my-2 text-center font-display text-5xl font-bold tabular-nums sm:text-6xl">
                   {formatHMS(session.elapsedSeconds)}
                 </p>
               </>
@@ -695,7 +700,8 @@ export default function SessoesPage() {
               <PomodoroTimer />
             )}
 
-            <div className="mb-5 grid gap-3 sm:grid-cols-3">
+            {/* MUDANÇA: grid-cols-1 explícito no mobile */}
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <select
                 className={field}
                 value={session.discipline}
@@ -710,7 +716,7 @@ export default function SessoesPage() {
                 ))}
               </select>
 
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <select
                   className={field}
                   value={topicSelectValue}
@@ -743,7 +749,7 @@ export default function SessoesPage() {
                 )}
               </div>
 
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <select
                   className={field}
                   value={linkType}
@@ -812,8 +818,10 @@ export default function SessoesPage() {
               <PomodoroControls />
             )}
           </section>
-{/* ===== POMODORO HOJE ===== */}
+
+          {/* ===== POMODORO HOJE ===== */}
           <PomodoroStats />
+
           {/* ===== ESTATÍSTICAS REAIS ===== */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Hoje" value={formatMinutes(stats.todayMin)} />
@@ -823,7 +831,7 @@ export default function SessoesPage() {
           </div>
 
           {/* ===== GRÁFICO: TEMPO POR DIA ===== */}
-          <section className="rounded-3xl rf-card p-5">
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
             <SectionTitle>Tempo por dia (últimos 7 dias)</SectionTitle>
             {weekData.some((d) => d.minutes > 0) ? (
               <div className="h-48">
@@ -862,7 +870,7 @@ export default function SessoesPage() {
           </section>
 
           {/* ===== GRÁFICO: POR DISCIPLINA ===== */}
-          <section className="rounded-3xl rf-card p-5">
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
             <SectionTitle>Por disciplina</SectionTitle>
             {disciplineData.length > 0 ? (
               <div style={{ height: Math.max(160, disciplineData.length * 44) }}>
@@ -885,7 +893,7 @@ export default function SessoesPage() {
                     <YAxis
                       type="category"
                       dataKey="name"
-                      width={120}
+                      width={100}
                       stroke="var(--muted-foreground)"
                       fontSize={12}
                       tickLine={false}
@@ -912,9 +920,10 @@ export default function SessoesPage() {
         </div>
 
         {/* ===== COLUNA DIREITA: CALENDÁRIO + RECENTES ===== */}
-        <div className="space-y-6">
+        {/* MUDANÇA: min-w-0 na coluna direita */}
+        <div className="min-w-0 space-y-6">
           <DailyChallenge />
-          <section className="rounded-3xl rf-card p-5">
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
             <div className="mb-3 flex items-center justify-between">
               <button
                 onClick={goPrevMonth}
@@ -973,7 +982,7 @@ export default function SessoesPage() {
             )}
           </section>
 
-          <section className="rounded-3xl rf-card p-5">
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
             <SectionTitle>
               {selectedDay
                 ? `Sessões em ${selectedDay.split("-").reverse().join("/")}`
@@ -1112,7 +1121,7 @@ export default function SessoesPage() {
             <div>
               <p className="mb-1 text-xs font-medium text-foreground/70">Duração *</p>
               <div className="flex gap-2">
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <input
                     type="number"
                     min="0"
@@ -1124,7 +1133,7 @@ export default function SessoesPage() {
                   />
                   <p className="mt-1 text-[10px] text-foreground/50">Horas</p>
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <input
                     type="number"
                     min="0"

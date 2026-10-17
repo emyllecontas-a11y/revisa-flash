@@ -1,5 +1,6 @@
 // src/components/PomodoroCard.tsx
 // Pomodoro — Etapa 4: animação no anel e botão de pular ciclo.
+// Correção mobile: abas dos modos com flex-wrap e padding menor no celular.
 
 import { useEffect, useRef, useState } from "react";
 import { Play, Pause, Square, X, SkipForward } from "lucide-react";
@@ -88,15 +89,16 @@ export function PomodoroTimer() {
       : `Sessão de ${MODE_LABEL[pomo.mode]}`;
 
   return (
-    <div>
+    <div className="min-w-0">
       {/* Topo: música (esquerda) + ajustes (direita) */}
-      <div className="mb-2 flex justify-between">
+      <div className="mb-2 flex justify-between gap-2">
         <MusicPlayer />
         <PomodoroSettings />
       </div>
 
       {/* Abas dos 3 modos */}
-      <div className="mb-5 flex items-center justify-center gap-1 sm:gap-4">
+      {/* MUDANÇA: flex-wrap + px-2 no mobile (px-3 a partir de sm) para as abas não passarem da tela */}
+      <div className="mb-5 flex flex-wrap items-center justify-center gap-x-1 gap-y-1 sm:gap-x-4">
         {MODES.map((m) => {
           const active = pomo.mode === m;
           return (
@@ -105,7 +107,7 @@ export function PomodoroTimer() {
               type="button"
               onClick={() => pomo.selectMode(m)}
               disabled={!idle && !active}
-              className={`relative px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed ${
+              className={`relative px-2 py-2 text-sm transition-colors disabled:cursor-not-allowed sm:px-3 ${
                 active
                   ? "font-semibold text-foreground"
                   : "text-muted-foreground hover:text-foreground disabled:opacity-50"
@@ -127,7 +129,7 @@ export function PomodoroTimer() {
 
       {/* Anel de progresso (com animação de pulso ao concluir um foco) */}
       <div
-        className={`relative mx-auto aspect-square w-60 sm:w-72 transition-transform duration-500 ${
+        className={`relative mx-auto aspect-square w-60 max-w-full sm:w-72 transition-transform duration-500 ${
           pulse ? "scale-105" : "scale-100"
         }`}
       >
@@ -278,7 +280,7 @@ export function PomodoroControls() {
   };
 
   return (
-    <div>
+    <div className="min-w-0">
       {isFocus && (
         <div className="mx-auto mb-5 w-full max-w-xs">
           <p className="mb-1 text-center text-xs font-medium text-foreground/70">

@@ -1,4 +1,5 @@
 // src/routes/conteudo.tsx
+// Correção mobile: grids com coluna definida (grid-cols-1), min-w-0, flex-wrap e paddings responsivos.
 import { AppShell } from "@/components/app-shell";
 import {
   Plus, Search, ChevronRight, ChevronLeft, FileText, Upload,
@@ -892,7 +893,8 @@ export default function ConteudoPage() {
           </div>
 
           {disciplinasFiltradas.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            /* MUDANÇA: grid-cols-1 explícito no mobile */
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {disciplinasFiltradas.map((d, index) => {
                 const counts = getStatusCounts(d.id);
                 const progresso = counts.total > 0 ? Math.round((counts.concluidos / counts.total) * 100) : 0;
@@ -909,7 +911,7 @@ export default function ConteudoPage() {
                         abrirDisciplina(d.id);
                       }
                     }}
-                    className="card-lip group p-5 flex flex-col min-h-[180px] text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="card-lip group min-w-0 p-5 flex flex-col min-h-[180px] text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
                     style={{ '--lip': cor } as React.CSSProperties}
                   >
                     <header className="mb-4 flex items-start justify-between">
@@ -1045,17 +1047,17 @@ export default function ConteudoPage() {
           </button>
 
           <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
                 <Folder className="h-6 w-6" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">Disciplina</span>
-                <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{disciplina.name}</h1>
+                <h1 className="font-display text-2xl font-semibold tracking-tight break-words sm:text-3xl">{disciplina.name}</h1>
                 <p className="mt-1 max-w-xl text-sm text-foreground/55">Todos os tópicos desta disciplina.</p>
               </div>
             </div>
-            <div className="flex gap-2 self-start sm:self-auto">
+            <div className="flex flex-wrap gap-2 self-start sm:self-auto">
               <button
                 onClick={() => { setIsAddTopicModalOpen(true); setErrorMessage(""); }}
                 className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
@@ -1254,11 +1256,11 @@ export default function ConteudoPage() {
         </button>
 
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+          <div className="min-w-0">
             <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">{disciplina?.name || "Disciplina"}</span>
-            <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{topico.name}</h1>
+            <h1 className="font-display text-2xl font-semibold tracking-tight break-words sm:text-3xl">{topico.name}</h1>
           </div>
-          <div className="flex gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
             <select
               value={topico.status}
               onChange={(e) => handleUpdateTopicStatus(topico.id, e.target.value)}
@@ -1277,18 +1279,22 @@ export default function ConteudoPage() {
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-3 min-w-0">
-          <section className="space-y-6 lg:col-span-2">
+        {/* MUDANÇA: grid-cols-1 no mobile (antes só tinha lg:grid-cols-3) */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* MUDANÇA: min-w-0 na section */}
+          <section className="min-w-0 space-y-6 lg:col-span-2">
             {/* NOVO: Card de subtópicos */}
             <SubtopicoCard topicoId={topico.id} userId={userId} />
 
-            <div className="rf-card p-6">
-              <header className="mb-4 flex items-center justify-between">
-                <div>
+            {/* MUDANÇA: p-4 no mobile, p-6 a partir de sm */}
+            <div className="rf-card min-w-0 p-4 sm:p-6">
+              {/* MUDANÇA: flex-wrap + gap para o botão "Enviar arquivo" descer quando faltar espaço */}
+              <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
                   <h3 className="text-xs font-medium uppercase tracking-widest text-foreground/40">Materiais</h3>
                   <p className="mt-1 text-xs text-foreground/55">PDFs, imagens, planilhas, áudios deste tópico.</p>
                 </div>
-                <div>
+                <div className="shrink-0">
                   <input
                     type="file"
                     id={`file-upload-${topico.id}`}
@@ -1337,11 +1343,13 @@ export default function ConteudoPage() {
                     const isCached = isPdf && cachedFileIds.has(a.id);
                     const filePath = resolveStoragePath(a);
                     return (
-                      <li key={a.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/40 p-3">
-                        <div className={`grid h-9 w-9 place-items-center rounded-md ${cor}`}>
+                      /* MUDANÇA: flex-wrap — os botões caem para a linha de baixo quando não cabem */
+                      <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-background/40 p-3">
+                        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${cor}`}>
                           <Icon className="h-4 w-4" />
                         </div>
-                        <div className="min-w-0 flex-1">
+                        {/* MUDANÇA: basis-40 faz o nome ter uma largura mínima antes de quebrar a linha */}
+                        <div className="min-w-0 flex-1 basis-40">
                           <div className="flex items-center gap-1.5">
                             <div className="truncate text-sm font-medium">{a.nome}</div>
                             {isCached && (
@@ -1354,11 +1362,13 @@ export default function ConteudoPage() {
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-foreground/45">
+                          {/* MUDANÇA: truncate */}
+                          <div className="truncate text-[11px] text-foreground/45">
                             {a.tipo} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        {/* MUDANÇA: ml-auto para alinhar os botões à direita quando estiverem na linha de baixo */}
+                        <div className="ml-auto flex items-center gap-1">
                           {isPdf && (
                             <button
                               type="button"
@@ -1417,7 +1427,8 @@ export default function ConteudoPage() {
             </div>
           </section>
 
-          <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+          {/* MUDANÇA: min-w-0 no aside */}
+          <aside className="min-w-0 space-y-4 lg:sticky lg:top-20 lg:self-start">
             <div className="rf-card p-5">
               <header className="mb-3 text-xs font-medium uppercase tracking-widest text-foreground/40">Progresso</header>
               <div className="flex items-baseline gap-2">
@@ -1473,7 +1484,7 @@ export default function ConteudoPage() {
 
 function Mini({ l, v, icon, tone }: { l: string; v: React.ReactNode; icon?: React.ReactNode; tone?: "accent" }) {
   return (
-    <div className="rf-card p-4">
+    <div className="rf-card min-w-0 p-4">
       {icon && <div className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">{icon}</div>}
       <div className="text-[10px] font-medium uppercase tracking-widest text-foreground/40">{l}</div>
       <div className={["mt-1 font-display text-xl font-semibold tabular-nums", tone === "accent" ? "text-accent" : ""].join(" ")}>{v}</div>
