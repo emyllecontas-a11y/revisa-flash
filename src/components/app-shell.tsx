@@ -20,6 +20,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { useComunidadeBadge } from "@/hooks/useComunidadeBadge";
+import { NotificacoesBell } from "@/components/NotificacoesBell";
 
 function LoadingScreen() {
   return (
@@ -353,6 +354,7 @@ function AppShellInner({
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3">
+                <NotificacoesBell userId={user?.id} />
                 <button
                   onClick={() => performSync(true)}
                   disabled={isSyncing}
