@@ -33,8 +33,9 @@ import {
   ListChecks, Play, Loader2, Layers, Plus, X, CheckCircle2,
   RotateCcw, RefreshCcw, Trash2, Clock, History, Image as ImageIcon, TrendingUp, Pencil,
   Folder, FolderOpen, FolderPlus, ChevronRight, ArrowLeft, FolderInput,
-  Search, ChevronUp, ChevronDown, AlertCircle,
+  Search, ChevronUp, ChevronDown, AlertCircle, Share2,
 } from "lucide-react";
+import { CompartilharModal } from "@/components/compartilhar-modal";
 
 // ============================================================
 // CORES PASTEL ROTATIVAS (mesmas do Conteúdo)
@@ -107,6 +108,7 @@ export function ListasTab() {
   const [gerenciandoLista, setGerenciandoLista] = useState<Lista | null>(null);
   const [excluindo, setExcluindo] = useState<string | null>(null);
   const [listaParaMover, setListaParaMover] = useState<Lista | null>(null);
+  const [listaParaCompartilhar, setListaParaCompartilhar] = useState<Lista | null>(null);
 
   const [modalNovaPasta, setModalNovaPasta] = useState(false);
   const [modalRenomearPasta, setModalRenomearPasta] = useState<Pasta | null>(null);
@@ -526,6 +528,7 @@ export function ListasTab() {
             onGerenciar={setGerenciandoLista}
             onEditar={setEditandoLista}
             onMover={setListaParaMover}
+            onCompartilhar={setListaParaCompartilhar}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           />
@@ -581,6 +584,17 @@ export function ListasTab() {
             userId={user.id}
             onClose={() => setGerenciandoLista(null)}
             onListaAlterada={() => loadData()}
+          />
+        )}
+
+        {listaParaCompartilhar && user?.id && (
+          <CompartilharModal
+            open={true}
+            onClose={() => setListaParaCompartilhar(null)}
+            userId={user.id}
+            itemType="question_list"
+            itemId={listaParaCompartilhar.id}
+            itemName={listaParaCompartilhar.titulo}
           />
         )}
 
@@ -779,6 +793,7 @@ export function ListasTab() {
                 onGerenciar={setGerenciandoLista}
                 onEditar={setEditandoLista}
                 onMover={setListaParaMover}
+                onCompartilhar={setListaParaCompartilhar}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
               />
@@ -874,6 +889,17 @@ export function ListasTab() {
         />
       )}
 
+      {listaParaCompartilhar && user?.id && (
+        <CompartilharModal
+          open={true}
+          onClose={() => setListaParaCompartilhar(null)}
+          userId={user.id}
+          itemType="question_list"
+          itemId={listaParaCompartilhar.id}
+          itemName={listaParaCompartilhar.titulo}
+        />
+      )}
+
       {listaParaMover && user?.id && (
         <MoverListaModal
           lista={listaParaMover}
@@ -892,7 +918,7 @@ export function ListasTab() {
 // ============================================================
 function GridListas({
   listas, ultimosResultados, excluindo, onAbrir, onExcluir,
-  onHistorico, onGerenciar, onEditar, onMover, onDragStart, onDragEnd,
+  onHistorico, onGerenciar, onEditar, onMover, onCompartilhar, onDragStart, onDragEnd,
 }: {
   listas: Lista[];
   ultimosResultados: Record<string, ResultadoLista>;
@@ -903,6 +929,7 @@ function GridListas({
   onGerenciar: (l: Lista) => void;
   onEditar: (l: Lista) => void;
   onMover: (l: Lista) => void;
+  onCompartilhar: (l: Lista) => void;
   onDragStart: (e: React.DragEvent, listaId: string) => void;
   onDragEnd: () => void;
 }) {
@@ -1000,6 +1027,13 @@ function GridListas({
                       title="Editar lista"
                     >
                       <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onCompartilhar(l)}
+                      className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                      title="Compartilhar com amigas"
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => onMover(l)}

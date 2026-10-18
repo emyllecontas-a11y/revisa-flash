@@ -19,12 +19,13 @@ import { RevisarImportacaoPdfModal } from "@/components/RevisarImportacaoPdfModa
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
-  BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack
+  BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack, Share2
 } from "lucide-react";
 import type { Simulado } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { GerenciarQuestoesSimuladoModal } from "@/components/GerenciarQuestoesSimuladoModal";
+import { CompartilharModal } from "@/components/compartilhar-modal";
 
 export default function SimuladosPage() {
   const navigate = useNavigate();
@@ -59,6 +60,7 @@ export default function SimuladosPage() {
   const [historicoFilter, setHistoricoFilter] = useState('');
 
   const [gerenciandoSimulado, setGerenciandoSimulado] = useState<Simulado | null>(null);
+  const [simuladoParaCompartilhar, setSimuladoParaCompartilhar] = useState<Simulado | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -569,6 +571,13 @@ export default function SimuladosPage() {
                                 </button>
                               )}
                               <button
+                                onClick={() => setSimuladoParaCompartilhar(s)}
+                                className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                                title="Compartilhar com amigas"
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
                                 onClick={() => handleExcluirSimulado(s.id, s.titulo)}
                                 disabled={excluindo === s.id}
                                 className="grid h-8 w-8 place-items-center rounded-full text-foreground/30 hover:text-destructive transition-colors disabled:opacity-50"
@@ -1052,6 +1061,17 @@ export default function SimuladosPage() {
           userId={user.id}
           onClose={() => setGerenciandoSimulado(null)}
           onSimuladoAlterado={() => loadData()}
+        />
+      )}
+
+      {simuladoParaCompartilhar && user?.id && (
+        <CompartilharModal
+          open={true}
+          onClose={() => setSimuladoParaCompartilhar(null)}
+          userId={user.id}
+          itemType="simulado"
+          itemId={simuladoParaCompartilhar.id}
+          itemName={simuladoParaCompartilhar.titulo}
         />
       )}
     </AppShell>
