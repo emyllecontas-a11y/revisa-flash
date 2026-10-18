@@ -143,7 +143,7 @@ async function loadLinkItems(type: LinkType, userId: string): Promise<LinkItem[]
 
   if (type === "Simulado") {
     const docs = await db.simulados
-      .find({ selector: { isdeleted: { $ne: true } } })
+      .find({ selector: { created_by: userId, isdeleted: { $ne: true } } })
       .exec();
     return docs
       .map((d: any) => {
