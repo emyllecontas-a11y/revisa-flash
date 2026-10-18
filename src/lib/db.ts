@@ -1230,6 +1230,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const { data: simData, error: simErr } = await supabaseClient
         .from('simulados')
         .select('*')
+        .eq('created_by', userIdStr)
         .eq('isdeleted', false)
         .gte('updated_at', pullFrom);
       if (!simErr && simData) {
@@ -1248,7 +1249,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
 
       const questoesCollection = database.collections.questoes;
-      const localSimsAll = await simuladosCollection.find({ selector: {} }).exec();
+      const localSimsAll = await simuladosCollection.find({ selector: { created_by: userIdStr } }).exec();
       const simIds = localSimsAll.map(d => d.get('id'));
 
       if (simIds.length > 0) {
@@ -1344,7 +1345,14 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       console.error('❌ Erro na sincronização de study_sessions:', err);
       houveErro = true;
     }
-
+      // Conteúdo compartilhado por amigas (somente leitura, não afeta o lastSync)
+    try {
+      const { syncSharedContent } = await import('./sharedSync');
+      const okShared = await syncSharedContent(userIdStr);
+      if (!okShared) console.warn('⚠️ Sync de compartilhados incompleto (será retentado).');
+    } catch (sharedErr) {
+      console.error('❌ Erro no sync de compartilhados:', sharedErr);
+    }
     if (houveErro) {
       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
     } else {
