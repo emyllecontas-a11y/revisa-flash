@@ -81,7 +81,11 @@ export default function ListaPlayerPage() {
     titulo: string;
     questoes: QuestaoListaPlayer[];
     discipline_id: string | null;
+    user_id: string | null;
   } | null>(null);
+  // Lista compartilhada por amiga: somente leitura (sem enviar erros ao caderno)
+  const ehDona = !!lista && lista.user_id === user?.id;
+  const rotaVoltar = lista && !ehDona ? "/compartilhados" : "/simulados";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,6 +170,7 @@ export default function ListaPlayerPage() {
           titulo: result.data.titulo,
           questoes: result.data.questoes,
           discipline_id: result.data.discipline_id ?? null,
+          user_id: result.data.user_id ?? null,
         });
 
         const prog = await getProgressoLista(id, user.id);
@@ -562,7 +567,7 @@ export default function ListaPlayerPage() {
       cancelText: "Ficar",
       destructive: true,
     });
-    if (ok) navigate("/simulados");
+    if (ok) navigate(rotaVoltar);
   };
 
   // ============================================================
@@ -584,7 +589,7 @@ export default function ListaPlayerPage() {
         <div className="rf-card p-6 text-center">
           <p className="text-accent">{error || "Lista não encontrada"}</p>
           <button
-            onClick={() => navigate("/simulados")}
+            onClick={() => navigate(rotaVoltar)}
             className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar
@@ -606,7 +611,7 @@ export default function ListaPlayerPage() {
       <AppShell breadcrumb="Listas" title="Resultado da lista">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
-            onClick={() => navigate("/simulados")}
+            onClick={() => navigate(rotaVoltar)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar para listas
@@ -692,7 +697,7 @@ export default function ListaPlayerPage() {
               >
                 <RotateCcw className="h-3.5 w-3.5" /> Refazer lista
               </button>
-              {errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
+              {ehDona && errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
                 <button
                   onClick={() => setMostrarModalErros(true)}
                   className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
@@ -709,7 +714,7 @@ export default function ListaPlayerPage() {
           </div>
         </div>
 
-        {mostrarModalErros && errosParaEnviar && lista.discipline_id && (
+        {ehDona && mostrarModalErros && errosParaEnviar && lista.discipline_id && (
           <EnviarErrosModal
             listaId={lista.id}
             listaTitulo={lista.titulo}

@@ -26,6 +26,7 @@ import PdfPage from './routes/pdf.$fileId';
 // 🔥 NOVO — Sessões
 import Sessoes from './routes/sessoes';
 import Amigas from './routes/amigas';
+import Compartilhados from './routes/compartilhados';
 
 // Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
@@ -194,6 +195,14 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <Amigas />
+      </ClerkProtectedRoute>
+    ),
+  },
+  {
+    path: '/compartilhados',
+    element: (
+      <ClerkProtectedRoute>
+        <Compartilhados />
       </ClerkProtectedRoute>
     ),
   },

@@ -79,6 +79,9 @@ export default function SimuladoPlayerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState(false);
+  // Simulado compartilhado por amiga é somente leitura: só a dona pode excluir
+  const ehDona = !!simulado && simulado.created_by === user?.id;
+  const rotaVoltar = simulado && !ehDona ? "/compartilhados" : "/simulados";
 
   const [progresso, setProgresso] = useState<ProgressoPlayer>({
     respostas: {},
@@ -380,7 +383,7 @@ export default function SimuladoPlayerPage() {
       cancelText: "Ficar",
       destructive: true,
     });
-    if (ok) navigate("/simulados");
+    if (ok) navigate(rotaVoltar);
   };
 
   const handleExcluirSimulado = async () => {
@@ -399,7 +402,7 @@ export default function SimuladoPlayerPage() {
       const result = await excluirSimulado(id, user.id);
       if (result.success) {
         toast.success("Simulado excluído com sucesso!");
-        navigate("/simulados");
+        navigate(rotaVoltar);
       } else {
         toast.error("Erro ao excluir", { description: result.error });
       }
@@ -426,7 +429,7 @@ export default function SimuladoPlayerPage() {
         <div className="rf-card p-6 text-center">
           <p className="text-accent">{error || "Simulado não encontrado"}</p>
           <button
-            onClick={() => navigate("/simulados")}
+            onClick={() => navigate(rotaVoltar)}
             className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar para simulados
@@ -442,7 +445,7 @@ export default function SimuladoPlayerPage() {
         <div className="rf-card p-6 text-center">
           <p className="text-accent">Este simulado não possui questões.</p>
           <button
-            onClick={() => navigate("/simulados")}
+            onClick={() => navigate(rotaVoltar)}
             className="btn-sun mt-4 px-4 py-2 text-xs font-bold"
           >
             Voltar para simulados
@@ -488,19 +491,21 @@ export default function SimuladoPlayerPage() {
       <AppShell breadcrumb="Simulados" title="Resultado do simulado">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <button
-            onClick={() => navigate("/simulados")}
+            onClick={() => navigate(rotaVoltar)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar para simulados
           </button>
-          <button
-            onClick={handleExcluirSimulado}
-            disabled={excluindo}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
-          >
-            {excluindo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            Excluir simulado
-          </button>
+          {ehDona && (
+            <button
+              onClick={handleExcluirSimulado}
+              disabled={excluindo}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
+            >
+              {excluindo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Excluir simulado
+            </button>
+          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -696,15 +701,17 @@ export default function SimuladoPlayerPage() {
               <Grid3X3 className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Questões</span>
             </button>
-            <button
-              onClick={handleExcluirSimulado}
-              disabled={excluindo}
-              className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[10px] font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
-              title="Excluir simulado"
-            >
-              {excluindo ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-              <span className="hidden sm:inline">Excluir</span>
-            </button>
+            {ehDona && (
+              <button
+                onClick={handleExcluirSimulado}
+                disabled={excluindo}
+                className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[10px] font-medium text-destructive/80 hover:bg-destructive/20 transition-colors disabled:opacity-50"
+                title="Excluir simulado"
+              >
+                {excluindo ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                <span className="hidden sm:inline">Excluir</span>
+              </button>
+            )}
             <button
               onClick={() => setConfirmar(true)}
               className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"

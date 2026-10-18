@@ -142,7 +142,9 @@ export async function getListaCompleta(
 
         if (!listaDoc) {
           const { data: lista, error: lErr } = await withTimeout(
-            client.from('listas').select('*').eq('id', listaId).eq('user_id', userId).eq('isdeleted', false).maybeSingle(),
+            // Sem filtro por user_id: lista compartilhada por amiga também deve abrir.
+            // A segurança de quem pode ler é do banco (RLS).
+            client.from('listas').select('*').eq('id', listaId).eq('isdeleted', false).maybeSingle(),
             8000,
             'select listas'
           );

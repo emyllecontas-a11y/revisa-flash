@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Share2
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
@@ -13,7 +13,7 @@ import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
 import { OnboardingTour } from "@/components/OnboardingTour";
-import { syncWithSupabase, readLastSync, writeLastSync } from "@/lib/db";
+import { syncWithSupabase, readLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
 import { Toaster } from "@/components/ui/sonner";
@@ -49,7 +49,8 @@ const MAIS_ROTAS = [
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
   { to: "/simulados", label: "Simulados", icon: "file-text" },
-    { to: "/amigas", label: "Amigas", icon: "users" },
+  { to: "/amigas", label: "Amigas", icon: "users" },
+  { to: "/compartilhados", label: "Compartilhado", icon: "share" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
 ] as const;
 
@@ -65,6 +66,7 @@ const ICONS = {
   "file-text": FileText,
   settings: Settings,
   users: Users,
+  share: Share2,
 } as const;
 
 type RouteIcon = keyof typeof ICONS;
@@ -183,9 +185,13 @@ function AppShellInner({
       refreshFlashcards();
       refreshErrors();
       refreshStudy();
-      const now = new Date();
-      setLastSyncTime(now.toLocaleTimeString());
-      writeLastSync(userId, now.toISOString());
+      // O horário só é gravado pelo próprio syncWithSupabase quando NÃO houve erro.
+      // Aqui apenas mostramos o último sync bem-sucedido (antes, o app gravava "agora"
+      // mesmo com erro, o que podia fazer itens serem pulados depois).
+      const ultimo = readLastSync(userId);
+      if (ultimo && ultimo !== '1970-01-01T00:00:00Z') {
+        setLastSyncTime(new Date(ultimo).toLocaleTimeString());
+      }
       if (showFeedback) toast.success('Sincronização concluída');
     } catch (error) {
       console.error('❌ [AppShell] Erro na sincronização:', error);
@@ -200,6 +206,43 @@ function AppShellInner({
     const initialSync = setTimeout(() => { performSync(); }, 2000);
     return () => clearTimeout(initialSync);
   }, [isLoaded, flashcardsLoading]);
+
+  // Sincronização automática: ao voltar para a aba, ao reconectar e a cada 5 minutos.
+  // Assim o que a amiga compartilha (ou remove) aparece sem precisar recarregar a página.
+  const performSyncRef = useRef(performSync);
+  useEffect(() => { performSyncRef.current = performSync; }, [performSync]);
+  const lastAutoSyncRef = useRef(0);
+
+  useEffect(() => {
+    if (!isLoaded || !user?.id) return;
+    const INTERVALO_MIN_MS = 60_000;
+    const CADA_MS = 5 * 60_000;
+
+    const podeSincronizar = () =>
+      document.visibilityState === 'visible' &&
+      !(typeof navigator !== 'undefined' && navigator.onLine === false);
+
+    const aoVoltarParaAba = () => {
+      if (!podeSincronizar()) return;
+      if (Date.now() - lastAutoSyncRef.current < INTERVALO_MIN_MS) return;
+      lastAutoSyncRef.current = Date.now();
+      void performSyncRef.current();
+    };
+    const aoReconectar = () => {
+      if (!podeSincronizar()) return;
+      lastAutoSyncRef.current = Date.now();
+      void performSyncRef.current();
+    };
+
+    document.addEventListener('visibilitychange', aoVoltarParaAba);
+    window.addEventListener('online', aoReconectar);
+    const timer = setInterval(aoVoltarParaAba, CADA_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', aoVoltarParaAba);
+      window.removeEventListener('online', aoReconectar);
+      clearInterval(timer);
+    };
+  }, [isLoaded, user?.id]);
 
   const handleLogout = async () => {
     const ok = await confirmDialog({
