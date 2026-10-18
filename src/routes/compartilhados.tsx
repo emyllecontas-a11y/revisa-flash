@@ -9,8 +9,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ClipboardList, FileText, Folder, Loader2, RefreshCw, Share2,
+  ClipboardList, Copy, FileText, Folder, Loader2, RefreshCw, Share2,
 } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { copiarDisciplinaParaMinhaConta } from "@/services/copiaConteudoService";
 import { AppShell } from "@/components/app-shell";
 import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast";
@@ -215,7 +217,10 @@ async function carregarDados(eu: string): Promise<Dados> {
 export default function CompartilhadosPage() {
   const { userId } = useAppUser();
   const toast = useToast();
+  const confirmDialog = useConfirm();
 
+  const [copiandoKey, setCopiandoKey] = useState<string | null>(null);
+  const [progressoCopia, setProgressoCopia] = useState("");
   const [dados, setDados] = useState<Dados | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
@@ -290,6 +295,44 @@ export default function CompartilhadosPage() {
   const vazio =
     !!dados && dados.grupos.length === 0 && dados.listas.length === 0 && dados.simulados.length === 0;
 
+  // Copia a disciplina (com tópicos e PDFs) para a conta de quem está logada.
+  const handleCopiarDisciplina = async (g: GrupoDisciplina) => {
+    if (!userId || copiandoKey) return;
+    const topicosParaCopiar = [...g.topicos.values()].map((t) => ({
+      nome: t.nome,
+      arquivoIds: t.arquivos.map((a) => a.id),
+    }));
+    const totalArquivos = topicosParaCopiar.reduce((soma, t) => soma + t.arquivoIds.length, 0);
+
+    const ok = await confirmDialog({
+      title: "Copiar para a sua conta?",
+      description: `Você recebe uma cópia só sua de "${g.nome}", com ${topicosParaCopiar.length} tópico(s) e ${totalArquivos} PDF(s). Os PDFs são baixados e enviados de novo, o que pode demorar e gastar internet. A cópia continua existindo mesmo que a dona apague o original.`,
+      confirmText: "Copiar",
+      cancelText: "Cancelar",
+    });
+    if (!ok) return;
+
+    setCopiandoKey(g.key);
+    setProgressoCopia("Começando...");
+    try {
+      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
+      if (!res.success) {
+        toast.error(res.error || "Não consegui copiar agora.");
+      } else if (res.arquivosComFalha > 0) {
+        toast.error(
+          `Copiei a disciplina e ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} PDF(s) falharam. Veja em Conteúdo.`
+        );
+      } else {
+        toast.success(
+          `Copiado! Veja em Conteúdo: ${res.topicosCriados} tópico(s) e ${res.arquivosCopiados} PDF(s).`
+        );
+      }
+    } finally {
+      setCopiandoKey(null);
+      setProgressoCopia("");
+    }
+  };
+
   return (
     <AppShell breadcrumb="Compartilhado comigo" title="Compartilhado comigo">
       <div className="mx-auto max-w-2xl space-y-6">
@@ -345,10 +388,30 @@ export default function CompartilhadosPage() {
               const topicos = [...g.topicos.values()];
               return (
                 <div key={g.key} className="rf-card p-4">
-                  <div className="mb-2">
-                    <p className="text-sm font-semibold">{g.nome}</p>
-                    <p className="text-xs text-foreground/50">de {nomesDe(g.donos)}</p>
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">{g.nome}</p>
+                      <p className="text-xs text-foreground/50">de {nomesDe(g.donos)}</p>
+                    </div>
+                    {topicos.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopiarDisciplina(g)}
+                        disabled={copiandoKey !== null}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                      >
+                        {copiandoKey === g.key ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                        Copiar
+                      </button>
+                    )}
                   </div>
+                  {copiandoKey === g.key && progressoCopia && (
+                    <p className="mb-2 text-xs text-foreground/60">{progressoCopia}</p>
+                  )}
                   {topicos.length === 0 && (
                     <p className="text-xs text-foreground/50">Nenhum tópico ou arquivo ainda.</p>
                   )}
