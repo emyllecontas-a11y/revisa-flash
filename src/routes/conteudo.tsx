@@ -6,7 +6,7 @@ import {
   Layers, Pencil, Trash2, X, BookOpen, Sparkles, ImageIcon,
   FileSpreadsheet, Music, Calendar, Clock, CheckCircle2, Circle,
   Loader2, ChevronUp, ChevronDown, Folder, MoreHorizontal,
-  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check, Share2
+  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check, Share2, ArrowDownToLine
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -104,6 +104,8 @@ export default function ConteudoPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // ID do arquivo que está sendo baixado para o dispositivo (para mostrar spinner no botão)
+  const [baixandoId, setBaixandoId] = useState<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -394,6 +396,36 @@ export default function ConteudoPage() {
       }
     }
   }, [cachedFileIds, toast]);
+
+  /**
+   * Baixa o arquivo para o DISPOSITIVO (disco), com o nome original.
+   * Usa fetch + blob + <a download> — força o download mesmo quando o
+   * servidor responde com Content-Disposition: inline.
+   * Se o navegador bloquear (CORS), abre em nova aba como fallback.
+   */
+  const handleBaixarArquivo = useCallback(async (file: FileRecord) => {
+    setBaixandoId(file.id);
+    try {
+      const resp = await fetch(file.url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = file.nome || 'arquivo.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      toast.success(`"${file.nome}" baixado!`);
+    } catch (e: any) {
+      console.warn('[conteudo] Download direto falhou, abrindo em nova aba:', e);
+      window.open(file.url, '_blank');
+      toast.warning('Não foi possível baixar direto. Abrimos em nova aba — use "Salvar como" do navegador.');
+    } finally {
+      setBaixandoId(null);
+    }
+  }, [toast]);
 
   const handleRemoveFile = useCallback(async (fileId: string, filePath: string, topicId: string) => {
     const ok = await confirmDialog({
@@ -1457,6 +1489,22 @@ export default function ConteudoPage() {
                             >
                               <FileText className="h-3.5 w-3.5" />
                             </a>
+                          )}
+                          {isPdf && (
+                            <button
+                              type="button"
+                              onClick={() => handleBaixarArquivo(a)}
+                              disabled={baixandoId === a.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-[11px] font-semibold text-foreground/70 hover:bg-surface-2 transition-colors disabled:opacity-50"
+                              title="Baixar para o dispositivo"
+                            >
+                              {baixandoId === a.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ArrowDownToLine className="h-3.5 w-3.5" />
+                              )}
+                              Baixar
+                            </button>
                           )}
                           <button
                             type="button"

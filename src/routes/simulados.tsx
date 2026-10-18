@@ -1,6 +1,6 @@
 // src/routes/simulados.tsx
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { AppShell } from "@/components/app-shell";
 import {
@@ -34,7 +34,15 @@ export default function SimuladosPage() {
   const { user } = useAppUser();
   const { records: studyRecords } = useStudy();
 
-  const [mainTab, setMainTab] = useState<'simulados' | 'listas'>('simulados');
+    // A aba ativa é lida/escrita na URL (?tab=listas). Sem parâmetro → "simulados".
+  // Isso permite que "voltar" para uma lista reabra a aba correta.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mainTab: 'simulados' | 'listas' =
+    searchParams.get('tab') === 'listas' ? 'listas' : 'simulados';
+  const trocarTab = (nova: 'simulados' | 'listas') => {
+    if (nova === 'simulados') setSearchParams({}, { replace: true });
+    else setSearchParams({ tab: 'listas' }, { replace: true });
+  };
 
   const [simulados, setSimulados] = useState<Simulado[]>([]);
   const [loading, setLoading] = useState(true);
@@ -434,7 +442,7 @@ export default function SimuladosPage() {
     <AppShell breadcrumb="Simulados" title="Simulados">
       <div className="mb-6 flex gap-1 border-b border-border">
         <button
-          onClick={() => setMainTab('simulados')}
+          onClick={() => trocarTab('simulados')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
             mainTab === 'simulados'
               ? 'border-primary text-primary'
@@ -444,7 +452,7 @@ export default function SimuladosPage() {
           Simulados
         </button>
         <button
-          onClick={() => setMainTab('listas')}
+          onClick={() => trocarTab('listas')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
             mainTab === 'listas'
               ? 'border-primary text-primary'

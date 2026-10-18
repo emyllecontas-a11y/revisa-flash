@@ -1,9 +1,4 @@
 // src/routes/compartilhados.tsx
-//
-// Tela "Compartilhado comigo" (somente leitura).
-// Mostra o que AMIGOS compartilharam com você: disciplinas/tópicos/arquivos,
-// listas de questões e simulados. Lê só do banco local do aparelho
-// (o sharedSync é quem baixa e remove o que mudou).
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -14,6 +9,8 @@ import {
   copiarDisciplinaParaMinhaConta,
   copiarListaParaMinhaConta,
   copiarSimuladoParaMinhaConta,
+  copiarTopicosParaDisciplina,
+  type ProgressoCopia,
 } from "@/services/copiaConteudoService";
 import { AppShell } from "@/components/app-shell";
 import { useAppUser } from "@/contexts/UserContext";
@@ -21,6 +18,11 @@ import { useToast } from "@/hooks/useToast";
 import { getDb } from "@/lib/db";
 import { syncSharedContent } from "@/lib/sharedSync";
 import { findUsersByIds } from "@/services/clerkService";
+import {
+  EscolherDestinoCopiaModal,
+  type TipoDestino,
+  type ResultadoEscolha,
+} from "@/components/EscolherDestinoCopiaModal";
 
 type Row = Record<string, any>;
 
@@ -64,6 +66,12 @@ interface Dados {
   listas: ListaItem[];
   simulados: SimuladoItem[];
   nomes: Map<string, string>;
+}
+
+interface PendingCopy {
+  tipo: TipoDestino;
+  nomeItem: string;
+  executar: (destino: ResultadoEscolha) => Promise<void>;
 }
 
 const AVULSOS = "__avulsos__";
@@ -205,7 +213,7 @@ async function carregarDados(eu: string): Promise<Dados> {
 }
 
 // ============================================================
-// CONTEÚDO (sem AppShell) — usado pela aba "Compartilhado comigo"
+// CONTEÚDO
 // ============================================================
 export function CompartilhadosConteudo() {
   const { userId } = useAppUser();
@@ -213,7 +221,8 @@ export function CompartilhadosConteudo() {
   const confirmDialog = useConfirm();
 
   const [copiandoKey, setCopiandoKey] = useState<string | null>(null);
-  const [progressoCopia, setProgressoCopia] = useState("");
+  const [progressoCopia, setProgressoCopia] = useState<ProgressoCopia | null>(null);
+  const [pendingCopy, setPendingCopy] = useState<PendingCopy | null>(null);
 
   const [dados, setDados] = useState<Dados | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -282,13 +291,22 @@ export function CompartilhadosConteudo() {
 
   const vazio = !!dados && dados.grupos.length === 0 && dados.listas.length === 0 && dados.simulados.length === 0;
 
+  const iniciarCopiaComDestino = (
+    tipo: TipoDestino,
+    nomeItem: string,
+    executar: (destino: ResultadoEscolha) => Promise<void>
+  ) => {
+    setPendingCopy({ tipo, nomeItem, executar });
+  };
+
+  // -------- Copiar disciplina INTEIRA (sem escolha de destino; cria nova) --------
   const handleCopiarGrupo = async (g: GrupoDisciplina) => {
     if (!userId || copiandoKey) return;
     const topicosParaCopiar = [...g.topicos.values()].map((t) => ({
       nome: t.nome,
       arquivoIds: t.arquivos.map((a) => a.id),
     }));
-    const totalArquivos = topicosParaCopiar.reduce((soma, t) => soma + t.arquivoIds.length, 0);
+    const totalArquivos = topicosParaCopiar.reduce((s, t) => s + t.arquivoIds.length, 0);
 
     const ok = await confirmDialog({
       title: "Copiar tudo para a sua conta?",
@@ -299,90 +317,112 @@ export function CompartilhadosConteudo() {
     if (!ok) return;
 
     setCopiandoKey(g.key);
-    setProgressoCopia("Começando...");
+    setProgressoCopia({ current: 0, total: 1, label: "Começando..." });
     try {
-      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
+      const res = await copiarDisciplinaParaMinhaConta(
+        g.nome,
+        topicosParaCopiar,
+        userId,
+        (info) => setProgressoCopia(info)
+      );
       if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
       else if (res.arquivosComFalha > 0) toast.error(`Copiei ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
       else toast.success(`Copiado! ${res.topicosCriados} tópico(s) e ${res.arquivosCopiados} PDF(s).`);
+      await recarregar();
     } finally {
       setCopiandoKey(null);
-      setProgressoCopia("");
+      setTimeout(() => setProgressoCopia(null), 2000);
     }
   };
 
+  // -------- Copiar TÓPICO (com escolha de destino) --------
   const handleCopiarTopico = async (g: GrupoDisciplina, t: TopicoItem) => {
     if (!userId || copiandoKey) return;
-    const topicosParaCopiar = [{ nome: t.nome, arquivoIds: t.arquivos.map((a) => a.id) }];
-    const totalArquivos = t.arquivos.length;
-
-    const ok = await confirmDialog({
-      title: "Copiar este tópico?",
-      description: `Você recebe uma cópia só sua do tópico "${t.nome}" (com ${totalArquivos} PDF(s)) na disciplina "${g.nome}".`,
-      confirmText: "Copiar",
-      cancelText: "Cancelar",
+    iniciarCopiaComDestino("conteudo", t.nome, async (destino) => {
+      setCopiandoKey(`topic:${t.id}`);
+      setProgressoCopia({ current: 0, total: 1, label: "Começando..." });
+      try {
+        const res = await copiarTopicosParaDisciplina(
+          userId,
+          destino.disciplinaId,
+          destino.nomeNovaDisciplina || g.nome,
+          [{
+            nomeOriginal: t.nome,
+            arquivoIds: t.arquivos.map((a) => a.id),
+            topicoDestinoId: destino.topicoId ?? null,
+            nomeNovoTopico: destino.nomeNovoTopico,
+          }],
+          (info) => setProgressoCopia(info)
+        );
+        if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
+        else if (res.arquivosComFalha > 0) toast.error(`Copiei ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
+        else toast.success(`Tópico copiado com ${res.arquivosCopiados} PDF(s)!`);
+        await recarregar();
+      } finally {
+        setCopiandoKey(null);
+        setTimeout(() => setProgressoCopia(null), 2000);
+      }
     });
-    if (!ok) return;
-
-    setCopiandoKey(`topic:${t.id}`);
-    setProgressoCopia("Começando...");
-    try {
-      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
-      if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
-      else if (res.arquivosComFalha > 0) toast.error(`Copiei ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
-      else toast.success(`Tópico copiado com ${res.arquivosCopiados} PDF(s)!`);
-    } finally {
-      setCopiandoKey(null);
-      setProgressoCopia("");
-    }
   };
 
+  // -------- Copiar ARQUIVO (com escolha de destino) --------
   const handleCopiarArquivo = async (g: GrupoDisciplina, t: TopicoItem, a: ArquivoItem) => {
     if (!userId || copiandoKey) return;
-    const topicosParaCopiar = [{ nome: t.nome, arquivoIds: [a.id] }];
-
-    const ok = await confirmDialog({
-      title: "Copiar este PDF?",
-      description: `Você recebe uma cópia só sua do arquivo "${a.nome}" na disciplina "${g.nome}".`,
-      confirmText: "Copiar",
-      cancelText: "Cancelar",
+    iniciarCopiaComDestino("conteudo", a.nome, async (destino) => {
+      setCopiandoKey(`file:${a.id}`);
+      setProgressoCopia({ current: 0, total: 1, label: "Baixando PDF..." });
+      try {
+        const res = await copiarTopicosParaDisciplina(
+          userId,
+          destino.disciplinaId,
+          destino.nomeNovaDisciplina || g.nome,
+          [{
+            nomeOriginal: t.nome,
+            arquivoIds: [a.id],
+            topicoDestinoId: destino.topicoId ?? null,
+            nomeNovoTopico: destino.nomeNovoTopico,
+          }],
+          (info) => setProgressoCopia(info)
+        );
+        if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
+        else if (res.arquivosComFalha > 0) toast.error("O PDF não pôde ser copiado.");
+        else toast.success("PDF copiado!");
+        await recarregar();
+      } finally {
+        setCopiandoKey(null);
+        setTimeout(() => setProgressoCopia(null), 2000);
+      }
     });
-    if (!ok) return;
-
-    setCopiandoKey(`file:${a.id}`);
-    setProgressoCopia("Baixando PDF...");
-    try {
-      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
-      if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
-      else toast.success("PDF copiado!");
-    } finally {
-      setCopiandoKey(null);
-      setProgressoCopia("");
-    }
   };
 
+  // -------- Copiar LISTA (com escolha de destino) --------
   const handleCopiarLista = async (l: ListaItem) => {
     if (!userId || copiandoKey) return;
-    const ok = await confirmDialog({
-      title: "Copiar lista para a sua conta?",
-      description: `Você recebe uma cópia só sua de "${l.titulo}" com ${l.total} questão(ões). O histórico de respostas do dono não é copiado.`,
-      confirmText: "Copiar",
-      cancelText: "Cancelar",
+    iniciarCopiaComDestino("lista", l.titulo, async (destino) => {
+      setCopiandoKey(`lista:${l.id}`);
+      setProgressoCopia({ current: 0, total: 1, label: "Começando..." });
+      try {
+        const res = await copiarListaParaMinhaConta(
+          l.id,
+          userId,
+          (info) => setProgressoCopia(info),
+          {
+            disciplinaId: destino.disciplinaId,
+            nomeNovaDisciplina: destino.nomeNovaDisciplina,
+            folderId: destino.folderId ?? null,
+          }
+        );
+        if (res.success) toast.success(`Lista copiada com ${res.questoesCopiadas} questões!`);
+        else toast.error(res.error || "Erro ao copiar lista.");
+        await recarregar();
+      } finally {
+        setCopiandoKey(null);
+        setTimeout(() => setProgressoCopia(null), 2000);
+      }
     });
-    if (!ok) return;
-
-    setCopiandoKey(`lista:${l.id}`);
-    setProgressoCopia("Começando...");
-    try {
-      const res = await copiarListaParaMinhaConta(l.id, userId, setProgressoCopia);
-      if (res.success) toast.success(`Lista copiada com ${res.questoesCopiadas} questões!`);
-      else toast.error(res.error || "Erro ao copiar lista.");
-    } finally {
-      setCopiandoKey(null);
-      setProgressoCopia("");
-    }
   };
 
+  // -------- Copiar SIMULADO (sem escolha de destino) --------
   const handleCopiarSimulado = async (s: SimuladoItem) => {
     if (!userId || copiandoKey) return;
     const ok = await confirmDialog({
@@ -394,16 +434,25 @@ export function CompartilhadosConteudo() {
     if (!ok) return;
 
     setCopiandoKey(`simulado:${s.id}`);
-    setProgressoCopia("Começando...");
+    setProgressoCopia({ current: 0, total: 1, label: "Começando..." });
     try {
-      const res = await copiarSimuladoParaMinhaConta(s.id, userId, setProgressoCopia);
+      const res = await copiarSimuladoParaMinhaConta(
+        s.id,
+        userId,
+        (info) => setProgressoCopia(info)
+      );
       if (res.success) toast.success(`Simulado copiado com ${res.questoesCopiadas} questões!`);
       else toast.error(res.error || "Erro ao copiar simulado.");
+      await recarregar();
     } finally {
       setCopiandoKey(null);
-      setProgressoCopia("");
+      setTimeout(() => setProgressoCopia(null), 2000);
     }
   };
+
+  const pctProgresso = progressoCopia && progressoCopia.total > 0
+    ? Math.min(100, Math.round((progressoCopia.current / progressoCopia.total) * 100))
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -423,10 +472,26 @@ export function CompartilhadosConteudo() {
         </button>
       </div>
 
-      {copiandoKey && progressoCopia && (
-        <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm text-primary flex items-center gap-3">
-          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-          <span>{progressoCopia}</span>
+      {progressoCopia && (
+        <div className="rounded-xl border border-primary/30 bg-primary/10 p-4">
+          <div className="flex items-center justify-between mb-2 gap-2 text-sm text-primary">
+            <div className="flex min-w-0 items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              <span className="truncate">{progressoCopia.label}</span>
+            </div>
+            <span className="text-xs font-semibold tabular-nums shrink-0">{pctProgresso}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-primary/20">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${pctProgresso}%` }}
+            />
+          </div>
+          {progressoCopia.total > 0 && (
+            <div className="mt-1 text-[10px] text-primary/70 text-right tabular-nums">
+              {progressoCopia.current} de {progressoCopia.total}
+            </div>
+          )}
         </div>
       )}
 
@@ -581,11 +646,25 @@ export function CompartilhadosConteudo() {
           </ul>
         </section>
       )}
+
+      {pendingCopy && userId && (
+        <EscolherDestinoCopiaModal
+          tipo={pendingCopy.tipo}
+          nomeItem={pendingCopy.nomeItem}
+          userId={userId}
+          onConfirm={async (destino) => {
+            const pending = pendingCopy;
+            setPendingCopy(null);
+            await pending.executar(destino);
+          }}
+          onCancel={() => setPendingCopy(null)}
+        />
+      )}
     </div>
   );
 }
 
-// Wrapper de compatibilidade (o router não usa mais este default)
+// Wrapper de compatibilidade
 export default function CompartilhadosPage() {
   return (
     <AppShell breadcrumb="Compartilhado comigo" title="Compartilhado comigo">

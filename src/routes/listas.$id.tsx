@@ -87,7 +87,11 @@ export default function ListaPlayerPage() {
   } | null>(null);
   // Lista compartilhada por amiga: somente leitura (sem enviar erros ao caderno)
   const ehDona = !!lista && lista.user_id === user?.id;
-  const rotaVoltar = lista && !ehDona ? "/compartilhados" : "/simulados";
+  // Lista própria → volta para a aba "Listas" (?tab=listas).
+  // Lista de amigo → volta direto para a sub-aba "Compartilhado comigo".
+  const rotaVoltar = lista && !ehDona
+    ? "/comunidade?tab=compartilhado"
+    : "/simulados?tab=listas";
   const [mostrarCopiar, setMostrarCopiar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

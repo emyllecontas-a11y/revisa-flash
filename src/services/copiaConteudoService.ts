@@ -11,6 +11,13 @@ export interface TopicoParaCopiar {
   arquivoIds: string[];
 }
 
+export interface ProgressoCopia {
+  current: number;
+  total: number;
+  label: string;
+}
+export type OnProgresso = (info: ProgressoCopia) => void;
+
 export interface ResultadoCopiaDisciplina {
   success: boolean;
   disciplinaId?: string;
@@ -32,6 +39,21 @@ export interface ResultadoCopiaSimulado {
   simuladoId?: string;
   questoesCopiadas: number;
   error?: string;
+}
+
+export interface TopicoDestino {
+  nomeOriginal: string;
+  arquivoIds: string[];
+  /** Se informado, copia arquivos para esse tópico existente. Senão, cria um novo com nomeNovoTopico. */
+  topicoDestinoId: string | null;
+  nomeNovoTopico?: string;
+}
+
+export interface DestinoLista {
+  /** null = criar nova disciplina (usa nomeNovaDisciplina) */
+  disciplinaId: string | null;
+  nomeNovaDisciplina?: string;
+  folderId?: string | null;
 }
 
 async function salvarNaNuvem(tabela: string, registro: Record<string, any>): Promise<void> {
@@ -98,23 +120,36 @@ async function copiarArquivo(
 }
 
 // ============================================================
-// 1. COPIAR DISCIPLINA
+// FUNÇÃO PRINCIPAL — copia tópicos (com arquivos) para um destino
 // ============================================================
-export async function copiarDisciplinaParaMinhaConta(
-  nomeDisciplina: string,
-  topicos: TopicoParaCopiar[],
+export async function copiarTopicosParaDisciplina(
   userId: string,
-  onProgresso?: (texto: string) => void
+  destinoDisciplinaId: string | null,
+  nomeNovaDisciplina: string,
+  topicos: TopicoDestino[],
+  onProgresso?: OnProgresso
 ): Promise<ResultadoCopiaDisciplina> {
   const vazio = { topicosCriados: 0, arquivosCopiados: 0, arquivosComFalha: 0 };
 
   if (!userId) return { success: false, ...vazio, error: 'Usuária não autenticada.' };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    return { success: false, ...vazio, error: 'Você está offline. Copiar precisa de conexão com a internet.' };
+    return { success: false, ...vazio, error: 'Você está offline. Copiar precisa de conexão.' };
   }
   if (!topicos.length) {
     return { success: false, ...vazio, error: 'Não há nada para copiar aqui.' };
   }
+
+  const totalArquivos = topicos.reduce((s, t) => s + t.arquivoIds.length, 0);
+  const vaiCriarDisciplina = !destinoDisciplinaId;
+  const topicosNovosPrevistos = topicos.filter((t) => !t.topicoDestinoId).length;
+  const totalPassos =
+    (vaiCriarDisciplina ? 1 : 0) + topicosNovosPrevistos + totalArquivos;
+  let passosFeitos = 0;
+
+  const reportar = (label: string) => {
+    onProgresso?.({ current: passosFeitos, total: Math.max(totalPassos, 1), label });
+  };
+  reportar('Começando...');
 
   let topicosCriados = 0;
   let arquivosCopiados = 0;
@@ -123,62 +158,117 @@ export async function copiarDisciplinaParaMinhaConta(
   try {
     const db: any = await getDb();
     const agora = new Date().toISOString();
-    const nome = (nomeDisciplina || 'Disciplina').trim();
 
-    const disciplinaId = uid();
-    const novaDisciplina = {
-      id: disciplinaId,
-      name: nome,
-      user_id: userId,
-      createdAt: agora,
-      updated_at: agora,
-      isDeleted: false,
-    };
-    await db.disciplines.insert(novaDisciplina);
-    await salvarNaNuvem('disciplines', novaDisciplina);
+    // 1) Disciplina de destino
+    let disciplinaId = destinoDisciplinaId;
+    let nomeDisciplinaFinal = nomeNovaDisciplina;
 
-    for (let i = 0; i < topicos.length; i++) {
-      const t = topicos[i];
-      onProgresso?.(`Tópico ${i + 1} de ${topicos.length}: ${t.nome}`);
-
-      const topicoId = uid();
-      const novoTopico = {
-        id: topicoId,
-        discipline_id: disciplinaId,
-        name: (t.nome || 'Tópico').trim(),
-        status: STATUS_TOPICO.NAO_ESTUDADO,
+    if (!disciplinaId) {
+      const nome = (nomeNovaDisciplina || 'Disciplina').trim();
+      disciplinaId = uid();
+      const novaDisciplina = {
+        id: disciplinaId,
+        name: nome,
+        user_id: userId,
         createdAt: agora,
         updated_at: agora,
-        user_id: userId,
         isDeleted: false,
-        order: i,
       };
-      await db.topics.insert(novoTopico);
-      await salvarNaNuvem('topics', novoTopico);
-      topicosCriados++;
+      reportar(`Criando disciplina "${nome}"...`);
+      await db.disciplines.insert(novaDisciplina);
+      await salvarNaNuvem('disciplines', novaDisciplina);
+      nomeDisciplinaFinal = nome;
+      passosFeitos++;
+    } else {
+      try {
+        const discDoc = await db.disciplines.findOne({ selector: { id: disciplinaId } }).exec();
+        if (discDoc) nomeDisciplinaFinal = discDoc.get('name') || nomeDisciplinaFinal;
+      } catch { /* segue com o nome padrão */ }
+    }
+
+    // 2) Descobre o próximo "order" disponível na disciplina
+    let proximaOrdem = 0;
+    try {
+      const existentes = await db.topics.find({
+        selector: { discipline_id: disciplinaId, isDeleted: { $ne: true } },
+      }).exec();
+      const ordens = existentes.map((d: any) => d.get('order') || 0);
+      proximaOrdem = ordens.length > 0 ? Math.max(...ordens) + 1 : 0;
+    } catch { /* segue com 0 */ }
+
+    // 3) Tópicos + arquivos
+    for (let i = 0; i < topicos.length; i++) {
+      const t = topicos[i];
+      let topicoId = t.topicoDestinoId;
+
+      if (!topicoId) {
+        topicoId = uid();
+        const nomeTopico = (t.nomeNovoTopico || t.nomeOriginal || 'Tópico').trim();
+        const novoTopico = {
+          id: topicoId,
+          discipline_id: disciplinaId,
+          name: nomeTopico,
+          status: STATUS_TOPICO.NAO_ESTUDADO,
+          createdAt: agora,
+          updated_at: agora,
+          user_id: userId,
+          isDeleted: false,
+          order: proximaOrdem++,
+        };
+        reportar(`Criando tópico "${nomeTopico}"...`);
+        await db.topics.insert(novoTopico);
+        await salvarNaNuvem('topics', novoTopico);
+        topicosCriados++;
+        passosFeitos++;
+      }
 
       for (let j = 0; j < t.arquivoIds.length; j++) {
-        onProgresso?.(`Copiando PDF ${j + 1} de ${t.arquivoIds.length} (${t.nome})`);
-        const ok = await copiarArquivo(t.arquivoIds[j], topicoId, nome, userId);
+        reportar(
+          `Copiando PDF ${j + 1} de ${t.arquivoIds.length} (${t.nomeOriginal})...`
+        );
+        const ok = await copiarArquivo(t.arquivoIds[j], topicoId, nomeDisciplinaFinal, userId);
         if (ok) arquivosCopiados++;
         else arquivosComFalha++;
+        passosFeitos++;
       }
     }
 
+    reportar('Concluído!');
     return { success: true, disciplinaId, topicosCriados, arquivosCopiados, arquivosComFalha };
   } catch (e: any) {
-    console.error('❌ [copiaConteudo] Erro ao copiar disciplina:', e);
+    console.error('❌ [copiaConteudo] Erro ao copiar conteúdo:', e);
     return { success: false, topicosCriados, arquivosCopiados, arquivosComFalha, error: e?.message || 'Erro ao copiar.' };
   }
 }
 
+// Wrapper de compatibilidade — copia disciplina inteira (criando nova)
+export async function copiarDisciplinaParaMinhaConta(
+  nomeDisciplina: string,
+  topicos: TopicoParaCopiar[],
+  userId: string,
+  onProgresso?: OnProgresso
+): Promise<ResultadoCopiaDisciplina> {
+  return copiarTopicosParaDisciplina(
+    userId,
+    null,
+    nomeDisciplina,
+    topicos.map((t) => ({
+      nomeOriginal: t.nome,
+      arquivoIds: t.arquivoIds,
+      topicoDestinoId: null,
+    })),
+    onProgresso
+  );
+}
+
 // ============================================================
-// 2. COPIAR LISTA DE QUESTÕES (CORRIGIDO)
+// COPIAR LISTA — aceita destino (disciplina + pasta)
 // ============================================================
 export async function copiarListaParaMinhaConta(
   listaId: string,
   userId: string,
-  onProgresso?: (texto: string) => void
+  onProgresso?: OnProgresso,
+  destino?: DestinoLista
 ): Promise<ResultadoCopiaLista> {
   if (!userId) return { success: false, questoesCopiadas: 0, error: 'Usuária não autenticada.' };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -189,24 +279,21 @@ export async function copiarListaParaMinhaConta(
     const db: any = await getDb();
     const agora = new Date().toISOString();
 
-    // 1. Pega a lista original
     const listaDoc = await db.listas.findOne({ selector: { id: listaId } }).exec();
     if (!listaDoc) return { success: false, questoesCopiadas: 0, error: 'Lista não encontrada.' };
     const lista = listaDoc.toJSON();
 
-    // 2. Encontra ou cria a disciplina "Listas Importadas" para a usuária
-    let disciplinaImportadaId = "";
-    const discDoc = await db.disciplines.findOne({ 
-      selector: { user_id: userId, name: 'Listas Importadas' } 
-    }).exec();
+    onProgresso?.({ current: 0, total: 1, label: 'Preparando...' });
 
-    if (discDoc) {
-      disciplinaImportadaId = discDoc.id;
-    } else {
-      disciplinaImportadaId = uid();
+    // Disciplina de destino
+    let disciplinaDestinoId: string;
+    if (destino?.disciplinaId) {
+      disciplinaDestinoId = destino.disciplinaId;
+    } else if (destino?.nomeNovaDisciplina) {
+      disciplinaDestinoId = uid();
       const novaDisc = {
-        id: disciplinaImportadaId,
-        name: 'Listas Importadas',
+        id: disciplinaDestinoId,
+        name: destino.nomeNovaDisciplina,
         user_id: userId,
         createdAt: agora,
         updated_at: agora,
@@ -214,16 +301,35 @@ export async function copiarListaParaMinhaConta(
       };
       await db.disciplines.insert(novaDisc);
       await salvarNaNuvem('disciplines', novaDisc);
+    } else {
+      const discDoc = await db.disciplines.findOne({
+        selector: { user_id: userId, name: 'Listas Importadas' },
+      }).exec();
+      if (discDoc) {
+        disciplinaDestinoId = discDoc.id;
+      } else {
+        disciplinaDestinoId = uid();
+        const novaDisc = {
+          id: disciplinaDestinoId,
+          name: 'Listas Importadas',
+          user_id: userId,
+          createdAt: agora,
+          updated_at: agora,
+          isDeleted: false,
+        };
+        await db.disciplines.insert(novaDisc);
+        await salvarNaNuvem('disciplines', novaDisc);
+      }
     }
 
-    // 3. Cria a nova lista vinculada à disciplina "Listas Importadas"
+    // Cria a nova lista
     const novaListaId = uid();
     const novaLista = {
       ...lista,
       id: novaListaId,
       user_id: userId,
-      discipline_id: disciplinaImportadaId, // <-- AQUI ESTÁ A CORREÇÃO
-      folder_id: null, // Remove o vínculo com a pasta da dona
+      discipline_id: disciplinaDestinoId,
+      folder_id: destino?.folderId ?? null,
       titulo: `${lista.titulo} (Cópia)`,
       created_at: agora,
       updated_at: agora,
@@ -232,31 +338,34 @@ export async function copiarListaParaMinhaConta(
     await db.listas.insert(novaLista);
     await salvarNaNuvem('listas', novaLista);
 
-    // 4. Pega e copia as questões
+    // Copia questões
     const vinculos = await db.listas_questoes.find({ selector: { lista_id: listaId } }).exec();
+    const totalQuestoes = vinculos.length;
     let copiadas = 0;
 
     for (let i = 0; i < vinculos.length; i++) {
       const v = vinculos[i].toJSON();
-      onProgresso?.(`Copiando questão ${i + 1} de ${vinculos.length}`);
+      onProgresso?.({
+        current: i,
+        total: Math.max(totalQuestoes, 1),
+        label: `Copiando questão ${i + 1} de ${totalQuestoes}...`,
+      });
 
       const qDoc = await db.questoes_lista.findOne({ selector: { id: v.questao_id } }).exec();
       if (!qDoc) continue;
       const q = qDoc.toJSON();
 
-      // Copia a imagem, se houver
       let novaImagemUrl = q.imagem_url;
       if (q.imagem_url) {
         novaImagemUrl = await copiarImagemQuestao(q.imagem_url, userId);
       }
 
-      // Cria a nova questão
       const novaQuestaoId = uid();
       const novaQuestao = {
         ...q,
         id: novaQuestaoId,
         user_id: userId,
-        discipline_id: disciplinaImportadaId, // <-- AQUI ESTÁ A CORREÇÃO
+        discipline_id: disciplinaDestinoId,
         imagem_url: novaImagemUrl,
         created_at: agora,
         updated_at: agora,
@@ -264,7 +373,6 @@ export async function copiarListaParaMinhaConta(
       await db.questoes_lista.insert(novaQuestao);
       await salvarNaNuvem('questoes_lista', novaQuestao);
 
-      // Cria o novo vínculo
       const novoVinculo = {
         id: uid(),
         lista_id: novaListaId,
@@ -277,6 +385,11 @@ export async function copiarListaParaMinhaConta(
       copiadas++;
     }
 
+    onProgresso?.({
+      current: Math.max(totalQuestoes, 1),
+      total: Math.max(totalQuestoes, 1),
+      label: 'Concluído!',
+    });
     return { success: true, listaId: novaListaId, questoesCopiadas: copiadas };
   } catch (e: any) {
     console.error('❌ [copiaConteudo] Erro ao copiar lista:', e);
@@ -285,12 +398,12 @@ export async function copiarListaParaMinhaConta(
 }
 
 // ============================================================
-// 3. COPIAR SIMULADO
+// COPIAR SIMULADO — só mudou tipo de progresso
 // ============================================================
 export async function copiarSimuladoParaMinhaConta(
   simuladoId: string,
   userId: string,
-  onProgresso?: (texto: string) => void
+  onProgresso?: OnProgresso
 ): Promise<ResultadoCopiaSimulado> {
   if (!userId) return { success: false, questoesCopiadas: 0, error: 'Usuária não autenticada.' };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -304,6 +417,8 @@ export async function copiarSimuladoParaMinhaConta(
     const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
     if (!simDoc) return { success: false, questoesCopiadas: 0, error: 'Simulado não encontrado.' };
     const simulado = simDoc.toJSON();
+
+    onProgresso?.({ current: 0, total: 1, label: 'Preparando...' });
 
     const novoSimuladoId = uid();
     const novoSimulado = {
@@ -319,11 +434,16 @@ export async function copiarSimuladoParaMinhaConta(
     await salvarNaNuvem('simulados', novoSimulado);
 
     const qDocs = await db.questoes.find({ selector: { simulado_id: simuladoId, isdeleted: false } }).exec();
+    const total = qDocs.length;
     let copiadas = 0;
 
     for (let i = 0; i < qDocs.length; i++) {
       const q = qDocs[i].toJSON();
-      onProgresso?.(`Copiando questão ${i + 1} de ${qDocs.length}`);
+      onProgresso?.({
+        current: i,
+        total: Math.max(total, 1),
+        label: `Copiando questão ${i + 1} de ${total}...`,
+      });
 
       let novaImagemUrl = q.imagem_url;
       if (q.imagem_url) {
@@ -358,6 +478,7 @@ export async function copiarSimuladoParaMinhaConta(
       copiadas++;
     }
 
+    onProgresso?.({ current: Math.max(total, 1), total: Math.max(total, 1), label: 'Concluído!' });
     return { success: true, simuladoId: novoSimuladoId, questoesCopiadas: copiadas };
   } catch (e: any) {
     console.error('❌ [copiaConteudo] Erro ao copiar simulado:', e);
