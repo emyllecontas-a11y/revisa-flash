@@ -92,7 +92,7 @@ export async function uploadFile(
 }
 
 /**
- * Lista os arquivos de um tópico.
+ * Lista os arquivos de um tópico (somente os da própria usuária).
  */
 export async function listFilesByTopic(topicId: string, userId: string): Promise<FileRecord[]> {
   try {
@@ -118,15 +118,20 @@ export async function listFilesByTopic(topicId: string, userId: string): Promise
 
 /**
  * Busca um arquivo específico pelo ID.
+ *
+ * COMPARTILHAMENTO: não filtramos mais por user_id aqui. Quem decide o que
+ * a usuária pode ler é a RLS do banco (arquivo próprio OU compartilhado com
+ * ela, direto ou herdado do tópico/disciplina). Se ela não tiver acesso, o
+ * servidor devolve vazio e esta função devolve null.
+ * O parâmetro userId continua existindo só para não quebrar quem já chama.
  */
-export async function getFileById(fileId: string, userId: string): Promise<FileRecord | null> {
+export async function getFileById(fileId: string, _userId?: string): Promise<FileRecord | null> {
   try {
     const supabase = await getSupabaseWithToken();
     const { data, error } = await supabase
       .from('files')
       .select('*')
       .eq('id', fileId)
-      .eq('user_id', userId)
       .maybeSingle();
 
     if (error) {

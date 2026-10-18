@@ -6,7 +6,7 @@ import {
   Layers, Pencil, Trash2, X, BookOpen, Sparkles, ImageIcon,
   FileSpreadsheet, Music, Calendar, Clock, CheckCircle2, Circle,
   Loader2, ChevronUp, ChevronDown, Folder, MoreHorizontal,
-  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check
+  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check, Share2
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -19,6 +19,8 @@ import { deletePdfBlob, ensureCached, listCachedPdfIds } from "@/services/pdfCac
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { SubtopicoCard } from "@/components/SubtopicoCard";
+import { CompartilharModal } from "@/components/compartilhar-modal";
+import type { ShareItemType } from "@/services/shareService";
 
 interface Disciplina {
   id: string;
@@ -106,6 +108,13 @@ export default function ConteudoPage() {
   const [userId, setUserId] = useState<string | null>(null);
 
   const [cachedFileIds, setCachedFileIds] = useState<Set<string>>(new Set());
+
+  // Compartilhar com amigas (disciplina, tópico ou arquivo)
+  const [compartilhar, setCompartilhar] = useState<{
+    itemType: ShareItemType;
+    itemId: string;
+    itemName: string;
+  } | null>(null);
 
   useEffect(() => {
     const loadUserId = async () => {
@@ -834,6 +843,18 @@ export default function ConteudoPage() {
   ];
   const getCardColor = (index: number) => CARD_COLORS[index % CARD_COLORS.length];
 
+  // Modal de compartilhar (usado nas três telas)
+  const modalCompartilhar = compartilhar && userId ? (
+    <CompartilharModal
+      open={true}
+      onClose={() => setCompartilhar(null)}
+      userId={userId}
+      itemType={compartilhar.itemType}
+      itemId={compartilhar.itemId}
+      itemName={compartilhar.itemName}
+    />
+  ) : null;
+
   // ============================================================
   // RENDER: LISTA DE DISCIPLINAS
   // ============================================================
@@ -925,13 +946,26 @@ export default function ConteudoPage() {
                           fill={`color-mix(in oklab, ${cor} 35%, transparent)`}
                         />
                       </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteDiscipline(d.id); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-destructive transition-colors"
-                        aria-label="Excluir"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCompartilhar({ itemType: 'discipline', itemId: d.id, itemName: d.name });
+                          }}
+                          className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground transition-colors"
+                          aria-label="Compartilhar com amigas"
+                          title="Compartilhar com amigas"
+                        >
+                          <Share2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteDiscipline(d.id); }}
+                          className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-destructive transition-colors"
+                          aria-label="Excluir"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
                     </header>
 
                     <h3 className="font-display text-base font-semibold tracking-tight line-clamp-2">
@@ -964,6 +998,8 @@ export default function ConteudoPage() {
             </div>
           )}
         </AppShell>
+
+        {modalCompartilhar}
 
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
@@ -1065,6 +1101,12 @@ export default function ConteudoPage() {
                 <Plus className="h-3.5 w-3.5" /> Novo tópico
               </button>
               <button
+                onClick={() => setCompartilhar({ itemType: 'discipline', itemId: disciplina.id, itemName: disciplina.name })}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2"
+              >
+                <Share2 className="h-3.5 w-3.5" /> Compartilhar
+              </button>
+              <button
                 onClick={() => handleDeleteDiscipline(selectedDisciplineId)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/15"
               >
@@ -1161,6 +1203,8 @@ export default function ConteudoPage() {
             </div>
           )}
         </AppShell>
+
+        {modalCompartilhar}
 
         {isAddTopicModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
@@ -1270,6 +1314,12 @@ export default function ConteudoPage() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+            <button
+              onClick={() => setCompartilhar({ itemType: 'topic', itemId: topico.id, itemName: topico.name })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2"
+            >
+              <Share2 className="h-3.5 w-3.5" /> Compartilhar
+            </button>
             <button
               onClick={() => handleDeleteTopic(selectedTopicId)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/15"
@@ -1409,6 +1459,14 @@ export default function ConteudoPage() {
                             </a>
                           )}
                           <button
+                            type="button"
+                            onClick={() => setCompartilhar({ itemType: 'file', itemId: a.id, itemName: a.nome })}
+                            className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors"
+                            title="Compartilhar com amigas"
+                          >
+                            <Share2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
                             onClick={() => handleRemoveFile(a.id, filePath, topico.id)}
                             disabled={isDeleting}
                             className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
@@ -1475,6 +1533,8 @@ export default function ConteudoPage() {
             )}
           </aside>
         </div>
+
+        {modalCompartilhar}
       </AppShell>
     );
   }

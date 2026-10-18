@@ -31,15 +31,19 @@ export default function PdfPage() {
         // 1) Tenta do banco local (RxDB) primeiro.
         // Usamos SÓ o primary key no selector: o RxDB tem um bug conhecido
         // quando o selector combina a primary key com outro campo não
-        // indexado — ele gera um IDBKeyRange inválido. A checagem de
-        // user_id é feita em JS logo depois.
+        // indexado — ele gera um IDBKeyRange inválido.
+        //
+        // COMPARTILHAMENTO: o banco local só guarda arquivos da própria
+        // usuária e os que foram compartilhados com ela (o sharedSync baixa
+        // só o que a RLS libera e apaga o que deixou de ser compartilhado).
+        // Por isso não exigimos mais user_id === user.id aqui.
         let localFile: FileRecord | null = null;
         try {
           const db = await getDb();
           const col = db.collections.files;
           if (col) {
             const doc = await col.findOne({ selector: { id: fileId } }).exec();
-            if (doc && doc.get('user_id') === user.id) {
+            if (doc) {
               localFile = doc.toJSON() as FileRecord;
             }
           }
@@ -64,12 +68,12 @@ export default function PdfPage() {
           return;
         }
 
-        // 3) Busca do Supabase.
+        // 3) Busca do Supabase (a RLS libera arquivo próprio ou compartilhado).
         const f = await getFileById(fileId, user.id);
         if (!mounted) return;
 
         if (!f) {
-          setError('Arquivo não encontrado.');
+          setError('Arquivo não encontrado ou sem acesso.');
           setLoading(false);
           return;
         }
