@@ -15,7 +15,8 @@ export interface QuestaoErrada {
 interface Props {
   listaId: string;
   listaTitulo: string;
-  disciplineId: string;
+  /** Pode ser null quando a lista é de um amigo e a disciplina original não existe na sua conta. */
+  disciplineId: string | null;
   questoesErradas: QuestaoErrada[];
   onClose: (enviou: boolean) => void;
 }
@@ -56,7 +57,9 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             question: q.enunciado,
             correctAnswer: q.respostaCorreta,
             yourAnswer: q.suaResposta,
-            discipline_id: disciplineId,
+            // Quando a lista é de um amigo e não temos disciplina equivalente
+            // na conta, salvamos sem discipline_id (vai para "Sem disciplina").
+            ...(disciplineId ? { discipline_id: disciplineId } : {}),
             topic: listaTitulo,
             source: `Lista: ${listaTitulo}`,
             source_lista_id: listaId,

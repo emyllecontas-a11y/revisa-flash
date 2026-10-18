@@ -19,6 +19,7 @@ import { useErrors } from '@/contexts/ErrorContext';
 import { Toaster } from "@/components/ui/sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
+import { useComunidadeBadge } from "@/hooks/useComunidadeBadge";
 
 function LoadingScreen() {
   return (
@@ -103,6 +104,7 @@ function AppShellInner({
   const { loading: flashcardsLoading, refreshFlashcards } = useFlashcardContext();
   const { refresh: refreshErrors } = useErrors();
   const { records: studyRecords, refresh: refreshStudy } = useStudy();
+  const { count: comunidadeBadge } = useComunidadeBadge(user?.id);
 
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
@@ -280,7 +282,14 @@ function AppShellInner({
         <nav className="mt-2 flex-1 space-y-1 px-3">
           <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/50">Principal</div>
           {TODAS_ROTAS.map((r) => (
-            <NavItem key={r.to} to={r.to} label={r.label} iconKey={r.icon as RouteIcon} active={pathname === r.to} />
+            <NavItem
+              key={r.to}
+              to={r.to}
+              label={r.label}
+              iconKey={r.icon as RouteIcon}
+              active={pathname === r.to}
+              badge={r.to === "/comunidade" ? comunidadeBadge : undefined}
+            />
           ))}
         </nav>
 
@@ -375,13 +384,14 @@ function AppShellInner({
         </div>
       </div>
 
-      <BottomNav pathname={pathname} />
+      <BottomNav pathname={pathname} comunidadeBadge={comunidadeBadge} />
     </div>
   );
 }
 
-function NavItem({ to, label, iconKey, active }: { to: string; label: string; iconKey: RouteIcon; active: boolean; }) {
+function NavItem({ to, label, iconKey, active, badge }: { to: string; label: string; iconKey: RouteIcon; active: boolean; badge?: number; }) {
   const Icon = ICONS[iconKey];
+  const showBadge = typeof badge === "number" && badge > 0;
   return (
     <Link
       to={to}
@@ -392,13 +402,20 @@ function NavItem({ to, label, iconKey, active }: { to: string; label: string; ic
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
-      {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+      {showBadge ? (
+        <span className="ml-auto min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-bold tabular-nums text-primary-foreground">
+          {badge! > 99 ? "99+" : badge}
+        </span>
+      ) : (
+        active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
+      )}
     </Link>
   );
 }
 
-function BottomNav({ pathname }: { pathname: string }) {
+function BottomNav({ pathname, comunidadeBadge }: { pathname: string; comunidadeBadge?: number }) {
   const [isMaisOpen, setIsMaisOpen] = useState(false);
+  const showMaisDot = typeof comunidadeBadge === "number" && comunidadeBadge > 0;
 
   useEffect(() => {
     setIsMaisOpen(false);
@@ -444,7 +461,12 @@ function BottomNav({ pathname }: { pathname: string }) {
               isMaisOpen ? "text-primary" : "text-foreground/55 hover:text-foreground/80",
             ].join(" ")}
           >
-            <MoreHorizontal className="h-5 w-5" />
+            <div className="relative">
+              <MoreHorizontal className="h-5 w-5" />
+              {showMaisDot && (
+                <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-primary ring-2 ring-[color:var(--sidebar)]" />
+              )}
+            </div>
             <span className="text-[10px] leading-tight truncate font-medium">Mais</span>
           </button>
         </div>
@@ -469,17 +491,24 @@ function BottomNav({ pathname }: { pathname: string }) {
               {MAIS_ROTAS.map((r) => {
                 const Icon = ICONS[r.icon as RouteIcon];
                 const active = pathname === r.to;
+                const itemBadge = r.to === "/comunidade" ? comunidadeBadge : undefined;
+                const showItemBadge = typeof itemBadge === "number" && itemBadge > 0;
                 return (
                   <Link
                     key={r.to}
                     to={r.to}
                     className={[
-                      "flex items-center gap-3 rounded-2xl border border-border p-4 transition-colors",
+                      "relative flex items-center gap-3 rounded-2xl border border-border p-4 transition-colors",
                       active ? "bg-primary/10 border-primary/30 text-primary" : "bg-background text-foreground/80 hover:bg-muted",
                     ].join(" ")}
                   >
                     <Icon className="h-5 w-5 shrink-0" />
                     <span className="text-sm font-semibold">{r.label}</span>
+                    {showItemBadge && (
+                      <span className="absolute right-2 top-2 min-w-[18px] rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-bold tabular-nums text-primary-foreground">
+                        {itemBadge! > 99 ? "99+" : itemBadge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

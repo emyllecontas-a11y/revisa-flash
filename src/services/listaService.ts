@@ -1250,6 +1250,70 @@ async function copiarImagemParaMinhaConta(url: string, userId: string): Promise<
   }
 }
 
+/**
+ * Resolve qual discipline_id usar ao salvar um erro no caderno.
+ *
+ * - Se a lista é minha: usa o próprio discipline_id da lista.
+ * - Se é de amigo: tenta achar uma disciplina MINHA com o mesmo nome da original.
+ *   Se achar, usa o id dela; se não, retorna null (cai em "Sem disciplina" no caderno).
+ *
+ * A função nunca lança exceção — em qualquer erro, retorna null.
+ */
+export async function resolverDisciplineIdParaErro(
+  listaDisciplineId: string | null,
+  listaUserId: string | null,
+  meuUserId: string
+): Promise<string | null> {
+  try {
+    // Lista é minha: usa direto
+    if (listaUserId === meuUserId) {
+      return listaDisciplineId;
+    }
+    if (!listaDisciplineId) return null;
+
+    const db = await getDb();
+
+    // 1) Descobre o nome da disciplina original (do banco local)
+    let nomeOriginal: string | null = null;
+    const discOriginal = await db.disciplines.findOne({
+      selector: { id: listaDisciplineId },
+    }).exec();
+    if (discOriginal) nomeOriginal = discOriginal.get('name') ?? null;
+
+    // Fallback: se não está local (amigo compartilhou só a lista), tenta no Supabase.
+    // Pode falhar por RLS — nesse caso, cai em "Sem disciplina".
+    if (!nomeOriginal && isOnline()) {
+      try {
+        const client = await getSupabaseWithToken();
+        const { data } = await client
+          .from('disciplines')
+          .select('name')
+          .eq('id', listaDisciplineId)
+          .maybeSingle();
+        if (data?.name) nomeOriginal = data.name;
+      } catch (e) {
+        console.warn('⚠️ [resolverDisciplineIdParaErro] Fallback Supabase falhou:', e);
+      }
+    }
+
+    if (!nomeOriginal) return null;
+    const alvo = nomeOriginal.trim().toLowerCase();
+
+    // 2) Procura na minha conta uma disciplina com esse mesmo nome
+    const minhas = await db.disciplines.find({
+      selector: { user_id: meuUserId, isDeleted: { $ne: true } },
+    }).exec();
+    const match = minhas.find((d: any) => {
+      const n = String(d.get('name') || '').trim().toLowerCase();
+      return n === alvo;
+    });
+    return match ? String(match.get('id')) : null;
+  } catch (e) {
+    console.warn('⚠️ [resolverDisciplineIdParaErro] Erro:', e);
+    return null;
+  }
+}
+
 // Copia só o CONTEÚDO da lista (questões, alternativas, comentários, imagens).
 // Respostas, grifos e resultados da dona original NÃO são copiados.
 export async function copiarListaParaMinhaConta(

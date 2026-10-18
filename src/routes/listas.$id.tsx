@@ -11,6 +11,7 @@ import {
   salvarResultadoLista,
   getProgressoLista,
   salvarProgressoLista,
+  resolverDisciplineIdParaErro,
 } from "@/services/listaService";
 import { QuestaoListaPlayer, ResultadoListaCalc } from "@/lib/listas-types";
 import { EnviarErrosModal, QuestaoErrada } from "@/components/EnviarErrosModal";
@@ -112,6 +113,8 @@ export default function ListaPlayerPage() {
   const [mostrarModalErros, setMostrarModalErros] = useState(false);
   const [enviadosAoBanco, setEnviadosAoBanco] = useState(false);
   const [mostrarAtalhos, setMostrarAtalhos] = useState(false);
+  const [disciplineIdParaErro, setDisciplineIdParaErro] = useState<string | null>(null);
+
 
   // Grifos
   const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
@@ -499,7 +502,18 @@ export default function ListaPlayerPage() {
     }
     return erros;
   };
-
+  // Abre o modal de envio. Antes, resolve a disciplina na conta da usuária
+  // (para o caso de lista compartilhada por amigo).
+  const abrirModalErros = async () => {
+    if (!lista || !user?.id) return;
+    const id = await resolverDisciplineIdParaErro(
+      lista.discipline_id,
+      lista.user_id,
+      user.id
+    );
+    setDisciplineIdParaErro(id);
+    setMostrarModalErros(true);
+  };
   const handleFinalizar = async () => {
     if (!lista || !user?.id) return;
     setConfirmar(false);
@@ -699,9 +713,9 @@ export default function ListaPlayerPage() {
               >
                 <RotateCcw className="h-3.5 w-3.5" /> Refazer lista
               </button>
-              {ehDona && errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
+              {errosParaEnviar && errosParaEnviar.length > 0 && !enviadosAoBanco && (
                 <button
-                  onClick={() => setMostrarModalErros(true)}
+                  onClick={() => void abrirModalErros()}
                   className="btn-sun inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold"
                 >
                   📥 Enviar {errosParaEnviar.length} {errosParaEnviar.length === 1 ? 'erro' : 'erros'} ao caderno
@@ -716,11 +730,11 @@ export default function ListaPlayerPage() {
           </div>
         </div>
 
-        {ehDona && mostrarModalErros && errosParaEnviar && lista.discipline_id && (
+        {mostrarModalErros && errosParaEnviar && (
           <EnviarErrosModal
             listaId={lista.id}
             listaTitulo={lista.titulo}
-            disciplineId={lista.discipline_id}
+            disciplineId={disciplineIdParaErro}
             questoesErradas={errosParaEnviar}
             onClose={(enviou) => {
               setMostrarModalErros(false);
