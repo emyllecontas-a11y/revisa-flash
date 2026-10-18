@@ -6,7 +6,8 @@ import {
   Layers, Pencil, Trash2, X, BookOpen, Sparkles, ImageIcon,
   FileSpreadsheet, Music, Calendar, Clock, CheckCircle2, Circle,
   Loader2, ChevronUp, ChevronDown, Folder, MoreHorizontal,
-  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check, Share2, ArrowDownToLine
+  BookOpenCheck, Download, HardDriveDownload, FileQuestion, Check, Share2,
+  ArrowDownToLine, CloudOff, CloudDownload, FilterX
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -110,6 +111,10 @@ export default function ConteudoPage() {
   const [userId, setUserId] = useState<string | null>(null);
 
   const [cachedFileIds, setCachedFileIds] = useState<Set<string>>(new Set());
+  // Mostrar só PDFs com cópia offline (filtro)
+  const [filtroOffline, setFiltroOffline] = useState(false);
+  // Progresso do "baixar todos" (null = parado)
+  const [baixandoTodos, setBaixandoTodos] = useState<{ atual: number; total: number } | null>(null);
 
   // Compartilhar com amigas (disciplina, tópico ou arquivo)
   const [compartilhar, setCompartilhar] = useState<{
@@ -396,6 +401,67 @@ export default function ConteudoPage() {
       }
     }
   }, [cachedFileIds, toast]);
+
+  /** Baixa todos os PDFs ainda não cacheados do tópico, em sequência. */
+  const handleBaixarTodos = useCallback(async (arquivos: FileRecord[]) => {
+    const pdfs = arquivos.filter(ehPdf);
+    const pendentes = pdfs.filter((f) => !cachedFileIds.has(f.id));
+    if (pendentes.length === 0) {
+      toast.success("Todos os PDFs deste tópico já estão offline.");
+      return;
+    }
+    setBaixandoTodos({ atual: 0, total: pendentes.length });
+    let sucesso = 0;
+    let falhas = 0;
+
+    for (let i = 0; i < pendentes.length; i++) {
+      const f = pendentes[i];
+      setBaixandoTodos({ atual: i + 1, total: pendentes.length });
+      const result = await ensureCached(f.id, f.url, f.nome);
+      if (result.cached) {
+        sucesso++;
+        setCachedFileIds((prev) => {
+          const next = new Set(prev);
+          next.add(f.id);
+          return next;
+        });
+      } else {
+        falhas++;
+      }
+    }
+
+    setBaixandoTodos(null);
+    if (falhas === 0) toast.success(`${sucesso} PDF(s) disponível(is) offline!`);
+    else if (sucesso > 0) toast.warning(`${sucesso} baixado(s), ${falhas} falharam.`);
+    else toast.error("Nenhum PDF pôde ser baixado. Verifique sua conexão.");
+  }, [cachedFileIds, toast]);
+
+  /** Remove todos os caches offline dos PDFs do tópico. */
+  const handleLimparOfflineTopico = useCallback(async (arquivos: FileRecord[]) => {
+    const pdfs = arquivos.filter(ehPdf);
+    const cacheados = pdfs.filter((f) => cachedFileIds.has(f.id));
+    if (cacheados.length === 0) {
+      toast.info("Nenhum PDF offline neste tópico.");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: `Remover ${cacheados.length} cópia(s) offline?`,
+      description: "Os PDFs continuam na nuvem — você só vai precisar de internet para abri-los de novo.",
+      confirmText: "Remover",
+      cancelText: "Cancelar",
+      destructive: true,
+    });
+    if (!ok) return;
+    for (const f of cacheados) {
+      await deletePdfBlob(f.id);
+    }
+    setCachedFileIds((prev) => {
+      const next = new Set(prev);
+      cacheados.forEach((f) => next.delete(f.id));
+      return next;
+    });
+    toast.success(`${cacheados.length} cópia(s) offline removida(s).`);
+  }, [cachedFileIds, confirmDialog, toast]);
 
   /**
    * Baixa o arquivo para o DISPOSITIVO (disco), com o nome original.
@@ -1315,6 +1381,15 @@ export default function ConteudoPage() {
       : null;
     const currentFiles = filesMap[topico.id] || [];
 
+    // Contadores e filtro de offline
+    const pdfsDoTopico = currentFiles.filter(ehPdf);
+    const pdfsOffline = pdfsDoTopico.filter((f) => cachedFileIds.has(f.id));
+    const totalPdfs = pdfsDoTopico.length;
+    const totalOffline = pdfsOffline.length;
+    const arquivosVisiveis = filtroOffline
+      ? currentFiles.filter((a) => ehPdf(a) && cachedFileIds.has(a.id))
+      : currentFiles;
+
     const statusOptions = [
       { value: "nao_estudado", label: "Não iniciado" },
       { value: "estudando", label: "Estudando" },
@@ -1374,9 +1449,58 @@ export default function ConteudoPage() {
               <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-xs font-medium uppercase tracking-widest text-foreground/40">Materiais</h3>
-                  <p className="mt-1 text-xs text-foreground/55">PDFs, imagens, planilhas, áudios deste tópico.</p>
+                  <p className="mt-1 text-xs text-foreground/55">
+                    PDFs, imagens, planilhas, áudios deste tópico.
+                    {totalPdfs > 0 && (
+                      <> · <span className="font-medium text-foreground/70">{totalOffline} de {totalPdfs} PDF(s) offline</span></>
+                    )}
+                  </p>
                 </div>
-                <div className="shrink-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  {totalPdfs > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroOffline((v) => !v)}
+                        className={[
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium transition-colors",
+                          filtroOffline
+                            ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-600"
+                            : "border-border bg-surface text-foreground/70 hover:bg-surface-2",
+                        ].join(" ")}
+                        title="Mostrar só PDFs disponíveis offline"
+                      >
+                        {filtroOffline ? <FilterX className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                        {filtroOffline ? "Ver todos" : "Só offline"}
+                      </button>
+                      {totalOffline < totalPdfs && (
+                        <button
+                          type="button"
+                          onClick={() => handleBaixarTodos(currentFiles)}
+                          disabled={baixandoTodos !== null}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2 disabled:opacity-50"
+                          title="Baixar todos os PDFs para uso offline"
+                        >
+                          {baixandoTodos ? (
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> {baixandoTodos.atual}/{baixandoTodos.total}</>
+                          ) : (
+                            <><CloudDownload className="h-3.5 w-3.5" /> Baixar todos</>
+                          )}
+                        </button>
+                      )}
+                      {totalOffline > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleLimparOfflineTopico(currentFiles)}
+                          disabled={baixandoTodos !== null}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/55 hover:bg-surface-2 disabled:opacity-50"
+                          title="Remover cópias offline deste tópico"
+                        >
+                          <CloudOff className="h-3.5 w-3.5" /> Limpar offline
+                        </button>
+                      )}
+                    </>
+                  )}
                   <input
                     type="file"
                     id={`file-upload-${topico.id}`}
@@ -1417,8 +1541,8 @@ export default function ConteudoPage() {
               )}
 
               <ul className="mt-5 space-y-2">
-                {currentFiles.length > 0 ? (
-                  currentFiles.map((a) => {
+                {arquivosVisiveis.length > 0 ? (
+                  arquivosVisiveis.map((a) => {
                     const Icon = getIconByType(a.tipo);
                     const cor = getIconCor(a.tipo);
                     const isPdf = ehPdf(a);
@@ -1527,7 +1651,11 @@ export default function ConteudoPage() {
                     );
                   })
                 ) : (
-                  <li className="py-4 text-center text-xs text-foreground/40">Nenhum material anexado ainda.</li>
+                  <li className="py-4 text-center text-xs text-foreground/40">
+                    {filtroOffline
+                      ? "Nenhum PDF deste tópico está disponível offline ainda."
+                      : "Nenhum material anexado ainda."}
+                  </li>
                 )}
               </ul>
             </div>

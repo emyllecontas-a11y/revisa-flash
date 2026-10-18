@@ -2,7 +2,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, X, Trash2, Highlighter, StickyNote, Pencil, Check, Plus, BookOpen, Minimize2, Copy, Strikethrough, Underline, Square, Move } from 'lucide-react';
+import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, X, Trash2, Highlighter, StickyNote, Pencil, Check, Plus, BookOpen, Minimize2, Copy, Strikethrough, Underline, Square, Move, CheckCircle2 } from 'lucide-react';
 import { getDb } from '@/lib/db';
 import { enqueueOperation } from '@/services/queueService';
 import { uid } from '@/utils/helpers';
@@ -238,10 +238,15 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
   // Cache offline do PDF (blob)
   // ============================================================
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  // Status do cache para feedback discreto no toolbar
+  const [lendoDoCache, setLendoDoCache] = useState(false);
+  const [cacheandoAgora, setCacheandoAgora] = useState(false);
 
   useEffect(() => {
     if (!fileId) {
       setResolvedUrl(url);
+      setLendoDoCache(false);
+      setCacheandoAgora(false);
       return;
     }
 
@@ -255,15 +260,21 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
       if (cached) {
         blobUrl = URL.createObjectURL(cached);
         setResolvedUrl(blobUrl);
+        setLendoDoCache(true);
         console.log('[PdfViewer] Usando PDF do cache local (offline disponível).');
         return;
       }
 
       setResolvedUrl(url);
+      setLendoDoCache(false);
 
       const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
       if (isOnline) {
-        ensureCached(fileId, url, fileId).catch(() => { /* já logado dentro */ });
+        setCacheandoAgora(true);
+        ensureCached(fileId, url, fileId)
+          .then((r) => { if (r.cached && !cancelled) setLendoDoCache(true); })
+          .catch(() => { /* já logado dentro */ })
+          .finally(() => { if (!cancelled) setCacheandoAgora(false); });
       }
     })();
 
@@ -1145,8 +1156,7 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
       const regex = new RegExp(`(${termoEscapado})`, 'gi');
       const textoEscapado = escapeHtml(str);
       return textoEscapado.replace(regex, '<mark class="pdf-search-highlight">$1</mark>');
-    },
-    [termoAtivo]
+    }, [termoAtivo]
   );
 
   const larguraPagina = useMemo(() => {
@@ -1346,6 +1356,26 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
             >
               <Search className="h-5 w-5 sm:h-4 sm:w-4" />
             </button>
+
+            {fileId && lendoDoCache && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 h-10 sm:h-8 text-[11px] font-medium text-emerald-400"
+                title="Lendo do cache local (abre sem internet)"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+                <span className="hidden xs:inline">Offline</span>
+              </span>
+            )}
+
+            {fileId && cacheandoAgora && !lendoDoCache && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 h-10 sm:h-8 text-[11px] font-medium text-blue-400"
+                title="Baixando para o cache offline"
+              >
+                <Loader2 className="h-3.5 w-3.5 sm:h-3 sm:w-3 animate-spin" />
+                <span className="hidden xs:inline">Baixando…</span>
+              </span>
+            )}
 
             {fileId && (
               <button
@@ -1556,231 +1586,221 @@ export function PdfViewer({ url, fileId }: PdfViewerProps) {
                   })
                 )}
 
-               {textBoxesDaPagina.map((box) => {
-  const cor = CORES_CAIXA[box.color] || CORES_CAIXA.yellow;
-  const isDragging = draggingBox?.id === box.id;
-  const isResizing = resizingBox?.id === box.id;
-  const isColorPickerOpen = colorPickerBoxId === box.id;
-  const isHovered = hoveredBoxId === box.id;
-  const boxHeight = box.height || 0.18;
+                {textBoxesDaPagina.map((box) => {
+                  const cor = CORES_CAIXA[box.color] || CORES_CAIXA.yellow;
+                  const isDragging = draggingBox?.id === box.id;
+                  const isResizing = resizingBox?.id === box.id;
+                  const isColorPickerOpen = colorPickerBoxId === box.id;
+                  const isHovered = hoveredBoxId === box.id;
+                  const boxHeight = box.height || 0.18;
+                  const showControls = isHovered || isDragging || isResizing || isColorPickerOpen;
 
-  // Botões aparecem no hover, ao arrastar, ao redimensionar ou com o seletor aberto
-  const showControls = isHovered || isDragging || isResizing || isColorPickerOpen;
+                  const seed = box.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                  const rotation = ((seed % 25) - 12) / 10;
 
-  // Inclinação leve, estável por caixa (baseada no id) — dá o ar de papel
-  const seed = box.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const rotation = ((seed % 25) - 12) / 10; // entre -1.2° e +1.2°
+                  const backgroundImage =
+                    cor.pattern === 'grid'
+                      ? `linear-gradient(to right, ${cor.lineColor} 1px, transparent 1px),
+                         linear-gradient(to bottom, ${cor.lineColor} 1px, transparent 1px)`
+                      : cor.pattern === 'lines'
+                      ? `repeating-linear-gradient(to bottom, transparent 0, transparent 19px, ${cor.lineColor} 19px, ${cor.lineColor} 20px)`
+                      : 'none';
+                  const backgroundSize =
+                    cor.pattern === 'grid' ? '16px 16px' : cor.pattern === 'lines' ? '100% 20px' : 'auto';
 
-  // Fundo com linhas ou grade, dependendo do estilo
-  const backgroundImage =
-    cor.pattern === 'grid'
-      ? `linear-gradient(to right, ${cor.lineColor} 1px, transparent 1px),
-         linear-gradient(to bottom, ${cor.lineColor} 1px, transparent 1px)`
-      : cor.pattern === 'lines'
-      ? `repeating-linear-gradient(to bottom, transparent 0, transparent 19px, ${cor.lineColor} 19px, ${cor.lineColor} 20px)`
-      : 'none';
-  const backgroundSize =
-    cor.pattern === 'grid' ? '16px 16px' : cor.pattern === 'lines' ? '100% 20px' : 'auto';
+                  return (
+                    <div
+                      key={box.id}
+                      className="pdf-text-box"
+                      onMouseEnter={() => setHoveredBoxId(box.id)}
+                      onMouseLeave={() => setHoveredBoxId(prev => (prev === box.id ? null : prev))}
+                      style={{
+                        position: 'absolute',
+                        left: `${box.x * 100}%`,
+                        top: `${box.y * 100}%`,
+                        width: `${box.width * 100}%`,
+                        height: `${boxHeight * 100}%`,
+                        zIndex: isDragging || isResizing ? 20 : 8,
+                        transform: `rotate(${rotation}deg)`,
+                        backgroundColor: cor.bg,
+                        backgroundImage,
+                        backgroundSize,
+                        borderRadius: 2,
+                        boxShadow: isDragging || isResizing
+                          ? '0 18px 40px rgba(0,0,0,0.4), 0 3px 6px rgba(0,0,0,0.2)'
+                          : '0 4px 10px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.15)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        transition: isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
+                        overflow: 'visible',
+                      }}
+                    >
+                      <div
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleBoxDragStart(e, box);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: -8,
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: 56,
+                          height: 18,
+                          backgroundColor: cor.border,
+                          opacity: 0.9,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                          clipPath: 'polygon(3% 0, 97% 0, 100% 50%, 97% 100%, 3% 100%, 0 50%)',
+                          cursor: 'grab',
+                          zIndex: 5,
+                        }}
+                        title="Arrastar"
+                      />
 
-  return (
-    <div
-      key={box.id}
-      className="pdf-text-box"
-      onMouseEnter={() => setHoveredBoxId(box.id)}
-      onMouseLeave={() => setHoveredBoxId(prev => (prev === box.id ? null : prev))}
-      style={{
-        position: 'absolute',
-        left: `${box.x * 100}%`,
-        top: `${box.y * 100}%`,
-        width: `${box.width * 100}%`,
-        height: `${boxHeight * 100}%`,
-        zIndex: isDragging || isResizing ? 20 : 8,
-        transform: `rotate(${rotation}deg)`,
-        backgroundColor: cor.bg,
-        backgroundImage,
-        backgroundSize,
-        borderRadius: 2,
-        boxShadow: isDragging || isResizing
-          ? '0 18px 40px rgba(0,0,0,0.4), 0 3px 6px rgba(0,0,0,0.2)'
-          : '0 4px 10px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.15)',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
-        overflow: 'visible',
-      }}
-    >
-      {/* Fita adesiva no topo — alça de arrastar */}
-      <div
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          handleBoxDragStart(e, box);
-        }}
-        style={{
-          position: 'absolute',
-          top: -8,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 56,
-          height: 18,
-          backgroundColor: cor.border,
-          opacity: 0.9,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-          clipPath: 'polygon(3% 0, 97% 0, 100% 50%, 97% 100%, 3% 100%, 0 50%)',
-          cursor: 'grab',
-          zIndex: 5,
-        }}
-        title="Arrastar"
-      />
+                      <div
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          borderRadius: 2,
+                          overflow: 'hidden',
+                          position: 'relative',
+                        }}
+                      >
+                        {showControls && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 12,
+                              right: 2,
+                              display: 'flex',
+                              gap: 2,
+                              zIndex: 4,
+                              opacity: 1,
+                              transition: 'opacity 0.15s',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setColorPickerBoxId(isColorPickerOpen ? null : box.id);
+                              }}
+                              className="grid h-4 w-4 place-items-center rounded-full bg-white/90 hover:bg-white shadow-sm"
+                              title="Trocar cor"
+                            >
+                              <span
+                                className="block h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: cor.dot }}
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoverCaixa(box.id);
+                              }}
+                              className="grid h-4 w-4 place-items-center rounded-full bg-white/90 hover:bg-white shadow-sm"
+                              style={{ color: '#444' }}
+                              title="Remover"
+                            >
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        )}
 
-      {/* Wrapper interno */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          borderRadius: 2,
-          overflow: 'hidden',
-          position: 'relative',
-        }}
-      >
-        {/* Botões (cor e excluir) — só aparecem no hover */}
-        {showControls && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 12,
-              right: 2,
-              display: 'flex',
-              gap: 2,
-              zIndex: 4,
-              opacity: 1,
-              transition: 'opacity 0.15s',
-            }}
-          >
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                setColorPickerBoxId(isColorPickerOpen ? null : box.id);
-              }}
-              className="grid h-4 w-4 place-items-center rounded-full bg-white/90 hover:bg-white shadow-sm"
-              title="Trocar cor"
-            >
-              <span
-                className="block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: cor.dot }}
-              />
-            </button>
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRemoverCaixa(box.id);
-              }}
-              className="grid h-4 w-4 place-items-center rounded-full bg-white/90 hover:bg-white shadow-sm"
-              style={{ color: '#444' }}
-              title="Remover"
-            >
-              <X className="h-2.5 w-2.5" />
-            </button>
-          </div>
-        )}
+                        {isColorPickerOpen && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 30,
+                              right: 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '4px 6px',
+                              borderRadius: 6,
+                              backgroundColor: 'rgba(255,255,255,0.97)',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                              zIndex: 5,
+                            }}
+                          >
+                            {Object.entries(CORES_CAIXA).map(([key, cfg]) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAtualizarCaixa(box.id, { color: key });
+                                  setColorPickerBoxId(null);
+                                }}
+                                className={[
+                                  "h-4 w-4 rounded-full border transition-transform hover:scale-125",
+                                  box.color === key ? "border-foreground/70" : "border-white/60",
+                                ].join(" ")}
+                                style={{
+                                  backgroundColor: cfg.dot,
+                                  outline: box.color === key ? '1px solid rgba(0,0,0,0.35)' : 'none',
+                                }}
+                                title={cfg.label}
+                              />
+                            ))}
+                          </div>
+                        )}
 
-        {/* Seletor de cor */}
-        {isColorPickerOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 30,
-              right: 2,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '4px 6px',
-              borderRadius: 6,
-              backgroundColor: 'rgba(255,255,255,0.97)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
-              zIndex: 5,
-            }}
-          >
-            {Object.entries(CORES_CAIXA).map(([key, cfg]) => (
-              <button
-                key={key}
-                type="button"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAtualizarCaixa(box.id, { color: key });
-                  setColorPickerBoxId(null);
-                }}
-                className={[
-                  "h-4 w-4 rounded-full border transition-transform hover:scale-125",
-                  box.color === key ? "border-foreground/70" : "border-white/60",
-                ].join(" ")}
-                style={{
-                  backgroundColor: cfg.dot,
-                  outline: box.color === key ? '1px solid rgba(0,0,0,0.35)' : 'none',
-                }}
-                title={cfg.label}
-              />
-            ))}
-          </div>
-        )}
+                        <textarea
+                          value={box.content}
+                          onChange={(e) => {
+                            const novoConteudo = e.target.value;
+                            setTextBoxes(prev =>
+                              prev.map(b => (b.id === box.id ? { ...b, content: novoConteudo } : b))
+                            );
+                          }}
+                          onFocus={() => setEditingBoxId(box.id)}
+                          onBlur={(e) => {
+                            handleAtualizarCaixa(box.id, { content: e.target.value });
+                            setEditingBoxId(null);
+                          }}
+                          placeholder="Escreva…"
+                          className="flex-1 w-full border-0 outline-none resize-none"
+                          style={{
+                            cursor: 'text',
+                            fontSize: 15,
+                            fontWeight: 600,
+                            lineHeight: '20px',
+                            fontFamily: 'inherit',
+                            padding: '8px 10px',
+                            color: '#1a1a1a',
+                            caretColor: '#1a1a1a',
+                            backgroundColor: 'transparent',
+                            WebkitTextFillColor: '#1a1a1a',
+                          }}
+                        />
+                      </div>
 
-        {/* Área de escrita — texto preto, maior e em negrito */}
-        <textarea
-          value={box.content}
-          onChange={(e) => {
-            const novoConteudo = e.target.value;
-            setTextBoxes(prev =>
-              prev.map(b => (b.id === box.id ? { ...b, content: novoConteudo } : b))
-            );
-          }}
-          onFocus={() => setEditingBoxId(box.id)}
-          onBlur={(e) => {
-            handleAtualizarCaixa(box.id, { content: e.target.value });
-            setEditingBoxId(null);
-          }}
-          placeholder="Escreva…"
-          className="flex-1 w-full border-0 outline-none resize-none"
-          style={{
-            cursor: 'text',
-            fontSize: 15,
-            fontWeight: 600,
-            lineHeight: '20px',
-            fontFamily: 'inherit',
-            padding: '8px 10px',
-            color: '#1a1a1a',
-            caretColor: '#1a1a1a',
-            backgroundColor: 'transparent',
-            WebkitTextFillColor: '#1a1a1a',
-          }}
-        />
-      </div>
-
-      {/* Alça de redimensionar (canto inferior direito) */}
-      <div
-        style={{
-          position: 'absolute',
-          right: 0,
-          bottom: 0,
-          width: 16,
-          height: 16,
-          cursor: 'nwse-resize',
-          background: `linear-gradient(135deg, transparent 45%, ${cor.border} 45%, ${cor.border} 55%, transparent 55%, transparent 70%, ${cor.border} 70%, ${cor.border} 80%, transparent 80%)`,
-          borderBottomRightRadius: 2,
-          zIndex: 4,
-          opacity: showControls ? 1 : 0.35,
-          transition: 'opacity 0.15s',
-        }}
-        onMouseDown={(e) => handleBoxResizeStart(e, box)}
-        title="Redimensionar"
-      />
-    </div>
-  );
-})}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          right: 0,
+                          bottom: 0,
+                          width: 16,
+                          height: 16,
+                          cursor: 'nwse-resize',
+                          background: `linear-gradient(135deg, transparent 45%, ${cor.border} 45%, ${cor.border} 55%, transparent 55%, transparent 70%, ${cor.border} 70%, ${cor.border} 80%, transparent 80%)`,
+                          borderBottomRightRadius: 2,
+                          zIndex: 4,
+                          opacity: showControls ? 1 : 0.35,
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseDown={(e) => handleBoxResizeStart(e, box)}
+                        title="Redimensionar"
+                      />
+                    </div>
+                  );
+                })}
 
                 {hoveredHighlight && !clickedHighlight && hoveredNote && (
                   <div style={{ position: 'absolute', right: 8, top: 8, zIndex: 6, pointerEvents: 'none' }}>

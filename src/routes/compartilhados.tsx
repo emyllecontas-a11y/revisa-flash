@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ClipboardList, Copy, FileText, Folder, Loader2, RefreshCw, Share2,
+  CheckSquare, Square,
 } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -16,8 +17,11 @@ import { AppShell } from "@/components/app-shell";
 import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast";
 import { getDb } from "@/lib/db";
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { syncSharedContent } from "@/lib/sharedSync";
 import { findUsersByIds } from "@/services/clerkService";
+import { uid } from "@/utils/helpers";
+import { enqueueOperation } from "@/services/queueService";
 import {
   EscolherDestinoCopiaModal,
   type TipoDestino,
@@ -223,6 +227,10 @@ export function CompartilhadosConteudo() {
   const [copiandoKey, setCopiandoKey] = useState<string | null>(null);
   const [progressoCopia, setProgressoCopia] = useState<ProgressoCopia | null>(null);
   const [pendingCopy, setPendingCopy] = useState<PendingCopy | null>(null);
+  // Seleção múltipla de listas (para copiar em bloco)
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  const [pendingBloco, setPendingBloco] = useState(false);
+  const [copiandoBloco, setCopiandoBloco] = useState<{ atual: number; total: number } | null>(null);
 
   const [dados, setDados] = useState<Dados | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -421,7 +429,106 @@ export function CompartilhadosConteudo() {
       }
     });
   };
+  // ============================================================
+  // SELEÇÃO MÚLTIPLA / CÓPIA EM BLOCO
+  // ============================================================
+  const toggleSelecionada = (id: string) => {
+    setSelecionadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
+  const selecionarTodas = () => {
+    if (!dados) return;
+    setSelecionadas(new Set(dados.listas.map((l) => l.id)));
+  };
+
+  const limparSelecao = () => setSelecionadas(new Set());
+
+  const copiarEmBloco = () => {
+    if (selecionadas.size === 0 || copiandoKey || copiandoBloco) return;
+    setPendingBloco(true);
+  };
+
+  const executarCopiaEmBloco = async (destino: ResultadoEscolha) => {
+    setPendingBloco(false);
+    if (!userId || selecionadas.size === 0) return;
+
+    const ids = [...selecionadas];
+    const total = ids.length;
+    setCopiandoBloco({ atual: 0, total });
+
+    // Se o destino é "criar nova disciplina", cria UMA vez e reusa
+    let disciplinaId = destino.disciplinaId;
+    if (!disciplinaId && destino.nomeNovaDisciplina) {
+      setProgressoCopia({ current: 0, total, label: `Criando disciplina "${destino.nomeNovaDisciplina}"...` });
+      try {
+        const db = await getDb();
+        const novaDiscId = uid();
+        const agora = new Date().toISOString();
+        const novaDisc = {
+          id: novaDiscId,
+          name: destino.nomeNovaDisciplina,
+          user_id: userId,
+          createdAt: agora,
+          updated_at: agora,
+          isDeleted: false,
+        };
+        await db.disciplines.insert(novaDisc);
+        try {
+          const supabaseClient = await getSupabaseWithToken();
+          const { error } = await supabaseClient.from('disciplines').insert(novaDisc);
+          if (error) throw error;
+        } catch {
+          await enqueueOperation('create', 'disciplines', novaDisc);
+        }
+        disciplinaId = novaDiscId;
+      } catch (e) {
+        console.error('[cópia em bloco] Erro ao criar disciplina:', e);
+        toast.error('Não foi possível criar a disciplina.');
+        setCopiandoBloco(null);
+        setProgressoCopia(null);
+        return;
+      }
+    }
+
+    let sucesso = 0;
+    let falhas = 0;
+    for (let i = 0; i < ids.length; i++) {
+      setCopiandoBloco({ atual: i + 1, total });
+      setProgressoCopia({ current: i, total, label: `Copiando lista ${i + 1} de ${total}...` });
+      try {
+        const res = await copiarListaParaMinhaConta(
+          ids[i],
+          userId,
+          (info) => setProgressoCopia(info),
+          {
+            disciplinaId: disciplinaId ?? null,
+            folderId: destino.folderId ?? null,
+          }
+        );
+        if (res.success) sucesso++;
+        else falhas++;
+      } catch {
+        falhas++;
+      }
+    }
+
+    setCopiandoBloco(null);
+    setProgressoCopia(null);
+
+    if (falhas === 0) toast.success(`${sucesso} lista(s) copiada(s)!`);
+    else if (sucesso > 0) toast.warning(`${sucesso} copiada(s), ${falhas} falharam.`);
+    else toast.error('Nenhuma lista pôde ser copiada.');
+
+    setSelecionadas(new Set());
+    await recarregar();
+  };
+
+  const handleCopiarSimulado = async (s: SimuladoItem) => {
   // -------- Copiar SIMULADO (sem escolha de destino) --------
   const handleCopiarSimulado = async (s: SimuladoItem) => {
     if (!userId || copiandoKey) return;
@@ -591,29 +698,69 @@ export function CompartilhadosConteudo() {
 
       {dados && dados.listas.length > 0 && (
         <section className="space-y-3">
-          <h2 className="flex items-center gap-2 font-display text-base font-bold">
-            <ClipboardList className="h-4 w-4 text-primary" /> Listas de questões
-          </h2>
-          <ul className="space-y-2">
-            {dados.listas.map((l) => (
-              <li key={l.id} className="relative">
-                <Link to={`/listas/${l.id}`} className="rf-card rf-card-hover block p-4 pr-28">
-                  <p className="text-sm font-semibold">{l.titulo}</p>
-                  <p className="text-xs text-foreground/50">
-                    de {nomeDe(l.donoId)} {l.total > 0 && ` · ${l.total} questões`}
-                  </p>
-                </Link>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 font-display text-base font-bold">
+              <ClipboardList className="h-4 w-4 text-primary" /> Listas de questões
+            </h2>
+            <div className="flex items-center gap-1.5">
+              {selecionadas.size === 0 ? (
                 <button
                   type="button"
-                  onClick={() => handleCopiarLista(l)}
-                  disabled={copiandoKey !== null}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                  onClick={selecionarTodas}
+                  className="text-[11px] font-medium text-primary hover:underline"
                 >
-                  {copiandoKey === `lista:${l.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-                  Copiar
+                  Selecionar todas
                 </button>
-              </li>
-            ))}
+              ) : (
+                <span className="text-[11px] font-medium text-foreground/60">
+                  {selecionadas.size} selecionada(s)
+                </span>
+              )}
+            </div>
+          </div>
+          <ul className="space-y-2">
+            {dados.listas.map((l) => {
+              const sel = selecionadas.has(l.id);
+              return (
+                <li
+                  key={l.id}
+                  className={["relative rounded-xl transition-all", sel ? "ring-1 ring-primary/40" : ""].join(" ")}
+                >
+                  <div
+                    className="absolute left-3 top-1/2 z-10 -translate-y-1/2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleSelecionada(l.id)}
+                      disabled={copiandoBloco !== null}
+                      className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-50"
+                      title={sel ? 'Desmarcar' : 'Selecionar para copiar em bloco'}
+                    >
+                      {sel ? <CheckSquare className="h-5 w-5 text-primary" /> : <Square className="h-5 w-5" />}
+                    </button>
+                  </div>
+                  <Link
+                    to={`/listas/${l.id}`}
+                    className="rf-card rf-card-hover block p-4 pl-12 pr-28"
+                  >
+                    <p className="text-sm font-semibold">{l.titulo}</p>
+                    <p className="text-xs text-foreground/50">
+                      de {nomeDe(l.donoId)} {l.total > 0 && ` · ${l.total} questões`}
+                    </p>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleCopiarLista(l)}
+                    disabled={copiandoKey !== null || copiandoBloco !== null}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                  >
+                    {copiandoKey === `lista:${l.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                    Copiar
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -659,6 +806,38 @@ export function CompartilhadosConteudo() {
           }}
           onCancel={() => setPendingCopy(null)}
         />
+      )}
+
+      {pendingBloco && userId && (
+        <EscolherDestinoCopiaModal
+          tipo="lista"
+          nomeItem={`${selecionadas.size} lista(s) selecionada(s)`}
+          userId={userId}
+          onConfirm={(destino) => { void executarCopiaEmBloco(destino); }}
+          onCancel={() => setPendingBloco(false)}
+        />
+      )}
+
+      {selecionadas.size > 0 && !pendingBloco && !copiandoBloco && (
+        <div className="fixed inset-x-4 bottom-20 z-40 mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-primary/40 bg-surface p-3 shadow-2xl">
+          <span className="flex-1 text-sm font-medium">
+            {selecionadas.size} selecionada(s)
+          </span>
+          <button
+            type="button"
+            onClick={limparSelecao}
+            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2"
+          >
+            Limpar
+          </button>
+          <button
+            type="button"
+            onClick={copiarEmBloco}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+          >
+            Copiar selecionadas
+          </button>
+        </div>
       )}
     </div>
   );

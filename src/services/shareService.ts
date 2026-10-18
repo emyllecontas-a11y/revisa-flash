@@ -20,6 +20,8 @@ export type ShareItemType =
 export interface ShareRow {
   id: string;
   shared_with_id: string;
+  /** ID do item compartilhado. Só preenchido em consultas em lote (listSharesOfListas). */
+  item_id?: string;
 }
 
 type DbError = { code?: string; message?: string };
@@ -49,6 +51,30 @@ export async function listSharesOfItem(
   return (data ?? []) as ShareRow[];
 }
 
+/**
+ * Lista os shares de VÁRIAS listas de uma vez.
+ * Usado pelo CompartilharPastaModal (Caminho A: pasta = N shares individuais).
+ */
+export async function listSharesOfListas(
+  myId: string,
+  listaIds: string[],
+): Promise<ShareRow[]> {
+  if (!myId || listaIds.length === 0) return [];
+  const supabase = await getSupabaseWithToken();
+  const { data, error } = await supabase
+    .from('shares')
+    .select('id, shared_with_id, item_id')
+    .eq('owner_id', myId)
+    .eq('item_type', 'question_list')
+    .in('item_id', listaIds);
+
+  if (error) {
+    console.error('❌ Erro ao listar compartilhamentos das listas:', error);
+    throw new FriendError('Não foi possível ver os compartilhamentos da pasta.');
+  }
+  return (data ?? []) as ShareRow[];
+}
+
 /** Compartilha o item com uma amiga. Se já estava compartilhado, não faz nada. */
 export async function addShare(
   myId: string,
@@ -69,7 +95,6 @@ export async function addShare(
 
   if (!error) return;
 
-  // 23505 = já existe este compartilhamento (tudo certo)
   if ((error as DbError).code === '23505') return;
 
   if (isPermissionError(error as DbError)) {

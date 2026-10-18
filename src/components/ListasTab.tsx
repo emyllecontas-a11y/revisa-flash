@@ -36,6 +36,7 @@ import {
   Search, ChevronUp, ChevronDown, AlertCircle, Share2,
 } from "lucide-react";
 import { CompartilharModal } from "@/components/compartilhar-modal";
+import { CompartilharPastaModal } from "@/components/CompartilharPastaModal";
 
 const CARD_COLORS = [
   '#E8A87C', '#E0A5C0', '#D4A88E', '#E8A87C', '#E0A5C0', '#D9A57E',
@@ -94,6 +95,7 @@ export function ListasTab() {
   const [excluindo, setExcluindo] = useState<string | null>(null);
   const [listaParaMover, setListaParaMover] = useState<Lista | null>(null);
   const [listaParaCompartilhar, setListaParaCompartilhar] = useState<Lista | null>(null);
+  const [pastaParaCompartilhar, setPastaParaCompartilhar] = useState<Pasta | null>(null);
 
   const [modalNovaPasta, setModalNovaPasta] = useState(false);
   const [modalRenomearPasta, setModalRenomearPasta] = useState<Pasta | null>(null);
@@ -653,6 +655,13 @@ export function ListasTab() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => setPastaParaCompartilhar(p)}
+                          className="inline-flex items-center gap-1 text-[11px] text-foreground/55 hover:text-foreground transition-colors"
+                        >
+                          <Share2 className="h-3 w-3" /> Compartilhar
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setModalExcluirPasta(p)}
                           className="ml-auto inline-flex items-center gap-1 text-[11px] text-foreground/55 hover:text-destructive transition-colors"
                         >
@@ -763,6 +772,19 @@ export function ListasTab() {
           userId={user.id}
           onClose={() => setModalExcluirPasta(null)}
           onSuccess={() => { setModalExcluirPasta(null); setPastaAberta(null); loadData(); }}
+        />
+      )}
+
+      {pastaParaCompartilhar && user?.id && (
+        <CompartilharPastaModal
+          open={true}
+          onClose={() => setPastaParaCompartilhar(null)}
+          userId={user.id}
+          pastaNome={pastaParaCompartilhar.name}
+          listaIds={todasListas
+            .filter((l) => l.folder_id === pastaParaCompartilhar.id)
+            .map((l) => l.id)}
+          onChanged={() => loadData()}
         />
       )}
 

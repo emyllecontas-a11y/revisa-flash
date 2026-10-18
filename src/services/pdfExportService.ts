@@ -4,15 +4,35 @@
 //  - "responder": enunciado + alternativas (sem gabarito nem resposta)
 //  - "corrigida": enunciado + alternativas marcadas (✓ correta / ✗ sua) + comentário
 //
-// Usa `jspdf` via dynamic import (só baixa a lib quando o usuário pede o PDF).
+// Suporta formatação rica: sublinhados, negritos e itálicos.
 import type { QuestaoPlayer } from '@/lib/simulados-types';
 import type { QuestaoListaPlayer } from '@/lib/listas-types';
+
+interface RangeFormatacao {
+  inicio: number;
+  fim: number;
+}
+
+interface AlternativaExport {
+  letra: string;
+  texto: string;
+  correta: boolean;
+  sublinhados?: RangeFormatacao[] | null;
+  negritos?: RangeFormatacao[] | null;
+  italicos?: RangeFormatacao[] | null;
+}
 
 export interface QuestaoExport {
   numero: number;
   enunciado: string;
-  alternativas: { letra: string; texto: string; correta: boolean }[];
+  sublinhadosEnunciado?: RangeFormatacao[] | null;
+  negritosEnunciado?: RangeFormatacao[] | null;
+  italicosEnunciado?: RangeFormatacao[] | null;
+  alternativas: AlternativaExport[];
   comentario: string | null;
+  sublinhadosComentario?: RangeFormatacao[] | null;
+  negritosComentario?: RangeFormatacao[] | null;
+  italicosComentario?: RangeFormatacao[] | null;
   imagem_url: string | null;
 }
 
@@ -38,62 +58,78 @@ export interface OpcoesExportacaoPdf {
 // ============================================================
 export function normalizarQuestaoSimulado(q: QuestaoPlayer): QuestaoExport {
   const ehMultipla = q.alternativas && q.alternativas.length > 0;
-  if (ehMultipla) {
-    return {
-      numero: q.numero,
-      enunciado: q.enunciado || '',
-      alternativas: q.alternativas.map((a: any) => ({
-        letra: a.letra,
-        texto: a.texto,
-        correta: !!a.correta,
-      })),
-      comentario: (q as any).comentario_geral ?? null,
-      imagem_url: (q as any).imagem_url ?? null,
-    };
-  }
-  const correta = q.gabarito_ce === true ? 'C' : 'E';
-  return {
+  const base: QuestaoExport = {
     numero: q.numero,
     enunciado: q.enunciado || '',
-    alternativas: [
-      { letra: 'C', texto: 'Certo', correta: correta === 'C' },
-      { letra: 'E', texto: 'Errado', correta: correta === 'E' },
-    ],
+    sublinhadosEnunciado: (q as any).sublinhados_enunciado ?? null,
+    negritosEnunciado: (q as any).negritos_enunciado ?? null,
+    italicosEnunciado: (q as any).italicos_enunciado ?? null,
+    alternativas: [],
     comentario: (q as any).comentario_geral ?? null,
+    sublinhadosComentario: (q as any).sublinhados_comentario ?? null,
+    negritosComentario: (q as any).negritos_comentario ?? null,
+    italicosComentario: (q as any).italicos_comentario ?? null,
     imagem_url: (q as any).imagem_url ?? null,
   };
+
+  if (ehMultipla) {
+    base.alternativas = q.alternativas.map((a: any) => ({
+      letra: a.letra,
+      texto: a.texto,
+      correta: !!a.correta,
+      sublinhados: a.sublinhados ?? null,
+      negritos: a.negritos ?? null,
+      italicos: a.italicos ?? null,
+    }));
+  } else {
+    const correta = q.gabarito_ce === true ? 'C' : 'E';
+    base.alternativas = [
+      { letra: 'C', texto: 'Certo', correta: correta === 'C' },
+      { letra: 'E', texto: 'Errado', correta: correta === 'E' },
+    ];
+  }
+
+  return base;
 }
 
 export function normalizarQuestaoLista(q: QuestaoListaPlayer): QuestaoExport {
   const ehMultipla = q.tipo === 'multipla_escolha' && q.alternativas && q.alternativas.length > 0;
-  if (ehMultipla) {
-    return {
-      numero: q.numero,
-      enunciado: q.enunciado || '',
-      alternativas: (q.alternativas || []).map((a: any) => ({
-        letra: a.letra,
-        texto: a.texto,
-        correta: !!a.correta,
-      })),
-      comentario: (q as any).comentario_geral ?? null,
-      imagem_url: (q as any).imagem_url ?? null,
-    };
-  }
-  const correta = q.gabarito_ce === true ? 'C' : 'E';
-  return {
+  const base: QuestaoExport = {
     numero: q.numero,
     enunciado: q.enunciado || '',
-    alternativas: [
-      { letra: 'C', texto: 'Certo', correta: correta === 'C' },
-      { letra: 'E', texto: 'Errado', correta: correta === 'E' },
-    ],
+    sublinhadosEnunciado: (q as any).sublinhados_enunciado ?? null,
+    negritosEnunciado: (q as any).negritos_enunciado ?? null,
+    italicosEnunciado: (q as any).italicos_enunciado ?? null,
+    alternativas: [],
     comentario: (q as any).comentario_geral ?? null,
+    sublinhadosComentario: (q as any).sublinhados_comentario ?? null,
+    negritosComentario: (q as any).negritos_comentario ?? null,
+    italicosComentario: (q as any).italicos_comentario ?? null,
     imagem_url: (q as any).imagem_url ?? null,
   };
+
+  if (ehMultipla) {
+    base.alternativas = (q.alternativas || []).map((a: any) => ({
+      letra: a.letra,
+      texto: a.texto,
+      correta: !!a.correta,
+      sublinhados: a.sublinhados ?? null,
+      negritos: a.negritos ?? null,
+      italicos: a.italicos ?? null,
+    }));
+  } else {
+    const correta = q.gabarito_ce === true ? 'C' : 'E';
+    base.alternativas = [
+      { letra: 'C', texto: 'Certo', correta: correta === 'C' },
+      { letra: 'E', texto: 'Errado', correta: correta === 'E' },
+    ];
+  }
+
+  return base;
 }
 
 // ============================================================
-// HELPERS
+// HELPERS DE IMAGEM
 // ============================================================
 async function carregarImagemBase64(url: string): Promise<string | null> {
   try {
@@ -133,6 +169,151 @@ function sanitizeFilename(name: string): string {
 }
 
 // ============================================================
+// RICH TEXT — segmentação em runs
+// ============================================================
+interface RichRun {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+}
+
+function segmentarTexto(
+  texto: string,
+  formatacao: {
+    sublinhados?: RangeFormatacao[] | null;
+    negritos?: RangeFormatacao[] | null;
+    italicos?: RangeFormatacao[] | null;
+  }
+): RichRun[] {
+  if (!texto) return [{ text: '', bold: false, italic: false, underline: false }];
+
+  const len = texto.length;
+  const boldMask = new Uint8Array(len);
+  const italicMask = new Uint8Array(len);
+  const underlineMask = new Uint8Array(len);
+
+  for (const r of formatacao.negritos || []) {
+    for (let i = Math.max(0, r.inicio); i < Math.min(len, r.fim); i++) boldMask[i] = 1;
+  }
+  for (const r of formatacao.italicos || []) {
+    for (let i = Math.max(0, r.inicio); i < Math.min(len, r.fim); i++) italicMask[i] = 1;
+  }
+  for (const r of formatacao.sublinhados || []) {
+    for (let i = Math.max(0, r.inicio); i < Math.min(len, r.fim); i++) underlineMask[i] = 1;
+  }
+
+  const runs: RichRun[] = [];
+  let i = 0;
+  while (i < len) {
+    const b = boldMask[i];
+    const it = italicMask[i];
+    const u = underlineMask[i];
+    let j = i;
+    while (j < len && boldMask[j] === b && italicMask[j] === it && underlineMask[j] === u) j++;
+    runs.push({ text: texto.slice(i, j), bold: !!b, italic: !!it, underline: !!u });
+    i = j;
+  }
+
+  return runs;
+}
+
+function estiloFont(run: RichRun): string {
+  if (run.bold && run.italic) return 'bolditalic';
+  if (run.bold) return 'bold';
+  if (run.italic) return 'italic';
+  return 'normal';
+}
+
+function quebrarLinhas(
+  doc: any,
+  runs: RichRun[],
+  maxWidth: number,
+  fontSize: number
+): RichRun[][] {
+  const lines: RichRun[][] = [[]];
+  let currentWidth = 0;
+
+  for (const run of runs) {
+    doc.setFont('helvetica', estiloFont(run));
+    doc.setFontSize(fontSize);
+
+    const tokens: string[] = run.text.split(/(\s+)/).filter((t: string) => t.length > 0);
+
+    for (const token of tokens) {
+      if (token.includes('\n')) {
+        lines.push([]);
+        currentWidth = 0;
+        continue;
+      }
+      const isWhitespace = /^\s+$/.test(token);
+      const w = doc.getTextWidth(token);
+
+      if (isWhitespace) {
+        if (currentWidth > 0) {
+          lines[lines.length - 1].push({ ...run, text: token });
+          currentWidth += w;
+        }
+        continue;
+      }
+
+      if (currentWidth + w > maxWidth && currentWidth > 0) {
+        lines.push([]);
+        currentWidth = 0;
+      }
+
+      lines[lines.length - 1].push({ ...run, text: token });
+      currentWidth += w;
+    }
+  }
+
+  return lines;
+}
+
+function desenharRichText(
+  doc: any,
+  runs: RichRun[],
+  x: number,
+  yInicial: number,
+  maxWidth: number,
+  fontSize: number,
+  lineHeight: number,
+  contentBottom: number,
+  novaPagina: () => number,
+  cor: [number, number, number]
+): number {
+  let y = yInicial;
+  const lines = quebrarLinhas(doc, runs, maxWidth, fontSize);
+
+  for (const line of lines) {
+    if (y + lineHeight > contentBottom) {
+      y = novaPagina();
+    }
+
+    let cursorX = x;
+    for (const run of line) {
+      doc.setFont('helvetica', estiloFont(run));
+      doc.setFontSize(fontSize);
+      doc.setTextColor(cor[0], cor[1], cor[2]);
+
+      const w = doc.getTextWidth(run.text);
+      doc.text(run.text, cursorX, y);
+
+      if (run.underline) {
+        doc.setDrawColor(cor[0], cor[1], cor[2]);
+        doc.setLineWidth(0.2);
+        doc.line(cursorX, y + 0.7, cursorX + w, y + 0.7);
+      }
+
+      cursorX += w;
+    }
+    y += lineHeight;
+  }
+
+  return y;
+}
+
+// ============================================================
 // FUNÇÃO PRINCIPAL
 // ============================================================
 export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
@@ -155,7 +336,6 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
   const totalQuestoes = questoes.length;
 
   const desenharCabecalho = () => {
-    // Faixa superior (laranja da marca)
     doc.setFillColor(254, 120, 2);
     doc.rect(0, 0, pageW, 10, 'F');
 
@@ -168,7 +348,6 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
       doc.text('CORRIGIDO', pageW - margin, 7, { align: 'right' });
     }
 
-    // Título
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
@@ -176,7 +355,6 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     doc.text(tituloLines, margin, margin + 6);
     let yCab = margin + 6 + tituloLines.length * 5;
 
-    // Subtítulo
     if (subtitulo) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
@@ -185,7 +363,6 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
       doc.text(subtitulo, margin, yCab);
     }
 
-    // Resultado (apenas na versão corrigida)
     if (modo === 'corrigida' && resultado) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
@@ -195,7 +372,6 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
       doc.text(texto, margin, yCab);
     }
 
-    // Linha
     doc.setDrawColor(220, 220, 220);
     doc.setLineWidth(0.3);
     doc.line(margin, margin + headerHeight, pageW - margin, margin + headerHeight);
@@ -208,16 +384,12 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     doc.text(`RevisaFlash · Página ${pageNum}`, pageW / 2, pageH - 6, { align: 'center' });
   };
 
-  const novaPagina = () => {
+  const novaPaginaRetornaY = (): number => {
     desenharRodape(pageNumber);
     doc.addPage();
     pageNumber++;
     desenharCabecalho();
-    y = contentTop;
-  };
-
-  const verificarEspaco = (espaco: number) => {
-    if (y + espaco > contentBottom) novaPagina();
+    return contentTop;
   };
 
   desenharCabecalho();
@@ -235,7 +407,7 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     });
 
     // Cabeçalho da questão
-    verificarEspaco(10);
+    if (y + 10 > contentBottom) y = novaPaginaRetornaY();
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -249,7 +421,7 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     doc.text(labelQ, margin, y);
     y += 6;
 
-    // Imagem (antes do enunciado, como no app)
+    // Imagem
     if (q.imagem_url) {
       const b64 = await carregarImagemBase64(q.imagem_url);
       if (b64) {
@@ -262,7 +434,7 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
             imgH = 80;
             imgW = imgH / ratio;
           }
-          verificarEspaco(imgH + 4);
+          if (y + imgH + 4 > contentBottom) y = novaPaginaRetornaY();
           try {
             doc.addImage(b64, 'JPEG', margin, y, imgW, imgH);
             y += imgH + 4;
@@ -280,19 +452,20 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
       }
     }
 
-    // Enunciado
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(0, 0, 0);
-    const enunciadoLines = doc.splitTextToSize(q.enunciado, contentW);
-    for (const line of enunciadoLines) {
-      verificarEspaco(5);
-      doc.text(line, margin, y);
-      y += 5;
-    }
+    // Enunciado com formatação rica
+    const runsEnunciado = segmentarTexto(q.enunciado, {
+      sublinhados: q.sublinhadosEnunciado,
+      negritos: q.negritosEnunciado,
+      italicos: q.italicosEnunciado,
+    });
+    y = desenharRichText(
+      doc, runsEnunciado, margin, y, contentW,
+      10, 5, contentBottom, novaPaginaRetornaY,
+      [0, 0, 0]
+    );
     y += 2;
 
-    // Alternativas
+    // Alternativas com formatação rica
     for (const alt of q.alternativas) {
       let cor: [number, number, number] = [0, 0, 0];
       let sufixo = '';
@@ -307,31 +480,52 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
         }
       }
 
-      doc.setTextColor(cor[0], cor[1], cor[2]);
-      const linha = `(${alt.letra}) ${alt.texto}${sufixo}`;
-      const altLines = doc.splitTextToSize(linha, contentW - 5);
-      for (const line of altLines) {
-        verificarEspaco(5);
-        doc.text(line, margin + 5, y);
-        y += 5;
+      const textoAlternativa = `(${alt.letra}) ${alt.texto}`;
+      const runsAlt = segmentarTexto(textoAlternativa, {
+        sublinhados: alt.sublinhados,
+        negritos: alt.negritos,
+        italicos: alt.italicos,
+      });
+
+      if (sufixo) {
+        runsAlt.push({ text: sufixo, bold: false, italic: false, underline: false });
       }
+
+      y = desenharRichText(
+        doc, runsAlt, margin + 5, y, contentW - 5,
+        10, 5, contentBottom, novaPaginaRetornaY,
+        cor
+      );
     }
 
-    // Comentário (só na corrigida)
+    // Comentário (só na corrigida) com formatação rica
     if (modo === 'corrigida' && q.comentario && q.comentario.trim()) {
       y += 2;
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'italic');
-      doc.setTextColor(80, 80, 80);
-      const comentLines = doc.splitTextToSize(`Comentário: ${q.comentario}`, contentW);
-      for (const line of comentLines) {
-        verificarEspaco(4.5);
-        doc.text(line, margin, y);
-        y += 4.5;
-      }
+
+      const prefixo: RichRun = { text: 'Comentário: ', bold: false, italic: true, underline: false };
+      const runsComentario = segmentarTexto(q.comentario, {
+        sublinhados: q.sublinhadosComentario,
+        negritos: q.negritosComentario,
+        italicos: q.italicosComentario,
+      });
+      // Aplica itálico como base (para combinar com o prefixo), mantendo negrito/sublinhado próprios.
+      const runsComBase: RichRun[] = runsComentario.map((r) => ({
+        text: r.text,
+        bold: r.bold,
+        italic: true, // comentário inteiro em itálico
+        underline: r.underline,
+      }));
+
+      y = desenharRichText(
+        doc,
+        [prefixo, ...runsComBase],
+        margin, y, contentW,
+        9, 4.5, contentBottom, novaPaginaRetornaY,
+        [80, 80, 80]
+      );
     }
 
-    y += 6; // espaço entre questões
+    y += 6;
   }
 
   desenharRodape(pageNumber);
