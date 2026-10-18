@@ -29,9 +29,14 @@ import type {
 import {
   ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, Trash2, Copy,
+  Loader2, Trash2, Copy, FileDown,
 } from "lucide-react";
 import type { SimuladoPlayer, QuestaoPlayer, ProgressoPlayer, Alternativa } from "@/lib/simulados-types";
+import {
+  exportarPdf,
+  normalizarQuestaoSimulado,
+  type ModoPdf,
+} from "@/services/pdfExportService";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 
@@ -418,6 +423,49 @@ export default function SimuladoPlayerPage() {
     if (ok) navigate(rotaVoltar);
   };
 
+  const handleBaixarPdf = async (modo: ModoPdf) => {
+    if (!simulado) return;
+
+    // Calcula o resultado no mesmo formato da tela
+    let acertos = 0, erros = 0, naoRespondidas = 0, tempoExibido = progresso.tempo_decorrido;
+    let respostasParaExportar: Record<number, string> = progresso.respostas;
+
+    if (resultadoSalvo) {
+      acertos = resultadoSalvo.acertos || 0;
+      erros = resultadoSalvo.erros || 0;
+      naoRespondidas = resultadoSalvo.nao_respondidas || 0;
+      tempoExibido = resultadoSalvo.tempo_segundos || 0;
+      respostasParaExportar = resultadoSalvo.respostas || {};
+    } else {
+      simulado.questoes.forEach((q) => {
+        const resp = progresso.respostas[q.numero];
+        if (!resp) { naoRespondidas++; return; }
+        const correta = getCorreta(q);
+        if (resp === correta) acertos++;
+        else erros++;
+      });
+    }
+
+    const total = simulado.questoes.length;
+    const pct = total > 0 ? Math.round((acertos / total) * 100) : 0;
+
+    try {
+      const questoesExport = simulado.questoes.map(normalizarQuestaoSimulado);
+      await exportarPdf({
+        titulo: simulado.titulo,
+        subtitulo: `${simulado.banca || 'Simulado'} · ${simulado.ano || ''} · ${total} questões · ${new Date().toLocaleDateString('pt-BR')}`,
+        questoes: questoesExport,
+        respostas: respostasParaExportar,
+        resultado: { acertos, erros, naoRespondidas, porcentagem: pct },
+        modo,
+      });
+      toast.success(`PDF ${modo === 'corrigida' ? 'corrigido' : 'para responder'} gerado!`);
+    } catch (e: any) {
+      console.error('[PDF] Erro ao gerar:', e);
+      toast.error("Erro ao gerar PDF", { description: e?.message });
+    }
+  };
+
   const handleExcluirSimulado = async () => {
     if (!id || !user?.id || !simulado) return;
     const ok = await confirmDialog({
@@ -548,6 +596,23 @@ export default function SimuladoPlayerPage() {
               Excluir simulado
             </button>
           )}
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => void handleBaixarPdf('responder')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface"
+            title="Baixar PDF com as questões para responder (sem gabarito)"
+          >
+            <FileDown className="h-3.5 w-3.5" /> PDF para responder
+          </button>
+          <button
+            onClick={() => void handleBaixarPdf('corrigida')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/15"
+            title="Baixar PDF corrigido (com gabarito e comentários)"
+          >
+            <FileDown className="h-3.5 w-3.5" /> PDF corrigido
+          </button>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
