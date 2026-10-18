@@ -677,9 +677,10 @@ export async function buscarResultadosDoUsuario(
     const docs = await db.resultados_simulado.find({
       selector: { user_id: userId, isdeleted: false },
     }).exec();
-    const data = docs
+       const ordenados = docs
       .map((d: any) => d.toJSON())
       .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''));
+    const data = await anexarTitulos(db, ordenados);
     return { success: true, data };
   } catch (error: any) {
     console.error('Erro ao buscar resultados:', error);
@@ -704,7 +705,7 @@ export async function buscarHistoricoCompleto(
     const all = docs
       .map((d: any) => d.toJSON())
       .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''));
-    const slice = all.slice(offset, offset + limit);
+        const slice = await anexarTitulos(db, all.slice(offset, offset + limit));
     return { success: true, data: { total: all.length, resultados: slice } };
   } catch (error: any) {
     console.error('Erro ao buscar histórico:', error);
@@ -1246,5 +1247,24 @@ export async function removerQuestaoDoSimulado(
   } catch (error: any) {
     console.error('Erro ao remover questão do simulado:', error);
     return { success: false, error: error.message };
+  }
+}
+
+// Acrescenta título e área do simulado aos resultados (inclusive de simulados de amigas)
+async function anexarTitulos(db: any, resultados: any[]): Promise<any[]> {
+  try {
+    const ids = Array.from(new Set(resultados.map((r) => r.simulado_id).filter(Boolean)));
+    if (ids.length === 0) return resultados;
+    const sims = await db.simulados.find({ selector: { id: { $in: ids } } }).exec();
+    const mapa: Record<string, any> = {};
+    sims.forEach((s: any) => { mapa[s.get('id')] = s; });
+    return resultados.map((r) => ({
+      ...r,
+      simulado_titulo: mapa[r.simulado_id]?.get('titulo') || r.simulado_titulo,
+      simulado_area: mapa[r.simulado_id]?.get('area') || r.simulado_area,
+    }));
+  } catch (e) {
+    console.warn('⚠️ Não consegui anexar títulos aos resultados:', e);
+    return resultados;
   }
 }

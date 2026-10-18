@@ -366,7 +366,8 @@ export default function SimuladosPage() {
 
   const getSimuladoTitulo = (simuladoId: string) => {
     const s = simulados.find(s => s.id === simuladoId);
-    return s?.titulo || 'Simulado';
+    const r = resultadosLista.find(r => r.simulado_id === simuladoId);
+    return s?.titulo || r?.simulado_titulo || 'Simulado';
   };
 
   const selectedResults = getSelectedResults();

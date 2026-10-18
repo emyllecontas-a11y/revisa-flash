@@ -14,6 +14,7 @@ import {
 } from "@/services/listaService";
 import { QuestaoListaPlayer, ResultadoListaCalc } from "@/lib/listas-types";
 import { EnviarErrosModal, QuestaoErrada } from "@/components/EnviarErrosModal";
+import { CopiarListaModal } from "@/components/copiar-lista-modal";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -31,7 +32,7 @@ import type {
 import {
   ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, Keyboard, Scissors,
+  Loader2, Keyboard, Scissors, Copy,
 } from "lucide-react";
 
 type Fase = "resolvendo" | "resultado" | "correcao";
@@ -86,6 +87,7 @@ export default function ListaPlayerPage() {
   // Lista compartilhada por amiga: somente leitura (sem enviar erros ao caderno)
   const ehDona = !!lista && lista.user_id === user?.id;
   const rotaVoltar = lista && !ehDona ? "/compartilhados" : "/simulados";
+  const [mostrarCopiar, setMostrarCopiar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -859,6 +861,16 @@ export default function ListaPlayerPage() {
             >
               <Keyboard className="h-3.5 w-3.5" />
             </button>
+              {!ehDona && (
+              <button
+                onClick={() => setMostrarCopiar(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
+                title="Copiar para minha conta"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Copiar</span>
+              </button>
+            )}
             <button
               onClick={() => setPainel(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface"
@@ -1062,6 +1074,18 @@ export default function ListaPlayerPage() {
             </div>
           </div>
         </div>
+      )}
+      {mostrarCopiar && !ehDona && user?.id && (
+        <CopiarListaModal
+          listaId={lista.id}
+          listaTitulo={lista.titulo}
+          userId={user.id}
+          onClose={() => setMostrarCopiar(false)}
+          onAbrirCopia={(novoId) => {
+            setMostrarCopiar(false);
+            navigate(`/listas/${novoId}`);
+          }}
+        />
       )}
     </AppShell>
   );

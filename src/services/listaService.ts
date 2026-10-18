@@ -1225,3 +1225,113 @@ export async function excluirTodosResultadosLista(
     return { success: false, error: error.message };
   }
 }
+
+// ============================================================
+// COPIAR LISTA DE OUTRA PESSOA PARA A MINHA CONTA
+// ============================================================
+
+// Baixa uma imagem pública e a envia de novo para a pasta de quem está copiando.
+// Se falhar, devolve null (quem chama mantém o endereço original da imagem).
+async function copiarImagemParaMinhaConta(url: string, userId: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const base64: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    const res = await uploadImagemQuestao(base64, userId);
+    return res.success && res.url ? res.url : null;
+  } catch {
+    return null;
+  }
+}
+
+// Copia só o CONTEÚDO da lista (questões, alternativas, comentários, imagens).
+// Respostas, grifos e resultados da dona original NÃO são copiados.
+export async function copiarListaParaMinhaConta(
+  listaId: string,
+  userId: string,
+  disciplineId: string
+): Promise<{ success: boolean; listaId?: string; imagensNaoCopiadas?: number; error?: string }> {
+  try {
+    if (!userId) return { success: false, error: 'Usuário não autenticado' };
+    if (!disciplineId) return { success: false, error: 'Escolha uma disciplina' };
+    if (!isOnline()) {
+      return {
+        success: false,
+        error: 'Você está offline. Copiar uma lista precisa de conexão com a internet.',
+      };
+    }
+
+    const original = await getListaCompleta(listaId, userId);
+    if (!original.success || !original.data) {
+      return { success: false, error: original.error || 'Não consegui abrir a lista original.' };
+    }
+    const lista = original.data;
+    if (lista.user_id === userId) {
+      return { success: false, error: 'Esta lista já é sua.' };
+    }
+
+    // Cada questão com imagem ganha uma cópia da imagem na pasta de quem está copiando
+    let imagensNaoCopiadas = 0;
+    const novasUrls = await processarEmLotes(lista.questoes, 5, async (q: any) => {
+      if (!q.imagem_url) return null as string | null;
+      const nova = await copiarImagemParaMinhaConta(q.imagem_url, userId);
+      if (!nova) {
+        imagensNaoCopiadas++;
+        return q.imagem_url as string;
+      }
+      return nova;
+    });
+
+    const questoesFormatadas = lista.questoes.map((q: any, i: number) => {
+      const qf: any = {
+        numero: i + 1,
+        tipo: q.tipo,
+        enunciado: q.enunciado,
+        area: q.area || null,
+        imagem_url: novasUrls[i],
+        comentario_geral: q.comentario_geral || null,
+      };
+      if (q.tipo === 'multipla_escolha') qf.alternativas = q.alternativas || [];
+      else if (q.tipo === 'certo_errado') qf.correta = q.gabarito_ce === true;
+
+      if (q.sublinhados_enunciado?.length) qf.sublinhados_enunciado = q.sublinhados_enunciado;
+      if (q.sublinhados_comentario?.length) qf.sublinhados_comentario = q.sublinhados_comentario;
+      if (q.negritos_enunciado?.length) qf.negritos_enunciado = q.negritos_enunciado;
+      if (q.negritos_comentario?.length) qf.negritos_comentario = q.negritos_comentario;
+      if (q.italicos_enunciado?.length) qf.italicos_enunciado = q.italicos_enunciado;
+      if (q.italicos_comentario?.length) qf.italicos_comentario = q.italicos_comentario;
+      return qf;
+    });
+
+    const client = await getSupabaseWithToken();
+    const novaListaId = crypto.randomUUID();
+
+    const { data, error } = await client.rpc('importar_lista', {
+      p_lista_id: novaListaId,
+      p_user_id: userId,
+      p_discipline_id: disciplineId,
+      p_titulo: lista.titulo,
+      p_descricao: lista.descricao || null,
+      p_questoes: questoesFormatadas,
+    });
+
+    if (error) throw error;
+
+    if (data && data.success === true) {
+      import('@/lib/db').then(({ syncWithSupabase }) => {
+        syncWithSupabase(userId).catch(() => {});
+      });
+      return { success: true, listaId: novaListaId, imagensNaoCopiadas };
+    }
+    return { success: false, error: data?.error || 'Erro desconhecido na RPC' };
+  } catch (error: any) {
+    console.error('Erro ao copiar lista:', error);
+    return { success: false, error: error.message };
+  }
+}

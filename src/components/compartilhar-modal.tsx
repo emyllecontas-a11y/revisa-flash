@@ -246,7 +246,7 @@ export function CompartilharModal({
           )}
 
           {erro && (
-            <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {erro}
             </p>
           )}

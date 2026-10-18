@@ -962,6 +962,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_text_boxes',
       'files',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
+      'anotacoes_questao',
     ];
     const emptyCollections = new Set<string>();
     for (const name of collectionsToCheck) {
@@ -983,6 +984,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
+      'anotacoes_questao',
     ];
 
     for (const name of collections) {
@@ -990,7 +992,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       if (!collection) continue;
 
       // MUDANÇA: user_settings sempre puxa completo
-      const pullFrom = (name === 'user_settings' || emptyCollections.has(name)) 
+      const pullFrom = (name === 'user_settings' || name === 'anotacoes_questao' || emptyCollections.has(name))
         ? '1970-01-01T00:00:00Z' 
         : lastSyncGlobal;
 
