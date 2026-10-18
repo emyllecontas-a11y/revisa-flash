@@ -671,6 +671,12 @@ export async function atualizarLista(
 // 12-16. QUESTÕES (corrigido — busca por PK)
 // ============================================================
 
+/** Só a dona (user_id) pode alterar a lista e suas questões. Lista de amiga é somente leitura. */
+async function souDonaDaLista(db: any, listaId: string, userId: string): Promise<boolean> {
+  const l = await db.listas.findOne({ selector: { id: listaId } }).exec();
+  return !!l && l.get('user_id') === userId;
+}
+
 export async function removerQuestaoDALista(
   listaId: string,
   questaoId: string,
@@ -678,6 +684,9 @@ export async function removerQuestaoDALista(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const db = await getDb();
+    if (!(await souDonaDaLista(db, listaId, userId))) {
+      return { success: false, error: 'Só a dona da lista pode remover questões.' };
+    }
 
     const linkDoc = await db.listas_questoes.findOne({
       selector: { lista_id: listaId, questao_id: questaoId },
@@ -758,6 +767,9 @@ export async function criarQuestaoNaLista(
     }
 
     const db = await getDb();
+    if (!(await souDonaDaLista(db, listaId, userId))) {
+      return { success: false, error: 'Só a dona da lista pode adicionar questões.' };
+    }
     const questaoId = crypto.randomUUID();
     const now = nowIso();
 

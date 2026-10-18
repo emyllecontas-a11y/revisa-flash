@@ -507,6 +507,12 @@ export async function importarSimulado(
 // 7. EXCLUIR SIMULADO
 // ============================================================
 
+/** Só a dona (created_by) pode alterar o simulado e suas questões. Simulado de amiga é somente leitura. */
+async function souDonoDoSimulado(db: any, simuladoId: string, userId: string): Promise<boolean> {
+  const sim = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+  return !!sim && sim.get('created_by') === userId;
+}
+
 export async function excluirSimulado(
   simuladoId: string,
   userId: string
@@ -576,6 +582,9 @@ export async function atualizarSimulado(
 
     const doc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
     if (!doc) return { success: false, error: 'Simulado não encontrado' };
+    if (doc.get('created_by') !== userId) {
+      return { success: false, error: 'Só a dona do simulado pode editá-lo.' };
+    }
     await doc.patch(patch);
     await enqueueOperation('update', 'simulados', { id: simuladoId, ...patch });
 
@@ -1040,6 +1049,9 @@ export async function criarQuestaoNoSimulado(
     }
 
     const db = await getDb();
+    if (!(await souDonoDoSimulado(db, simuladoId, userId))) {
+      return { success: false, error: 'Só a dona do simulado pode adicionar questões.' };
+    }
     const questaoId = crypto.randomUUID();
     const now = nowIso();
 
@@ -1138,6 +1150,9 @@ export async function atualizarQuestaoSimulado(
 
     const doc = await db.questoes.findOne({ selector: { id: questaoId } }).exec();
     if (!doc) return { success: false, error: 'Questão não encontrada' };
+    if (!(await souDonoDoSimulado(db, String(doc.get('simulado_id')), userId))) {
+      return { success: false, error: 'Só a dona do simulado pode editar as questões.' };
+    }
 
     // Atualiza a questão
     const patch = {
@@ -1208,6 +1223,9 @@ export async function removerQuestaoDoSimulado(
 
     const qDoc = await db.questoes.findOne({ selector: { id: questaoId } }).exec();
     if (!qDoc) return { success: false, error: 'Questão não encontrada' };
+    if (!(await souDonoDoSimulado(db, simuladoId, userId))) {
+      return { success: false, error: 'Só a dona do simulado pode remover questões.' };
+    }
 
     await qDoc.patch({ isdeleted: true, updated_at: now });
     await enqueueOperation('update', 'questoes', {
