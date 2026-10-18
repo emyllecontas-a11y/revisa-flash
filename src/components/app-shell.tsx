@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
@@ -49,6 +49,7 @@ const MAIS_ROTAS = [
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
   { to: "/simulados", label: "Simulados", icon: "file-text" },
+    { to: "/amigas", label: "Amigas", icon: "users" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
 ] as const;
 
@@ -63,6 +64,7 @@ const ICONS = {
   layers: Layers,
   "file-text": FileText,
   settings: Settings,
+  users: Users,
 } as const;
 
 type RouteIcon = keyof typeof ICONS;

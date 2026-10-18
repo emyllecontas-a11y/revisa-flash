@@ -25,6 +25,7 @@ import TestePdf from './routes/teste-pdf';
 import PdfPage from './routes/pdf.$fileId';
 // 🔥 NOVO — Sessões
 import Sessoes from './routes/sessoes';
+import Amigas from './routes/amigas';
 
 // Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
@@ -185,6 +186,14 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <Sessoes />
+      </ClerkProtectedRoute>
+    ),
+  },
+    {
+    path: '/amigas',
+    element: (
+      <ClerkProtectedRoute>
+        <Amigas />
       </ClerkProtectedRoute>
     ),
   },
