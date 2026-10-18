@@ -1,12 +1,14 @@
 // src/services/clerkService.ts
 //
-// Agora as funções de busca exigem login: enviamos o token do Clerk
-// (o mesmo que o app já usa para falar com o Supabase).
+// Busca de pessoas (por e-mail e por ID). Agora feita por funções do banco
+// (Supabase), protegidas por login e com limite de tentativas, em vez das
+// funções de servidor abertas. Os nomes exportados continuam os mesmos, então
+// a tela de flashcards e a tela Amigas funcionam sem outras mudanças.
+//
+// Observação: só encontra quem já entrou no app (o perfil é criado no
+// primeiro acesso, com nome e e-mail).
 
-import { getClerkToken } from '@/lib/supabaseClient';
-
-const SUPABASE_URL = 'https://driayoaxyrpfdaqugvmx.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+import { getSupabaseWithToken } from '@/lib/supabaseClient';
 
 export interface PessoaEncontrada {
   userId: string;
@@ -14,40 +16,33 @@ export interface PessoaEncontrada {
   email: string | null;
 }
 
-async function chamarFuncao(nome: string, corpo: unknown): Promise<any> {
-  const token = await getClerkToken();
-  if (!token) throw new Error('Usuário não autenticado');
-
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      apikey: SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify(corpo),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || data?.message || 'Erro ao consultar usuários');
-  }
-  return data;
+interface LinhaPessoa {
+  pessoa_id: string;
+  pessoa_nome: string | null;
+  pessoa_email: string | null;
 }
 
 /**
  * Busca uma pessoa pelo e-mail, com nome. Devolve null se não achar.
- * (Usada pela futura tela "Amigas".)
  */
 export async function findPersonByEmail(email: string): Promise<PessoaEncontrada | null> {
-  try {
-    const data = await chamarFuncao('clerk-search-user', { email });
-    if (!data?.found || !data?.userId) return null;
-    return { userId: data.userId, name: data.name ?? null, email: data.email ?? null };
-  } catch (error) {
+  const supabase = await getSupabaseWithToken();
+  const { data, error } = await supabase.rpc('buscar_pessoa_por_email', {
+    p_email: email.trim().toLowerCase(),
+  });
+
+  if (error) {
     console.error('❌ Erro ao buscar usuário por e-mail:', error);
-    throw error;
+    throw new Error(error.message || 'Erro ao buscar usuário');
   }
+
+  const row = (Array.isArray(data) ? data[0] : null) as LinhaPessoa | null;
+  if (!row) return null;
+  return {
+    userId: row.pessoa_id,
+    name: row.pessoa_nome ?? null,
+    email: row.pessoa_email ?? null,
+  };
 }
 
 /**
@@ -68,11 +63,19 @@ export async function findUsersByIds(
 ): Promise<{ id: string; email: string | null; name: string | null }[]> {
   if (!userIds || userIds.length === 0) return [];
 
-  try {
-    const data = await chamarFuncao('clerk-users-batch', { userIds });
-    return data.users || [];
-  } catch (error) {
+  const supabase = await getSupabaseWithToken();
+  const { data, error } = await supabase.rpc('buscar_pessoas_conhecidas', {
+    p_ids: userIds,
+  });
+
+  if (error) {
     console.error('❌ Erro ao buscar usuários por IDs:', error);
-    throw error;
+    throw new Error(error.message || 'Erro ao buscar usuários');
   }
+
+  return ((data ?? []) as LinhaPessoa[]).map((r) => ({
+    id: r.pessoa_id,
+    name: r.pessoa_nome ?? null,
+    email: r.pessoa_email ?? null,
+  }));
 }
