@@ -528,7 +528,6 @@ export function CompartilhadosConteudo() {
     await recarregar();
   };
 
-  const handleCopiarSimulado = async (s: SimuladoItem) => {
   // -------- Copiar SIMULADO (sem escolha de destino) --------
   const handleCopiarSimulado = async (s: SimuladoItem) => {
     if (!userId || copiandoKey) return;
