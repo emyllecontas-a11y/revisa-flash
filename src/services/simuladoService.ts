@@ -52,16 +52,19 @@ function serializar<T>(key: string, fn: () => Promise<T>): Promise<T> {
 // 1. LISTAR SIMULADOS
 // ============================================================
 
-export async function getSimulados(): Promise<{ success: boolean; data?: Simulado[]; error?: string }> {
+export async function getSimulados(userIdParam?: string): Promise<{ success: boolean; data?: Simulado[]; error?: string }> {
   try {
+    const meuId = userIdParam || localStorage.getItem('revisaflash_user_id') || '';
+    if (!meuId) return { success: true, data: [] };
+
     const db = await getDb();
-    const docs = await db.simulados.find({ selector: { isdeleted: false } }).exec();
+    const docs = await db.simulados.find({ selector: { created_by: meuId, isdeleted: false } }).exec();
     let simulados: Simulado[] = docs.map((d: any) => d.toJSON());
 
     if (simulados.length === 0 && isOnline()) {
       try {
         const client = await getSupabaseWithToken();
-        const { data } = await client.from('simulados').select('*').eq('isdeleted', false);
+        const { data } = await client.from('simulados').select('*').eq('created_by', meuId).eq('isdeleted', false);
         for (const doc of data || []) {
           const ex = await db.simulados.findOne({ selector: { id: doc.id } }).exec();
           if (!ex) await db.simulados.insert(doc).catch(() => {});
@@ -533,7 +536,10 @@ export async function excluirSimulado(
     }
 
     const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
-    if (simDoc) await simDoc.patch({ isdeleted: true, updated_at: now });
+      if (simDoc && simDoc.get('created_by') === userId) {
+      await simDoc.patch({ isdeleted: true, updated_at: now });
+      await enqueueOperation('update', 'simulados', { id: simuladoId, isdeleted: true, updated_at: now });
+    }
 
     return { success: true };
   } catch (error: any) {
