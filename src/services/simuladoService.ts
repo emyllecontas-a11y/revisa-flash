@@ -388,6 +388,10 @@ export async function finalizarSimulado(
       respostas: respostas || {},
       areas: areas || {},
       comentarios_gerais: null,
+      // Guarda o título/área no próprio resultado para o histórico nunca
+      // depender de o simulado ainda existir no banco local.
+      simulado_titulo: sim.titulo || null,
+      simulado_area: sim.area || null,
       created_at: now,
       updated_at: now,
       isdeleted: false,

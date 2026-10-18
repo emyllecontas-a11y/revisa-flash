@@ -685,6 +685,10 @@ const resultadoSimuladoSchema = {
     respostas: { type: 'object', additionalProperties: true },
     areas: { type: 'object', additionalProperties: true },
     comentarios_gerais: { type: ['string', 'null'] },
+    // NOVOS: guardam o título/área no momento da finalização,
+    // para o histórico não depender do simulado ainda existir localmente.
+    simulado_titulo: { type: ['string', 'null'] },
+    simulado_area: { type: ['string', 'null'] },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isdeleted: { type: 'boolean', default: false },
@@ -844,7 +848,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v11';
+    const DB_NAME = 'revisaflash_db_v12';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
@@ -854,14 +858,15 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v8'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v9'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v10'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v11'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v11') {
+      if (markerVersion !== 'v12') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
         clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v11');
+        localStorage.setItem('revisaflash_db_version', 'v12');
       }
     } catch (e) {}
 
@@ -907,7 +912,7 @@ export async function getDb(): Promise<RxDatabase> {
       revisoes_subtopico: { schema: revisaoSubtopicoSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v11).');
+    console.log('✅ Banco local criado com sucesso (v12).');
     dbInstance = db;
     return db;
   } catch (error: any) {
