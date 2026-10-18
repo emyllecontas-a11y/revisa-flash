@@ -95,6 +95,9 @@ const DEFAULT_SETTINGS: Omit<UserSettings, 'id' | 'user_id' | 'updated_at'> = {
   show_next_review_time: false
 };
 
+// MUDANÇA: ID fixo para evitar duplicatas
+const getFixedSettingsId = (userId: string) => `settings_${userId}`;
+
 interface FlashcardContextType {
   refreshFlashcards: () => void;
   dueCards: Card[];
@@ -126,9 +129,9 @@ interface FlashcardContextType {
   removeMemberFromDeck: (deckId: string, userIdToRemove: string) => Promise<void>;
   addMemberByEmail: (deckId: string, email: string) => Promise<void>;
 
-  // FUNÇÕES DE CONFIGURAÇÃO E PRIORIZAÇÃO
   getUserSettings: () => Promise<UserSettings>;
-  updateUserSettings: (settings: Partial<UserSettings>) => Promise<void>;
+  // MUDANÇA: Retorna se sincronizou ou não
+  updateUserSettings: (settings: Partial<UserSettings>) => Promise<{ synced: boolean }>;
   getDailyStudyCards: (deckId?: string, topico?: string) => Promise<Card[]>;
   getCardsReviewedToday: () => number;
   getHardestCards: (limit?: number) => Card[];
@@ -154,17 +157,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [allFlashcards, setAllFlashcards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estado para configurações do usuário (cache)
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
 
   const scheduler = useMemo(() => new FSRSScheduler(), []);
 
-  // ============================================================
-  // METADADOS (LOCALSTORAGE) — apenas deck metas permanecem aqui.
-  // O card.topico agora vive dentro do próprio card (sincroniza).
-  // Mantemos cardMetas em memória/localStorage APENAS como cache
-  // de leitura e para compatibilidade com a migração inicial.
-  // ============================================================
   const [deckMetas, setDeckMetas] = useState<Record<string, DeckMeta>>(() => {
     if (typeof window === 'undefined') return {};
     const saved = localStorage.getItem('eot_deck_metas');
@@ -203,10 +199,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     setDeckMetas(prev => ({ ...prev, [deckId]: { ...prev[deckId], ...meta } }));
   }, []);
 
-  // ============================================================
-  // getCardMeta: prioriza o topico do próprio card.
-  // Cai no localStorage (cardMetas) como fallback durante a transição.
-  // ============================================================
   const getCardMeta = useCallback((cardId: string): CardMeta => {
     const card = allFlashcards.find(c => c.id === cardId);
     if (card && card.topico) {
@@ -215,17 +207,11 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return cardMetas[cardId] || {};
   }, [allFlashcards, cardMetas]);
 
-  // ============================================================
-  // setCardMeta: agora grava no próprio card (RxDB + Supabase).
-  // Também atualiza o cache local para leitura instantânea.
-  // ============================================================
   const setCardMeta = useCallback((cardId: string, meta: CardMeta) => {
-    // Atualiza o cache local primeiro (leitura instantânea)
     setCardMetas(prev => ({ ...prev, [cardId]: { ...prev[cardId], ...meta } }));
 
-    if (!meta.topico && meta.topico !== '') return; // nada novo a gravar no card
+    if (!meta.topico && meta.topico !== '') return;
 
-    // Atualiza o card no RxDB (async, fire-and-forget)
     (async () => {
       try {
         const db = await getDb();
@@ -234,12 +220,10 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         const now = new Date().toISOString();
         await doc.patch({ topico: meta.topico, updated_at: now });
 
-        // Atualiza o estado local em memória
         setAllFlashcards(prev => prev.map(c =>
           c.id === cardId ? { ...c, topico: meta.topico } : c
         ));
 
-        // Enfileira para sincronizar com Supabase
         await enqueueOperation('update', 'flashcards', {
           id: cardId, topico: meta.topico, updated_at: now,
         });
@@ -249,10 +233,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     })();
   }, []);
 
-  // ============================================================
-  // MIGRAÇÃO: uma vez só, copia os tópicos do localStorage antigo
-  // para dentro dos cards no RxDB e enfileira para o Supabase.
-  // ============================================================
   useEffect(() => {
     if (!userId) return;
 
@@ -310,21 +290,31 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   // ============================================================
   const loadUserSettings = useCallback(async (db: any, userId: string) => {
     try {
-      const settingsDoc = await db.user_settings.findOne({
-        selector: { user_id: userId }
-      }).exec();
+      const fixedId = getFixedSettingsId(userId);
+      let settingsDoc = await db.user_settings.findOne({ selector: { id: fixedId } }).exec();
+
+      if (!settingsDoc) {
+        // Se não achou a fixa, pega a mais nova que existir (fallback)
+        const allDocs = await db.user_settings.find({ selector: { user_id: userId } }).exec();
+        if (allDocs.length > 0) {
+          const sorted = allDocs
+            .map((d: any) => d.toJSON())
+            .sort((a: any, b: any) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
+          settingsDoc = await db.user_settings.findOne({ selector: { id: sorted[0].id } }).exec();
+        }
+      }
 
       if (settingsDoc) {
         const settings = settingsDoc.toJSON() as UserSettings;
         setUserSettings(settings);
         console.log('📋 Configurações carregadas:', settings);
       } else {
-        const now = new Date().toISOString();
+        // MUDANÇA: Cria com ID fixo e updated_at antigo
         const newSettings: UserSettings = {
-          id: uid(),
+          id: getFixedSettingsId(userId),
           user_id: userId,
           ...DEFAULT_SETTINGS,
-          updated_at: now
+          updated_at: '1970-01-01T00:00:00.000Z'
         };
         await db.user_settings.insert(newSettings);
         setUserSettings(newSettings);
@@ -336,9 +326,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, []);
 
-  // ============================================================
-  // CARREGAR DADOS LOCAIS
-  // ============================================================
   const loadLocalData = useCallback(async (db: any, userId: string) => {
     try {
       console.log('📥 [loadLocalData] Buscando decks do usuário ou compartilhados com ele:', userId);
@@ -382,9 +369,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [loadUserSettings]);
 
-  // ============================================================
-  // FUNÇÕES AUXILIARES
-  // ============================================================
   const getAllFlashcards = useCallback(() => {
     return allFlashcards;
   }, [allFlashcards]);
@@ -407,9 +391,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId]);
 
-  // ============================================================
-  // CARREGAR USUÁRIO
-  // ============================================================
   useEffect(() => {
     let isMounted = true;
     const loadUser = async () => {
@@ -447,9 +428,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return () => { isMounted = false; };
   }, [loadLocalData]);
 
-  // ============================================================
-  // 🔥 RECARREGAR CONFIGURAÇÕES
-  // ============================================================
   const refreshUserSettings = useCallback(async () => {
     if (!userId) return;
     try {
@@ -461,9 +439,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, loadUserSettings]);
 
-  // ============================================================
-  // 🔥 REFRESH
-  // ============================================================
   const refreshFlashcards = useCallback(() => {
     setVersion(prev => prev + 1);
     const reload = async () => {
@@ -476,9 +451,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     reload();
   }, [userId, loadLocalData, refreshUserSettings]);
 
-  // ============================================================
-  // 🔥 OBSERVADOR RxDB PARA user_settings
-  // ============================================================
   useEffect(() => {
     if (!userId) return;
     let subscription: any;
@@ -502,17 +474,21 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
   }, [userId, refreshUserSettings]);
 
-  // ============================================================
-  // FUNÇÕES DE CONFIGURAÇÃO
-  // ============================================================
   const getUserSettings = useCallback(async (): Promise<UserSettings> => {
     if (userSettings) return userSettings;
     if (!userId) throw new Error('Usuário não autenticado');
 
     const db = await getDb();
-    const doc = await db.user_settings.findOne({
-      selector: { user_id: userId }
-    }).exec();
+    const fixedId = getFixedSettingsId(userId);
+    let doc = await db.user_settings.findOne({ selector: { id: fixedId } }).exec();
+
+    if (!doc) {
+      const allDocs = await db.user_settings.find({ selector: { user_id: userId } }).exec();
+      if (allDocs.length > 0) {
+        const sorted = allDocs.map(d => d.toJSON()).sort((a: any, b: any) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
+        doc = await db.user_settings.findOne({ selector: { id: sorted[0].id } }).exec();
+      }
+    }
 
     if (doc) {
       const settings = doc.toJSON() as UserSettings;
@@ -520,12 +496,11 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       return settings;
     }
 
-    const now = new Date().toISOString();
     const newSettings: UserSettings = {
-      id: uid(),
+      id: getFixedSettingsId(userId),
       user_id: userId,
       ...DEFAULT_SETTINGS,
-      updated_at: now
+      updated_at: '1970-01-01T00:00:00.000Z'
     };
     await db.user_settings.insert(newSettings);
     setUserSettings(newSettings);
@@ -533,7 +508,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newSettings;
   }, [userId, userSettings]);
 
-  const updateUserSettings = useCallback(async (settings: Partial<UserSettings>) => {
+  const updateUserSettings = useCallback(async (settings: Partial<UserSettings>): Promise<{ synced: boolean }> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
 
@@ -544,42 +519,55 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     console.log('💾 [updateUserSettings] Salvando configurações:', updatedData);
 
-    let doc = await db.user_settings.findOne({
-      selector: { user_id: userId }
-    }).exec();
-
-    let updatedSettings: UserSettings;
+    const fixedId = getFixedSettingsId(userId);
+    let doc = await db.user_settings.findOne({ selector: { id: fixedId } }).exec();
 
     if (!doc) {
-      const now = new Date().toISOString();
+      const allDocs = await db.user_settings.find({ selector: { user_id: userId } }).exec();
+      if (allDocs.length > 0) {
+        const sorted = allDocs.map(d => d.toJSON()).sort((a: any, b: any) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
+        doc = await db.user_settings.findOne({ selector: { id: sorted[0].id } }).exec();
+      }
+    }
+
+    let updatedSettings: UserSettings;
+    if (!doc) {
       const newSettings: UserSettings = {
-        id: uid(),
+        id: fixedId,
         user_id: userId,
         ...DEFAULT_SETTINGS,
         ...updatedData,
-        updated_at: now
       };
       await db.user_settings.insert(newSettings);
       updatedSettings = newSettings;
       setUserSettings(newSettings);
     } else {
       const currentDoc = doc.toJSON() as UserSettings;
-      await doc.update({ $set: updatedData });
+      await doc.patch(updatedData);
       updatedSettings = { ...currentDoc, ...updatedData } as UserSettings;
       setUserSettings(updatedSettings);
     }
 
     console.log('✅ [updateUserSettings] Configurações atualizadas localmente:', updatedSettings);
 
-    await refreshUserSettings();
-    await syncWithSupabase(userId);
+    // MUDANÇA: Força o envio imediato para a nuvem
+    let synced = false;
+    try {
+      const client = await getSupabaseWithToken();
+      const { error } = await client.rpc('salvar_user_settings_batch', { p_records: [updatedSettings] });
+      if (!error) {
+        synced = true;
+        console.log('✅ [updateUserSettings] Sincronizado com a nuvem imediatamente.');
+      }
+    } catch (e) {
+      console.warn('⚠️ [updateUserSettings] Falha ao enviar pra nuvem (offline), enfileirando.', e);
+    }
 
-    console.log('✅ [updateUserSettings] Processo concluído com recarga forçada.');
+    await refreshUserSettings();
+
+    return { synced };
   }, [userId, refreshUserSettings]);
 
-  // ============================================================
-  // DERIVADOS
-  // ============================================================
   const dueCards = useMemo(() => {
     if (!allFlashcards || !decksData) return [];
     const deckIds = new Set(decksData.map(d => d.id));
@@ -639,9 +627,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     ).length;
   }, [allFlashcards]);
 
-  // ============================================================
-  // PRIORIZAÇÃO E SELEÇÃO
-  // ============================================================
   const calculatePriority = useCallback((card: Card): number => {
     const lapses = card.lapses || 0;
     const difficulty = card.difficulty || 5;
@@ -662,9 +647,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return (card.lapses || 0) >= threshold;
   }, [userSettings]);
 
-  // ============================================================
-  // getDailyStudyCards — agora aceita filtro por topico (sub-baralho)
-  // ============================================================
   const getDailyStudyCards = useCallback(async (deckId?: string, topico?: string): Promise<Card[]> => {
     if (!userId) throw new Error('Usuário não autenticado');
 
@@ -685,7 +667,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    // Filtro por topico (sub-baralho)
     const passaFiltroTopico = (c: Card): boolean => {
       if (!topico) return true;
       if (topico === '__sem_topico__') return !c.topico;
@@ -776,9 +757,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return selected;
   }, [userId, allFlashcards, dueCards, getUserSettings, calculatePriority, getCardsReviewedToday]);
 
-  // ============================================================
-  // CARDS MAIS DIFÍCEIS
-  // ============================================================
   const getHardestCards = useCallback((limit: number = 10): Card[] => {
     return allFlashcards
       .filter(c => !c.isDeleted)
@@ -792,9 +770,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       .slice(0, limit);
   }, [dueCards, calculatePriority]);
 
-  // ============================================================
-  // CRUD
-  // ============================================================
   const createDeck = useCallback(async (
     name: string,
     description: string,
@@ -887,9 +862,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newDeck;
   }, [userId, refreshFlashcards]);
 
-  // ============================================================
-  // addCard — agora grava `topico` DENTRO do card
-  // ============================================================
   const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
@@ -961,7 +933,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       await db.flashcards.insert(newCard);
 
       if (topico) {
-        // Guarda também no cache local para leitura instantânea
         setCardMetas(prev => ({ ...prev, [cardId]: { ...prev[cardId], topico } }));
       }
 
@@ -1266,9 +1237,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards]);
 
-  // ============================================================
-  // editCard — agora grava `topico` DENTRO do card
-  // ============================================================
   const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
@@ -1345,7 +1313,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
     }
 
-    // Atualiza o cache local de metas
     if (topicoNormalizado !== undefined) {
       for (const id of cardIdsToUpdate) {
         setCardMetas(prev => {
@@ -1381,9 +1348,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return [{ message: 'Histórico de revisões não disponível', type: 'info' }];
   }, []);
 
-  // ============================================================
-  // GERENCIAR MEMBROS
-  // ============================================================
   const addMemberToDeck = useCallback(async (
     deckId: string,
     newUserId: string,
@@ -1620,9 +1584,6 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     await addMemberToDeck(deckId, foundUserId);
   }, [userId, addMemberToDeck]);
 
-  // ============================================================
-  // CONTEXT VALUE
-  // ============================================================
   const value = useMemo(() => ({
     refreshFlashcards,
     dueCards,

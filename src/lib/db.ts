@@ -846,7 +846,6 @@ export async function getDb(): Promise<RxDatabase> {
   try {
     const DB_NAME = 'revisaflash_db_v11';
 
-    // Limpa versões antigas (mantém a v10 órfã, o Dexie ignora).
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v5'); } catch (e) {}
@@ -931,6 +930,9 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     return;
   }
   isSyncing = true;
+  
+  // MUDANÇA: Captura a hora de INÍCIO do sync
+  const syncStartTime = new Date().toISOString();
 
   let houveErro = false;
 
@@ -987,7 +989,10 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const collection = database.collections[name];
       if (!collection) continue;
 
-      const pullFrom = emptyCollections.has(name) ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
+      // MUDANÇA: user_settings sempre puxa completo
+      const pullFrom = (name === 'user_settings' || emptyCollections.has(name)) 
+        ? '1970-01-01T00:00:00Z' 
+        : lastSyncGlobal;
 
       let supabaseData: any[] = [];
       let error: any = null;
@@ -1343,7 +1348,8 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     if (houveErro) {
       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
     } else {
-      writeLastSync(userId, new Date().toISOString());
+      // MUDANÇA: Grava o horário de INÍCIO
+      writeLastSync(userId, syncStartTime);
       console.log('✅ Sincronização concluída.');
     }
 

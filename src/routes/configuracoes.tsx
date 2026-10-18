@@ -123,6 +123,7 @@ export default function ConfigPage() {
     loadUser();
   }, [user, isLoaded]);
 
+  // MUDANÇA: Remove getUserSettings das dependências para não resetar o que o usuário digita
   useEffect(() => {
     const loadFlashcardSettings = async () => {
       try {
@@ -145,7 +146,7 @@ export default function ConfigPage() {
       }
     };
     if (userId) loadFlashcardSettings();
-  }, [userId, getUserSettings]);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const temaSalvo = localStorage.getItem('tema');
@@ -513,7 +514,8 @@ export default function ConfigPage() {
 
     setSalvandoFlashcards(true);
     try {
-      await updateUserSettings({
+      // MUDANÇA: Recebe o objeto informando se sincronizou ou não
+      const result = await updateUserSettings({
         daily_limit: flashcardSettings.daily_limit,
         new_cards_per_day: flashcardSettings.new_cards_per_day,
         max_reviews_per_day: flashcardSettings.max_reviews_per_day,
@@ -526,8 +528,15 @@ export default function ConfigPage() {
         day_start: flashcardSettings.day_start,
         show_next_review_time: flashcardSettings.show_next_review_time,
       });
-      setMensagem("✅ Configurações de flashcards salvas com sucesso!");
-      setMensagemTipo('success');
+      
+      // MUDANÇA: Mensagem honesta baseada no retorno
+      if (result.synced) {
+        setMensagem("✅ Configurações salvas e sincronizadas com a nuvem!");
+        setMensagemTipo('success');
+      } else {
+        setMensagem("✅ Configurações salvas neste aparelho! (Sincronizará quando houver conexão).");
+        setMensagemTipo('info');
+      }
       setTimeout(() => setMensagem(""), 4000);
     } catch (error: any) {
       console.error("Erro ao salvar configurações de flashcards:", error);
