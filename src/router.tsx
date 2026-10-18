@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { QueryClient } from '@tanstack/react-query';
 import { AuthenticateWithRedirectCallback, SignIn } from '@clerk/clerk-react';
 
@@ -8,27 +8,19 @@ import Login from './routes/login';
 import Index from './routes/index';
 import Flashcards from './routes/flashcards';
 import Erros from './routes/erros';
-// import Desempenho from './routes/desempenho'; // 🔥 REMOVIDO
 import Conteudo from './routes/conteudo';
 import Configuracoes from './routes/configuracoes';
 import Calendario from './routes/calendario';
 import LandingPage from './routes/landing';
-// 🔥 IMPORTAÇÕES DE SIMULADOS
 import Simulados from './routes/simulados';
 import SimuladoPlayer from './routes/simulados.$id';
-// 🔥 IMPORTAÇÃO DE LISTAS
 import ListaPlayer from './routes/listas.$id';
-// 🔥 REMOVIDO: import Estatisticas from './routes/estatisticas';
-// 🔥 TESTE DO LEITOR DE PDF
 import TestePdf from './routes/teste-pdf';
-// 🔥 LEITOR DE PDF (aberto por fileId)
 import PdfPage from './routes/pdf.$fileId';
-// 🔥 NOVO — Sessões
 import Sessoes from './routes/sessoes';
-import Amigas from './routes/amigas';
-import Compartilhados from './routes/compartilhados';
+// 🔥 NOVA: tela única que junta "Compartilhado comigo" + "Amizades"
+import Comunidade from './routes/comunidade';
 
-// Importa o componente de proteção
 import { ClerkProtectedRoute } from './components/ClerkProtectedRoute';
 
 function ClerkCatchAll() {
@@ -54,12 +46,10 @@ export const router = createBrowserRouter([
     path: '/cadastro/*',
     element: <Cadastro />,
   },
-  // 🔥 Rota que o Google chama de volta após autenticar com OAuth
   {
     path: '/sso-callback',
     element: <AuthenticateWithRedirectCallback />,
   },
-  // 🔥 Rota de "Esqueci minha senha" — usa o Clerk SignIn com visual próprio
   {
     path: '/reset-senha/*',
     element: (
@@ -113,16 +103,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-  // 🔥 ROTA /desempenho REMOVIDA
-  // {
-  //   path: '/desempenho',
-  //   element: (
-  //     <ClerkProtectedRoute>
-  //       <Desempenho />
-  //     </ClerkProtectedRoute>
-  //   ),
-  // },
-  // 🔥 ROTAS DE SIMULADOS
   {
     path: '/simulados',
     element: (
@@ -139,7 +119,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-  // 🔥 ROTA DE LISTAS (player)
   {
     path: '/listas/:id',
     element: (
@@ -148,15 +127,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-  // 🔥 ROTA /estatisticas REMOVIDA (agora é modal)
-  // {
-  //   path: '/estatisticas',
-  //   element: (
-  //     <ClerkProtectedRoute>
-  //       <Estatisticas />
-  //     </ClerkProtectedRoute>
-  //   ),
-  // },
   {
     path: '/conteudo',
     element: (
@@ -181,7 +151,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-    // 🔥 NOVA ROTA — Sessões
   {
     path: '/sessoes',
     element: (
@@ -190,23 +159,24 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-    {
-    path: '/amigas',
+  // 🔥 NOVA ROTA UNIFICADA
+  {
+    path: '/comunidade',
     element: (
       <ClerkProtectedRoute>
-        <Amigas />
+        <Comunidade />
       </ClerkProtectedRoute>
     ),
   },
+  // 🔥 Redirecionamentos das rotas antigas (mantém links funcionando)
   {
     path: '/compartilhados',
-    element: (
-      <ClerkProtectedRoute>
-        <Compartilhados />
-      </ClerkProtectedRoute>
-    ),
+    element: <Navigate to="/comunidade?tab=compartilhado" replace />,
   },
-  // 🔥 ROTA DE TESTE DO LEITOR DE PDF
+  {
+    path: '/amigas',
+    element: <Navigate to="/comunidade?tab=amizades" replace />,
+  },
   {
     path: '/teste-pdf',
     element: (
@@ -215,7 +185,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-  // 🔥 ROTA DO LEITOR DE PDF (aberto por fileId)
   {
     path: '/pdf/:fileId',
     element: (
@@ -224,7 +193,6 @@ export const router = createBrowserRouter([
       </ClerkProtectedRoute>
     ),
   },
-  // A rota /flash-ia foi removida
   {
     path: '*',
     element: <ClerkCatchAll />,

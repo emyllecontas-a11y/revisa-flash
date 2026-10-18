@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Share2
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
@@ -49,8 +49,8 @@ const MAIS_ROTAS = [
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
   { to: "/simulados", label: "Simulados", icon: "file-text" },
-  { to: "/amigas", label: "Amigas", icon: "users" },
-  { to: "/compartilhados", label: "Compartilhado", icon: "share" },
+  // 🔥 Unificada: substitui "Amigas" + "Compartilhado"
+  { to: "/comunidade", label: "Comunidade", icon: "users" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
 ] as const;
 
@@ -66,7 +66,6 @@ const ICONS = {
   "file-text": FileText,
   settings: Settings,
   users: Users,
-  share: Share2,
 } as const;
 
 type RouteIcon = keyof typeof ICONS;
@@ -185,9 +184,6 @@ function AppShellInner({
       refreshFlashcards();
       refreshErrors();
       refreshStudy();
-      // O horário só é gravado pelo próprio syncWithSupabase quando NÃO houve erro.
-      // Aqui apenas mostramos o último sync bem-sucedido (antes, o app gravava "agora"
-      // mesmo com erro, o que podia fazer itens serem pulados depois).
       const ultimo = readLastSync(userId);
       if (ultimo && ultimo !== '1970-01-01T00:00:00Z') {
         setLastSyncTime(new Date(ultimo).toLocaleTimeString());
@@ -207,8 +203,6 @@ function AppShellInner({
     return () => clearTimeout(initialSync);
   }, [isLoaded, flashcardsLoading]);
 
-  // Sincronização automática: ao voltar para a aba, ao reconectar e a cada 5 minutos.
-  // Assim o que a amiga compartilha (ou remove) aparece sem precisar recarregar a página.
   const performSyncRef = useRef(performSync);
   useEffect(() => { performSyncRef.current = performSync; }, [performSync]);
   const lastAutoSyncRef = useRef(0);
@@ -368,7 +362,6 @@ function AppShellInner({
               </div>
             </header>
 
-            {/* Adicionado overflow-x-hidden para evitar que o conteúdo estoure a tela no mobile */}
             <main className="rf-fade-in mx-auto w-full max-w-7xl flex-1 overflow-x-hidden px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-10">
               {title && (
                 <div id={`${breadcrumb?.toLowerCase() || 'page'}-header`} className="mb-6 flex flex-col gap-1">
@@ -404,11 +397,9 @@ function NavItem({ to, label, iconKey, active }: { to: string; label: string; ic
   );
 }
 
-// NOVO MENU INFERIOR (MOBILE)
 function BottomNav({ pathname }: { pathname: string }) {
   const [isMaisOpen, setIsMaisOpen] = useState(false);
 
-  // Fecha a gaveta quando muda de página
   useEffect(() => {
     setIsMaisOpen(false);
   }, [pathname]);
@@ -445,8 +436,7 @@ function BottomNav({ pathname }: { pathname: string }) {
               </Link>
             );
           })}
-          
-          {/* Botão "Mais" */}
+
           <button
             onClick={() => setIsMaisOpen(true)}
             className={[
@@ -460,13 +450,12 @@ function BottomNav({ pathname }: { pathname: string }) {
         </div>
       </nav>
 
-      {/* GAVETA DE BAIXO PARA CIMA (Bottom Sheet) */}
       {isMaisOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm lg:hidden transition-opacity"
           onClick={() => setIsMaisOpen(false)}
         >
-          <div 
+          <div
             className="absolute bottom-0 left-0 right-0 rounded-t-3xl border-t border-border bg-surface p-5 pb-8 shadow-2xl animate-in slide-in-from-bottom"
             onClick={(e) => e.stopPropagation()}
           >
