@@ -1,14 +1,4 @@
 // src/services/copiaConteudoService.ts
-//
-// "Copiar para minha conta" — disciplinas, tópicos, PDFs, listas e simulados compartilhados.
-//
-// Regras:
-//  - Copia só o CONTEÚDO. Grifos, notas, progresso e status de estudo da dona NÃO são copiados.
-//  - Cada arquivo/imagem é baixado da URL pública e enviado de novo para a pasta de
-//    quem copia. A cópia nunca aponta para o arquivo da dona, então apagar o original
-//    dela não afeta a sua cópia, e vice-versa.
-//  - Tudo o que é criado pertence a quem copia (user_id dela).
-
 import { getDb } from '@/lib/db';
 import { getSupabaseWithToken } from '@/lib/supabaseClient';
 import { enqueueOperation } from '@/services/queueService';
@@ -44,8 +34,6 @@ export interface ResultadoCopiaSimulado {
   error?: string;
 }
 
-// Mesmo padrão do conteudo.tsx: tenta gravar direto no Supabase e, se
-// falhar (ex.: sem internet), deixa na fila para enviar depois.
 async function salvarNaNuvem(tabela: string, registro: Record<string, any>): Promise<void> {
   try {
     const supabase = await getSupabaseWithToken();
@@ -56,15 +44,12 @@ async function salvarNaNuvem(tabela: string, registro: Record<string, any>): Pro
   }
 }
 
-// Baixa a imagem da questão e envia de novo para a conta de quem copia.
 async function copiarImagemQuestao(urlOriginal: string, userId: string): Promise<string | null> {
   try {
     if (!urlOriginal) return null;
     const resp = await fetch(urlOriginal);
     if (!resp.ok) return null;
     const blob = await resp.blob();
-    
-    // Usa o uploadFile existente para subir para o bucket padrão de arquivos
     const arquivo = new File([blob], 'imagem-questao.jpg', { type: blob.type || 'image/jpeg' });
     const novo = await uploadFile(arquivo, 'questoes-imagens', 'Imagens', userId);
     return novo ? novo.url : null;
@@ -74,7 +59,6 @@ async function copiarImagemQuestao(urlOriginal: string, userId: string): Promise
   }
 }
 
-// Baixa o PDF da dona e envia de novo para a pasta de quem copia.
 async function copiarArquivo(
   arquivoId: string,
   novoTopicoId: string,
@@ -189,7 +173,7 @@ export async function copiarDisciplinaParaMinhaConta(
 }
 
 // ============================================================
-// 2. COPIAR LISTA DE QUESTÕES
+// 2. COPIAR LISTA DE QUESTÕES (CORRIGIDO)
 // ============================================================
 export async function copiarListaParaMinhaConta(
   listaId: string,
@@ -210,12 +194,36 @@ export async function copiarListaParaMinhaConta(
     if (!listaDoc) return { success: false, questoesCopiadas: 0, error: 'Lista não encontrada.' };
     const lista = listaDoc.toJSON();
 
-    // 2. Cria a nova lista
+    // 2. Encontra ou cria a disciplina "Listas Importadas" para a usuária
+    let disciplinaImportadaId = "";
+    const discDoc = await db.disciplines.findOne({ 
+      selector: { user_id: userId, name: 'Listas Importadas' } 
+    }).exec();
+
+    if (discDoc) {
+      disciplinaImportadaId = discDoc.id;
+    } else {
+      disciplinaImportadaId = uid();
+      const novaDisc = {
+        id: disciplinaImportadaId,
+        name: 'Listas Importadas',
+        user_id: userId,
+        createdAt: agora,
+        updated_at: agora,
+        isDeleted: false,
+      };
+      await db.disciplines.insert(novaDisc);
+      await salvarNaNuvem('disciplines', novaDisc);
+    }
+
+    // 3. Cria a nova lista vinculada à disciplina "Listas Importadas"
     const novaListaId = uid();
     const novaLista = {
       ...lista,
       id: novaListaId,
       user_id: userId,
+      discipline_id: disciplinaImportadaId, // <-- AQUI ESTÁ A CORREÇÃO
+      folder_id: null, // Remove o vínculo com a pasta da dona
       titulo: `${lista.titulo} (Cópia)`,
       created_at: agora,
       updated_at: agora,
@@ -224,7 +232,7 @@ export async function copiarListaParaMinhaConta(
     await db.listas.insert(novaLista);
     await salvarNaNuvem('listas', novaLista);
 
-    // 3. Pega as questões linkadas
+    // 4. Pega e copia as questões
     const vinculos = await db.listas_questoes.find({ selector: { lista_id: listaId } }).exec();
     let copiadas = 0;
 
@@ -236,18 +244,19 @@ export async function copiarListaParaMinhaConta(
       if (!qDoc) continue;
       const q = qDoc.toJSON();
 
-      // 3a. Se a questão tem imagem, copia a imagem
+      // Copia a imagem, se houver
       let novaImagemUrl = q.imagem_url;
       if (q.imagem_url) {
         novaImagemUrl = await copiarImagemQuestao(q.imagem_url, userId);
       }
 
-      // 3b. Cria a nova questão
+      // Cria a nova questão
       const novaQuestaoId = uid();
       const novaQuestao = {
         ...q,
         id: novaQuestaoId,
         user_id: userId,
+        discipline_id: disciplinaImportadaId, // <-- AQUI ESTÁ A CORREÇÃO
         imagem_url: novaImagemUrl,
         created_at: agora,
         updated_at: agora,
@@ -255,7 +264,7 @@ export async function copiarListaParaMinhaConta(
       await db.questoes_lista.insert(novaQuestao);
       await salvarNaNuvem('questoes_lista', novaQuestao);
 
-      // 3c. Cria o novo vínculo
+      // Cria o novo vínculo
       const novoVinculo = {
         id: uid(),
         lista_id: novaListaId,
@@ -292,12 +301,10 @@ export async function copiarSimuladoParaMinhaConta(
     const db: any = await getDb();
     const agora = new Date().toISOString();
 
-    // 1. Pega o simulado original
     const simDoc = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
     if (!simDoc) return { success: false, questoesCopiadas: 0, error: 'Simulado não encontrado.' };
     const simulado = simDoc.toJSON();
 
-    // 2. Cria o novo simulado
     const novoSimuladoId = uid();
     const novoSimulado = {
       ...simulado,
@@ -311,7 +318,6 @@ export async function copiarSimuladoParaMinhaConta(
     await db.simulados.insert(novoSimulado);
     await salvarNaNuvem('simulados', novoSimulado);
 
-    // 3. Pega as questões do simulado
     const qDocs = await db.questoes.find({ selector: { simulado_id: simuladoId, isdeleted: false } }).exec();
     let copiadas = 0;
 
@@ -319,13 +325,11 @@ export async function copiarSimuladoParaMinhaConta(
       const q = qDocs[i].toJSON();
       onProgresso?.(`Copiando questão ${i + 1} de ${qDocs.length}`);
 
-      // 3a. Se a questão tem imagem, copia a imagem
       let novaImagemUrl = q.imagem_url;
       if (q.imagem_url) {
         novaImagemUrl = await copiarImagemQuestao(q.imagem_url, userId);
       }
 
-      // 3b. Cria a nova questão
       const novaQuestaoId = uid();
       const novaQuestao = {
         ...q,
@@ -338,7 +342,6 @@ export async function copiarSimuladoParaMinhaConta(
       await db.questoes.insert(novaQuestao);
       await salvarNaNuvem('questoes', novaQuestao);
 
-      // 3c. Pega e copia as alternativas
       const altDocs = await db.alternativas.find({ selector: { questao_id: q.id, isdeleted: false } }).exec();
       for (const altDoc of altDocs) {
         const alt = altDoc.toJSON();

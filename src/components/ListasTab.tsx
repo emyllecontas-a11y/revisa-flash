@@ -17,7 +17,7 @@ import {
   excluirResultadoLista,
   excluirTodosResultadosLista,
 } from "@/services/listaService";
-import { getSupabaseWithToken } from "@/lib/supabaseClient";
+import { getDb } from "@/lib/db";
 import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -37,48 +37,33 @@ import {
 } from "lucide-react";
 import { CompartilharModal } from "@/components/compartilhar-modal";
 
-// ============================================================
-// CORES PASTEL ROTATIVAS (mesmas do Conteúdo)
-// ============================================================
 const CARD_COLORS = [
-  '#E8A87C',
-  '#E0A5C0',
-  '#D4A88E',
-  '#E8A87C',
-  '#E0A5C0',
-  '#D9A57E',
+  '#E8A87C', '#E0A5C0', '#D4A88E', '#E8A87C', '#E0A5C0', '#D9A57E',
 ];
 const getCardColor = (i: number) => CARD_COLORS[i % CARD_COLORS.length];
 
-// ============================================================
-// DISCIPLINAS
-// ============================================================
 interface Discipline {
   id: string;
   name: string;
 }
 
-async function getDisciplinesAuth(userId: string): Promise<{ success: boolean; data?: Discipline[]; error?: string }> {
+// Lê as disciplinas do banco local (RxDB)
+async function getDisciplinesLocal(userId: string): Promise<{ success: boolean; data?: Discipline[]; error?: string }> {
   try {
-    const client = await getSupabaseWithToken();
-    const { data, error } = await client
-      .from('disciplines')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('isDeleted', false)
-      .order('name', { ascending: true });
-
-    if (error) throw error;
-    return { success: true, data: (data || []) as Discipline[] };
+    const db = await getDb();
+    const docs = await db.disciplines.find({
+      selector: { user_id: userId, isDeleted: { $ne: true } }
+    }).exec();
+    const data = docs
+      .map((d: any) => ({ id: d.id, name: d.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { success: true, data };
   } catch (error: any) {
-    console.error('Erro ao buscar disciplinas:', error);
+    console.error('Erro ao buscar disciplinas locais:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================================
-// COMPONENTE PRINCIPAL
-// ============================================================
 export function ListasTab() {
   const navigate = useNavigate();
   const { user } = useAppUser();
@@ -125,7 +110,7 @@ export function ListasTab() {
     setError(null);
     try {
       const [discResult, listasResult, pastasResult, resultadosResult] = await Promise.all([
-        getDisciplinesAuth(user.id),
+        getDisciplinesLocal(user.id),
         getListas(user.id),
         getPastas(user.id),
         buscarTodosResultados(user.id),
@@ -144,6 +129,31 @@ export function ListasTab() {
   }, [user?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Escuta mudanças locais no RxDB para atualizar a tela imediatamente (após cópia)
+  useEffect(() => {
+    let isMounted = true;
+    let subs: any[] = [];
+    const setupObserver = async () => {
+      try {
+        const db = await getDb();
+        if (!isMounted) return;
+        if (db.collections.disciplines) {
+          subs.push(db.collections.disciplines.$.subscribe(() => loadData()));
+        }
+        if (db.collections.listas) {
+          subs.push(db.collections.listas.$.subscribe(() => loadData()));
+        }
+      } catch (e) {
+        console.warn("Erro ao configurar observer no ListasTab:", e);
+      }
+    };
+    setupObserver();
+    return () => {
+      isMounted = false;
+      subs.forEach((s) => s.unsubscribe());
+    };
+  }, [loadData]);
 
   useEffect(() => { setBusca(""); }, [disciplinaAberta?.id, pastaAberta?.id]);
 
@@ -385,24 +395,13 @@ export function ListasTab() {
                   className="card-lip p-5 flex flex-col min-h-[170px] text-left"
                   style={{ '--lip': cor } as React.CSSProperties}
                 >
-                  <div
-                    className="grid h-12 w-12 shrink-0 place-items-center"
-                    style={{ color: cor }}
-                  >
-                    <Folder
-                      className="h-8 w-8"
-                      strokeWidth={2.4}
-                      fill={`color-mix(in oklab, ${cor} 35%, transparent)`}
-                    />
+                  <div className="grid h-12 w-12 shrink-0 place-items-center" style={{ color: cor }}>
+                    <Folder className="h-8 w-8" strokeWidth={2.4} fill={`color-mix(in oklab, ${cor} 35%, transparent)`} />
                   </div>
-
-                  <h3 className="mt-3 font-display text-base font-bold tracking-tight line-clamp-2">
-                    {d.name}
-                  </h3>
+                  <h3 className="mt-3 font-display text-base font-bold tracking-tight line-clamp-2">{d.name}</h3>
                   <p className="mt-1 text-xs text-foreground/45">
                     {qtd === 0 ? "Nenhuma lista" : `${qtd} ${qtd === 1 ? "lista" : "listas"}`}
                   </p>
-
                   <div className="mt-auto pt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
                     Abrir <ChevronRight className="h-3.5 w-3.5" />
                   </div>
@@ -428,30 +427,20 @@ export function ListasTab() {
   // ============================================================
   const breadcrumb = (
     <nav className="mb-4 flex items-center gap-1.5 text-xs text-foreground/55 overflow-x-auto">
-      <button
-        onClick={handleVoltarParaDisciplinas}
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0"
-      >
+      <button onClick={handleVoltarParaDisciplinas} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0">
         <ArrowLeft className="h-3.5 w-3.5" /> Disciplinas
       </button>
       <ChevronRight className="h-3 w-3 shrink-0" />
       {pastaAberta ? (
         <>
-          <button
-            onClick={handleVoltarParaDisciplina}
-            className="rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0"
-          >
+          <button onClick={handleVoltarParaDisciplina} className="rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0">
             {disciplinaAberta.name}
           </button>
           <ChevronRight className="h-3 w-3 shrink-0" />
-          <span className="rounded-md px-1.5 py-1 text-foreground font-medium truncate">
-            {pastaAberta.name}
-          </span>
+          <span className="rounded-md px-1.5 py-1 text-foreground font-medium truncate">{pastaAberta.name}</span>
         </>
       ) : (
-        <span className="rounded-md px-1.5 py-1 text-foreground font-medium truncate">
-          {disciplinaAberta.name}
-        </span>
+        <span className="rounded-md px-1.5 py-1 text-foreground font-medium truncate">{disciplinaAberta.name}</span>
       )}
     </nav>
   );
@@ -463,7 +452,6 @@ export function ListasTab() {
     return (
       <>
         {breadcrumb}
-
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <FolderOpen className="h-5 w-5 text-primary" />
@@ -472,37 +460,16 @@ export function ListasTab() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/40" />
-              <input
-                type="text"
-                placeholder="Buscar lista…"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                className="w-full sm:w-64 rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
-              />
+              <input type="text" placeholder="Buscar lista…" value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full sm:w-64 rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40" />
             </div>
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-            >
+            <button onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
               <Plus className="h-4 w-4" /> Importar
             </button>
           </div>
         </div>
 
-        <div
-          onDragOver={(e) => handleDragOver(e, "__root__")}
-          onDragLeave={(e) => handleDragLeave(e, "__root__")}
-          onDrop={(e) => handleDrop(e, "__root__", null)}
-          className={[
-            "mb-4 flex items-center justify-center rounded-xl border border-dashed p-3 text-xs transition-colors",
-            dropTargetId === "__root__"
-              ? "border-primary bg-primary/5 text-primary"
-              : "border-border/60 bg-surface/30 text-foreground/40",
-          ].join(" ")}
-        >
-          {dropTargetId === "__root__"
-            ? "Solte aqui para mover para fora desta pasta"
-            : "Arraste uma lista para cá para movê-la para fora da pasta"}
+        <div onDragOver={(e) => handleDragOver(e, "__root__")} onDragLeave={(e) => handleDragLeave(e, "__root__")} onDrop={(e) => handleDrop(e, "__root__", null)} className={["mb-4 flex items-center justify-center rounded-xl border border-dashed p-3 text-xs transition-colors", dropTargetId === "__root__" ? "border-primary bg-primary/5 text-primary" : "border-border/60 bg-surface/30 text-foreground/40"].join(" ")}>
+          {dropTargetId === "__root__" ? "Solte aqui para mover para fora desta pasta" : "Arraste uma lista para cá para movê-la para fora da pasta"}
         </div>
 
         {listasDaPasta.length === 0 ? (
@@ -511,101 +478,38 @@ export function ListasTab() {
               <p className="text-xs text-foreground/45">Nenhuma lista encontrada para "{busca}".</p>
             </div>
           ) : (
-            <EmptyStateListas
-              titulo="Nenhuma lista nesta pasta"
-              descricao="Importe um JSON ou PDF para criar a primeira lista desta pasta."
-              onImportar={() => setIsImportModalOpen(true)}
-            />
+            <EmptyStateListas titulo="Nenhuma lista nesta pasta" descricao="Importe um JSON ou PDF para criar a primeira lista desta pasta." onImportar={() => setIsImportModalOpen(true)} />
           )
         ) : (
-          <GridListas
-            listas={listasDaPasta}
-            ultimosResultados={ultimosResultados}
-            excluindo={excluindo}
-            onAbrir={(l) => navigate(`/listas/${l.id}`)}
-            onExcluir={handleExcluir}
-            onHistorico={setHistoricoLista}
-            onGerenciar={setGerenciandoLista}
-            onEditar={setEditandoLista}
-            onMover={setListaParaMover}
-            onCompartilhar={setListaParaCompartilhar}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          />
+          <GridListas listas={listasDaPasta} ultimosResultados={ultimosResultados} excluindo={excluindo} onAbrir={(l) => navigate(`/listas/${l.id}`)} onExcluir={handleExcluir} onHistorico={setHistoricoLista} onGerenciar={setGerenciandoLista} onEditar={setEditandoLista} onMover={setListaParaMover} onCompartilhar={setListaParaCompartilhar} onDragStart={handleDragStart} onDragEnd={handleDragEnd} />
         )}
 
         {isImportModalOpen && user?.id && (
-          <ImportListaModal
-            userId={user.id}
-            disciplinaInicial={disciplinaAberta.id}
-            pastaInicial={pastaAberta.id}
-            pastasDisponiveis={todasPastas}
-            onClose={() => setIsImportModalOpen(false)}
-            onSuccess={() => { setIsImportModalOpen(false); loadData(); }}
-            onPdfSelected={(f) => setPdfFileParaRevisar(f)}
-          />
+          <ImportListaModal disciplinas={disciplinas} userId={user.id} disciplinaInicial={disciplinaAberta.id} pastaInicial={pastaAberta.id} pastasDisponiveis={todasPastas} onClose={() => setIsImportModalOpen(false)} onSuccess={() => { setIsImportModalOpen(false); loadData(); }} onPdfSelected={(f) => setPdfFileParaRevisar(f)} />
         )}
 
         {pdfFileParaRevisar && user?.id && (
-          <RevisarImportacaoPdfModal
-            file={pdfFileParaRevisar}
-            userId={user.id}
-            modo="lista"
-            disciplinaInicial={disciplinaAberta.id}
-            pastaInicial={pastaAberta.id}
-            pastasDisponiveis={todasPastas.map((p) => ({ id: p.id, name: p.name, discipline_id: p.discipline_id }))}
-            onClose={() => setPdfFileParaRevisar(null)}
-            onSuccess={() => { setPdfFileParaRevisar(null); loadData(); }}
-          />
+          <RevisarImportacaoPdfModal file={pdfFileParaRevisar} userId={user.id} modo="lista" disciplinaInicial={disciplinaAberta.id} pastaInicial={pastaAberta.id} pastasDisponiveis={todasPastas.map((p) => ({ id: p.id, name: p.name, discipline_id: p.discipline_id }))} onClose={() => setPdfFileParaRevisar(null)} onSuccess={() => { setPdfFileParaRevisar(null); loadData(); }} />
         )}
 
         {historicoLista && user?.id && (
-          <HistoricoListaModal
-            lista={historicoLista}
-            resultados={resultados.filter((r) => r.lista_id === historicoLista.id)}
-            userId={user.id}
-            onRefresh={loadData}
-            onClose={() => setHistoricoLista(null)}
-          />
+          <HistoricoListaModal lista={historicoLista} resultados={resultados.filter((r) => r.lista_id === historicoLista.id)} userId={user.id} onRefresh={loadData} onClose={() => setHistoricoLista(null)} />
         )}
 
         {editandoLista && user?.id && (
-          <EditarListaModal
-            lista={editandoLista}
-            userId={user.id}
-            onClose={() => setEditandoLista(null)}
-            onSuccess={() => { setEditandoLista(null); loadData(); }}
-          />
+          <EditarListaModal lista={editandoLista} userId={user.id} onClose={() => setEditandoLista(null)} onSuccess={() => { setEditandoLista(null); loadData(); }} />
         )}
 
         {gerenciandoLista && user?.id && (
-          <GerenciarQuestoesModal
-            lista={gerenciandoLista}
-            userId={user.id}
-            onClose={() => setGerenciandoLista(null)}
-            onListaAlterada={() => loadData()}
-          />
+          <GerenciarQuestoesModal lista={gerenciandoLista} userId={user.id} onClose={() => setGerenciandoLista(null)} onListaAlterada={() => loadData()} />
         )}
 
         {listaParaCompartilhar && user?.id && (
-          <CompartilharModal
-            open={true}
-            onClose={() => setListaParaCompartilhar(null)}
-            userId={user.id}
-            itemType="question_list"
-            itemId={listaParaCompartilhar.id}
-            itemName={listaParaCompartilhar.titulo}
-          />
+          <CompartilharModal open={true} onClose={() => setListaParaCompartilhar(null)} userId={user.id} itemType="question_list" itemId={listaParaCompartilhar.id} itemName={listaParaCompartilhar.titulo} />
         )}
 
         {listaParaMover && user?.id && (
-          <MoverListaModal
-            lista={listaParaMover}
-            pastas={pastasDaDisciplina}
-            userId={user.id}
-            onClose={() => setListaParaMover(null)}
-            onSuccess={() => { setListaParaMover(null); loadData(); }}
-          />
+          <MoverListaModal lista={listaParaMover} pastas={pastasDaDisciplina} userId={user.id} onClose={() => setListaParaMover(null)} onSuccess={() => { setListaParaMover(null); loadData(); }} />
         )}
       </>
     );
@@ -810,6 +714,7 @@ export function ListasTab() {
 
       {isImportModalOpen && user?.id && (
         <ImportListaModal
+          disciplinas={disciplinas}
           userId={user.id}
           disciplinaInicial={disciplinaAberta.id}
           pastaInicial={null}
@@ -1344,8 +1249,9 @@ interface ImportJob {
 }
 
 function ImportListaModal({
-  userId, disciplinaInicial, pastaInicial, pastasDisponiveis, onClose, onSuccess, onPdfSelected,
+  disciplinas, userId, disciplinaInicial, pastaInicial, pastasDisponiveis, onClose, onSuccess, onPdfSelected,
 }: {
+  disciplinas: Discipline[];
   userId: string;
   disciplinaInicial: string;
   pastaInicial: string | null;
@@ -1359,25 +1265,10 @@ function ImportListaModal({
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [disciplineId, setDisciplineId] = useState(disciplinaInicial);
-  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [folderId, setFolderId] = useState<string | null>(pastaInicial);
-  const [loadingDisciplines, setLoadingDisciplines] = useState(true);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      if (!userId) { setLoadingDisciplines(false); return; }
-      const result = await getDisciplinesAuth(userId);
-      if (result.success && result.data) {
-        setDisciplines(result.data);
-        if (!disciplinaInicial && result.data.length > 0) setDisciplineId(result.data[0].id);
-      }
-      setLoadingDisciplines(false);
-    };
-    load();
-  }, [userId, disciplinaInicial]);
 
   const handleMudarDisciplina = (novoId: string) => {
     setDisciplineId(novoId);
@@ -1389,7 +1280,6 @@ function ImportListaModal({
   const handleSelectFiles = (files: File[]) => {
     setError(null);
 
-    // 1) PDFs → passam para a tela de revisão (um por vez)
     const pdfs = files.filter((f) => /\.pdf$/i.test(f.name));
     if (pdfs.length > 0) {
       if (pdfs.length > 1) {
@@ -1405,7 +1295,6 @@ function ImportListaModal({
       return;
     }
 
-    // 2) JSONs → vão para a fila (comportamento antigo)
     const novos: ImportJob[] = [];
     for (const f of files) {
       if (!/\.json$/i.test(f.name)) continue;
@@ -1481,14 +1370,9 @@ function ImportListaModal({
           </div>
         ) : (
           <div className="space-y-4">
-
             <div>
               <label className="text-sm font-medium text-foreground/70">Disciplina *</label>
-              {loadingDisciplines ? (
-                <div className="mt-1 flex items-center gap-2 text-xs text-foreground/50">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando disciplinas...
-                </div>
-              ) : disciplines.length === 0 ? (
+              {disciplinas.length === 0 ? (
                 <div className="mt-1 rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent">
                   Você ainda não tem disciplinas cadastradas. Crie uma antes de importar listas.
                 </div>
@@ -1499,7 +1383,7 @@ function ImportListaModal({
                   disabled={importing || !!disciplinaInicial}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1 disabled:opacity-60"
                 >
-                  {disciplines.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
+                  {disciplinas.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
                 </select>
               )}
             </div>
@@ -1606,7 +1490,7 @@ function ImportListaModal({
               </button>
               <button
                 onClick={handleImport}
-                disabled={importing || disciplines.length === 0 || jobs.length === 0}
+                disabled={importing || disciplinas.length === 0 || jobs.length === 0}
                 className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {importing ? (
