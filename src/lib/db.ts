@@ -1269,7 +1269,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         }
 
         const altCollection = database.collections.alternativas;
-        const localQ = await questoesCollection.find({ selector: {} }).exec();
+                const localQ = await questoesCollection.find({ selector: { simulado_id: { $in: simIds } } }).exec();
         const qIds = localQ.map(d => d.get('id'));
         if (qIds.length > 0) {
           const qIdChunks = chunkArray(qIds, 100);

@@ -514,7 +514,11 @@ export async function excluirSimulado(
   try {
     const db = await getDb();
     const now = nowIso();
-
+        // Só a dona pode excluir o simulado (as amigas usam "Sair do compartilhamento")
+    const simDono = await db.simulados.findOne({ selector: { id: simuladoId } }).exec();
+    if (!simDono || simDono.get('created_by') !== userId) {
+      return { success: false, error: 'Só a dona do simulado pode excluí-lo.' };
+    }
     const progs = await db.progresso_simulado.find({
       selector: { simulado_id: simuladoId, user_id: userId, isdeleted: false },
     }).exec();
