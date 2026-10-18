@@ -152,7 +152,7 @@ async function carregarDados(eu: string): Promise<Dados> {
     g.donos.add(arq.donoId);
     let solto = g.topicos.get("__soltos__");
     if (!solto) {
-      solto = { id: "__soltos__", nome: "Arquivos", arquivos: [] };
+      solto = { id: "__soltos__", nome: "Arquivos Soltos", arquivos: [] };
       g.topicos.set(solto.id, solto);
     }
     solto.arquivos.push(arq);
@@ -209,15 +209,9 @@ export default function CompartilhadosPage() {
   const toast = useToast();
   const confirmDialog = useConfirm();
 
-  // Estados de cópia para cada tipo
-  const [copiandoDisciplinaKey, setCopiandoDisciplinaKey] = useState<string | null>(null);
-  const [progressoDisciplina, setProgressoDisciplina] = useState("");
-  
-  const [copiandoListaId, setCopiandoListaId] = useState<string | null>(null);
-  const [progressoLista, setProgressoLista] = useState("");
-  
-  const [copiandoSimuladoId, setCopiandoSimuladoId] = useState<string | null>(null);
-  const [progressoSimulado, setProgressoSimulado] = useState("");
+  // Estado para controlar qual item está copiando (grupo, tópico, arquivo, lista ou simulado)
+  const [copiandoKey, setCopiandoKey] = useState<string | null>(null);
+  const [progressoCopia, setProgressoCopia] = useState("");
 
   const [dados, setDados] = useState<Dados | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -287,8 +281,8 @@ export default function CompartilhadosPage() {
   const vazio = !!dados && dados.grupos.length === 0 && dados.listas.length === 0 && dados.simulados.length === 0;
 
   // Handlers de Cópia
-  const handleCopiarDisciplina = async (g: GrupoDisciplina) => {
-    if (!userId || copiandoDisciplinaKey) return;
+  const handleCopiarGrupo = async (g: GrupoDisciplina) => {
+    if (!userId || copiandoKey) return;
     const topicosParaCopiar = [...g.topicos.values()].map((t) => ({
       nome: t.nome,
       arquivoIds: t.arquivos.map((a) => a.id),
@@ -296,28 +290,78 @@ export default function CompartilhadosPage() {
     const totalArquivos = topicosParaCopiar.reduce((soma, t) => soma + t.arquivoIds.length, 0);
 
     const ok = await confirmDialog({
-      title: "Copiar para a sua conta?",
-      description: `Você recebe uma cópia só sua de "${g.nome}", com ${topicosParaCopiar.length} tópico(s) e ${totalArquivos} PDF(s). A cópia continua existindo mesmo que a dona apague o original.`,
+      title: "Copiar tudo para a sua conta?",
+      description: `Você recebe uma cópia só sua de "${g.nome}", com ${topicosParaCopiar.length} tópico(s) e ${totalArquivos} PDF(s).`,
       confirmText: "Copiar",
       cancelText: "Cancelar",
     });
     if (!ok) return;
 
-    setCopiandoDisciplinaKey(g.key);
-    setProgressoDisciplina("Começando...");
+    setCopiandoKey(g.key);
+    setProgressoCopia("Começando...");
     try {
-      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoDisciplina);
+      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
       if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
-      else if (res.arquivosComFalha > 0) toast.error(`Copiei a disciplina e ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
-      else toast.success(`Copiado! Veja em Conteúdo: ${res.topicosCriados} tópico(s) e ${res.arquivosCopiados} PDF(s).`);
+      else if (res.arquivosComFalha > 0) toast.error(`Copiei ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
+      else toast.success(`Copiado! ${res.topicosCriados} tópico(s) e ${res.arquivosCopiados} PDF(s).`);
     } finally {
-      setCopiandoDisciplinaKey(null);
-      setProgressoDisciplina("");
+      setCopiandoKey(null);
+      setProgressoCopia("");
+    }
+  };
+
+  const handleCopiarTopico = async (g: GrupoDisciplina, t: TopicoItem) => {
+    if (!userId || copiandoKey) return;
+    const topicosParaCopiar = [{ nome: t.nome, arquivoIds: t.arquivos.map((a) => a.id) }];
+    const totalArquivos = t.arquivos.length;
+
+    const ok = await confirmDialog({
+      title: "Copiar este tópico?",
+      description: `Você recebe uma cópia só sua do tópico "${t.nome}" (com ${totalArquivos} PDF(s)) na disciplina "${g.nome}".`,
+      confirmText: "Copiar",
+      cancelText: "Cancelar",
+    });
+    if (!ok) return;
+
+    setCopiandoKey(`topic:${t.id}`);
+    setProgressoCopia("Começando...");
+    try {
+      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
+      if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
+      else if (res.arquivosComFalha > 0) toast.error(`Copiei ${res.arquivosCopiados} PDF(s), mas ${res.arquivosComFalha} falharam.`);
+      else toast.success(`Tópico copiado com ${res.arquivosCopiados} PDF(s)!`);
+    } finally {
+      setCopiandoKey(null);
+      setProgressoCopia("");
+    }
+  };
+
+  const handleCopiarArquivo = async (g: GrupoDisciplina, t: TopicoItem, a: ArquivoItem) => {
+    if (!userId || copiandoKey) return;
+    const topicosParaCopiar = [{ nome: t.nome, arquivoIds: [a.id] }];
+
+    const ok = await confirmDialog({
+      title: "Copiar este PDF?",
+      description: `Você recebe uma cópia só sua do arquivo "${a.nome}" na disciplina "${g.nome}".`,
+      confirmText: "Copiar",
+      cancelText: "Cancelar",
+    });
+    if (!ok) return;
+
+    setCopiandoKey(`file:${a.id}`);
+    setProgressoCopia("Baixando PDF...");
+    try {
+      const res = await copiarDisciplinaParaMinhaConta(g.nome, topicosParaCopiar, userId, setProgressoCopia);
+      if (!res.success) toast.error(res.error || "Não consegui copiar agora.");
+      else toast.success("PDF copiado!");
+    } finally {
+      setCopiandoKey(null);
+      setProgressoCopia("");
     }
   };
 
   const handleCopiarLista = async (l: ListaItem) => {
-    if (!userId || copiandoListaId) return;
+    if (!userId || copiandoKey) return;
     const ok = await confirmDialog({
       title: "Copiar lista para a sua conta?",
       description: `Você recebe uma cópia só sua de "${l.titulo}" com ${l.total} questão(ões). O histórico de respostas da dona não é copiado.`,
@@ -326,20 +370,20 @@ export default function CompartilhadosPage() {
     });
     if (!ok) return;
 
-    setCopiandoListaId(l.id);
-    setProgressoLista("Começando...");
+    setCopiandoKey(`lista:${l.id}`);
+    setProgressoCopia("Começando...");
     try {
-      const res = await copiarListaParaMinhaConta(l.id, userId, setProgressoLista);
+      const res = await copiarListaParaMinhaConta(l.id, userId, setProgressoCopia);
       if (res.success) toast.success(`Lista copiada com ${res.questoesCopiadas} questões!`);
       else toast.error(res.error || "Erro ao copiar lista.");
     } finally {
-      setCopiandoListaId(null);
-      setProgressoLista("");
+      setCopiandoKey(null);
+      setProgressoCopia("");
     }
   };
 
   const handleCopiarSimulado = async (s: SimuladoItem) => {
-    if (!userId || copiandoSimuladoId) return;
+    if (!userId || copiandoKey) return;
     const ok = await confirmDialog({
       title: "Copiar simulado para a sua conta?",
       description: `Você recebe uma cópia só sua de "${s.titulo}" com ${s.total} questão(ões). O histórico de resultados da dona não é copiado.`,
@@ -348,15 +392,15 @@ export default function CompartilhadosPage() {
     });
     if (!ok) return;
 
-    setCopiandoSimuladoId(s.id);
-    setProgressoSimulado("Começando...");
+    setCopiandoKey(`simulado:${s.id}`);
+    setProgressoCopia("Começando...");
     try {
-      const res = await copiarSimuladoParaMinhaConta(s.id, userId, setProgressoSimulado);
+      const res = await copiarSimuladoParaMinhaConta(s.id, userId, setProgressoCopia);
       if (res.success) toast.success(`Simulado copiado com ${res.questoesCopiadas} questões!`);
       else toast.error(res.error || "Erro ao copiar simulado.");
     } finally {
-      setCopiandoSimuladoId(null);
-      setProgressoSimulado("");
+      setCopiandoKey(null);
+      setProgressoCopia("");
     }
   };
 
@@ -379,6 +423,14 @@ export default function CompartilhadosPage() {
           </button>
         </div>
 
+        {/* Feedback de progresso global */}
+        {copiandoKey && progressoCopia && (
+          <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm text-primary flex items-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+            <span>{progressoCopia}</span>
+          </div>
+        )}
+
         {carregando && <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
 
         {erro && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
@@ -390,7 +442,7 @@ export default function CompartilhadosPage() {
           </div>
         )}
 
-        {/* DISCIPLINAS */}
+        {/* DISCIPLINAS E ARQUIVOS */}
         {dados && dados.grupos.length > 0 && (
           <section className="space-y-3">
             <h2 className="flex items-center gap-2 font-display text-base font-bold">
@@ -405,33 +457,63 @@ export default function CompartilhadosPage() {
                       <p className="text-sm font-semibold">{g.nome}</p>
                       <p className="text-xs text-foreground/50">de {nomesDe(g.donos)}</p>
                     </div>
+                    {/* Botão Copiar Tudo (Grupo) */}
                     {topicos.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => handleCopiarDisciplina(g)}
-                        disabled={copiandoDisciplinaKey !== null}
+                        onClick={() => handleCopiarGrupo(g)}
+                        disabled={copiandoKey !== null}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                        title="Copiar tudo"
                       >
-                        {copiandoDisciplinaKey === g.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-                        Copiar
+                        {copiandoKey === g.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                        Copiar Tudo
                       </button>
                     )}
                   </div>
-                  {copiandoDisciplinaKey === g.key && progressoDisciplina && <p className="mb-2 text-xs text-foreground/60">{progressoDisciplina}</p>}
-                  <div className="space-y-3">
+
+                  <div className="space-y-3 mt-3">
                     {topicos.map((t) => (
-                      <div key={t.id}>
-                        <p className="text-xs font-medium uppercase tracking-wide text-foreground/50">{t.nome}</p>
+                      <div key={t.id} className="border-t border-border/50 pt-3 first:border-0 first:pt-0">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-xs font-medium uppercase tracking-wide text-foreground/50">
+                            {t.nome}
+                          </p>
+                          {t.arquivos.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopiarTopico(g, t)}
+                              disabled={copiandoKey !== null}
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline disabled:opacity-50"
+                            >
+                              {copiandoKey === `topic:${t.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3" />}
+                              Copiar tópico
+                            </button>
+                          )}
+                        </div>
+
                         {t.arquivos.length === 0 ? (
-                          <p className="mt-1 text-xs text-foreground/40">Sem arquivos.</p>
+                          <p className="text-xs text-foreground/40 italic">Sem arquivos.</p>
                         ) : (
-                          <ul className="mt-1 divide-y divide-border">
+                          <ul className="divide-y divide-border">
                             {t.arquivos.map((a) => (
-                              <li key={a.id}>
-                                <Link to={`/pdf/${a.id}`} className="flex items-center gap-2 py-2 text-sm hover:text-primary">
+                              <li key={a.id} className="flex items-center justify-between gap-2 py-2">
+                                <Link
+                                  to={`/pdf/${a.id}`}
+                                  className="flex min-w-0 flex-1 items-center gap-2 text-sm hover:text-primary"
+                                >
                                   <FileText className="h-4 w-4 shrink-0 text-foreground/50" />
-                                  <span className="min-w-0 flex-1 truncate">{a.nome}</span>
+                                  <span className="truncate">{a.nome}</span>
                                 </Link>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopiarArquivo(g, t, a)}
+                                  disabled={copiandoKey !== null}
+                                  className="shrink-0 text-[10px] font-medium text-primary hover:underline disabled:opacity-50 flex items-center gap-1"
+                                >
+                                  {copiandoKey === `file:${a.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3" />}
+                                  Copiar PDF
+                                </button>
                               </li>
                             ))}
                           </ul>
@@ -454,7 +536,7 @@ export default function CompartilhadosPage() {
             <ul className="space-y-2">
               {dados.listas.map((l) => (
                 <li key={l.id} className="relative">
-                  <Link to={`/listas/${l.id}`} className="rf-card rf-card-hover block p-4 pr-24">
+                  <Link to={`/listas/${l.id}`} className="rf-card rf-card-hover block p-4 pr-28">
                     <p className="text-sm font-semibold">{l.titulo}</p>
                     <p className="text-xs text-foreground/50">
                       de {nomeDe(l.donoId)} {l.total > 0 && ` · ${l.total} questões`}
@@ -463,15 +545,12 @@ export default function CompartilhadosPage() {
                   <button
                     type="button"
                     onClick={() => handleCopiarLista(l)}
-                    disabled={copiandoListaId !== null}
+                    disabled={copiandoKey !== null}
                     className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
                   >
-                    {copiandoListaId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiandoKey === `lista:${l.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
                     Copiar
                   </button>
-                  {copiandoListaId === l.id && progressoLista && (
-                    <p className="absolute left-4 bottom-1 text-[10px] text-foreground/60">{progressoLista}</p>
-                  )}
                 </li>
               ))}
             </ul>
@@ -487,7 +566,7 @@ export default function CompartilhadosPage() {
             <ul className="space-y-2">
               {dados.simulados.map((s) => (
                 <li key={s.id} className="relative">
-                  <Link to={`/simulados/${s.id}`} className="rf-card rf-card-hover block p-4 pr-24">
+                  <Link to={`/simulados/${s.id}`} className="rf-card rf-card-hover block p-4 pr-28">
                     <p className="text-sm font-semibold">{s.titulo}</p>
                     <p className="text-xs text-foreground/50">
                       de {nomeDe(s.donoId)} {s.detalhe && ` · ${s.detalhe}`} {s.total > 0 && ` · ${s.total} questões`}
@@ -496,15 +575,12 @@ export default function CompartilhadosPage() {
                   <button
                     type="button"
                     onClick={() => handleCopiarSimulado(s)}
-                    disabled={copiandoSimuladoId !== null}
+                    disabled={copiandoKey !== null}
                     className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
                   >
-                    {copiandoSimuladoId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiandoKey === `simulado:${s.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
                     Copiar
                   </button>
-                  {copiandoSimuladoId === s.id && progressoSimulado && (
-                    <p className="absolute left-4 bottom-1 text-[10px] text-foreground/60">{progressoSimulado}</p>
-                  )}
                 </li>
               ))}
             </ul>
