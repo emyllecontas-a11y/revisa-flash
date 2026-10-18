@@ -1268,3 +1268,129 @@ async function anexarTitulos(db: any, resultados: any[]): Promise<any[]> {
     return resultados;
   }
 }
+
+// ============================================================
+// COPIAR SIMULADO DE OUTRA PESSOA PARA A MINHA CONTA
+// ============================================================
+
+// Baixa uma imagem pública e a envia de novo para a pasta de quem está copiando.
+// Se falhar, devolve null (quem chama mantém o endereço original da imagem).
+async function copiarImagemParaMinhaContaSimulado(url: string, userId: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const base64: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    const { uploadImagemQuestao } = await import('@/services/listaService');
+    const res = await uploadImagemQuestao(base64, userId);
+    return res.success && res.url ? res.url : null;
+  } catch {
+    return null;
+  }
+}
+
+// Copia só o CONTEÚDO do simulado (questões, alternativas, comentários, imagens).
+// Respostas, progresso, grifos e resultados da dona original NÃO são copiados.
+export async function copiarSimuladoParaMinhaConta(
+  simuladoId: string,
+  userId: string
+): Promise<{ success: boolean; simuladoId?: string; imagensNaoCopiadas?: number; error?: string }> {
+  try {
+    if (!userId) return { success: false, error: 'Usuário não autenticado' };
+    if (!isOnline()) {
+      return {
+        success: false,
+        error: 'Você está offline. Copiar um simulado precisa de conexão com a internet.',
+      };
+    }
+
+    const original = await getSimuladoCompleto(simuladoId);
+    if (!original.success || !original.data) {
+      return { success: false, error: original.error || 'Não consegui abrir o simulado original.' };
+    }
+    const sim: any = original.data;
+    const userIdStr = String(userId);
+    if (sim.created_by === userIdStr) {
+      return { success: false, error: 'Este simulado já é seu.' };
+    }
+
+    let imagensNaoCopiadas = 0;
+    const questoesFormatadas: any[] = [];
+    for (let i = 0; i < sim.questoes.length; i++) {
+      const q: any = sim.questoes[i];
+
+      let imagemUrl: string | null = q.imagem_url || null;
+      if (imagemUrl) {
+        const nova = await copiarImagemParaMinhaContaSimulado(imagemUrl, userIdStr);
+        if (nova) imagemUrl = nova;
+        else imagensNaoCopiadas++;
+      }
+
+      const ehMultipla = !!(q.alternativas && q.alternativas.length > 0);
+      const item: any = {
+        numero: i + 1,
+        tipo: ehMultipla ? 'multipla_escolha' : 'certo_errado',
+        enunciado: q.enunciado || '',
+        area: q.area || null,
+        comentario_geral: q.comentario_geral || null,
+        imagem_url: imagemUrl,
+        sublinhados_enunciado: q.sublinhados_enunciado || null,
+        sublinhados_comentario: q.sublinhados_comentario || null,
+        negritos_enunciado: q.negritos_enunciado || null,
+        negritos_comentario: q.negritos_comentario || null,
+        italicos_enunciado: q.italicos_enunciado || null,
+        italicos_comentario: q.italicos_comentario || null,
+      };
+
+      if (ehMultipla) {
+        item.alternativas = q.alternativas.map((a: any, idx: number) => ({
+          letra: a.letra || String.fromCharCode(65 + (idx % 5)),
+          texto: a.texto || '',
+          correta: a.correta || false,
+          comentario: a.comentario || null,
+          sublinhados: a.sublinhados || null,
+          negritos: a.negritos || null,
+          italicos: a.italicos || null,
+        }));
+      } else {
+        item.correta = q.gabarito_ce === true;
+      }
+
+      questoesFormatadas.push(item);
+    }
+
+    const supabaseClient = await getSupabaseWithToken();
+    const novoId = crypto.randomUUID();
+
+    const { data, error } = await supabaseClient.rpc('importar_simulado', {
+      p_id: novoId,
+      p_titulo: sim.titulo,
+      p_descricao: sim.descricao || null,
+      p_area: sim.area,
+      p_nivel: sim.nivel,
+      p_banca: sim.banca,
+      p_ano: sim.ano,
+      p_tempo_total: sim.tempo_total,
+      p_created_by: userIdStr,
+      p_questoes: questoesFormatadas,
+    });
+
+    if (error) throw error;
+
+    if (data && data.success === true) {
+      import('@/lib/db').then(({ syncWithSupabase }) => {
+        syncWithSupabase(userId).catch(() => {});
+      });
+      return { success: true, simuladoId: novoId, imagensNaoCopiadas };
+    }
+    return { success: false, error: data?.error || 'Erro desconhecido na RPC' };
+  } catch (error: any) {
+    console.error('Erro ao copiar simulado:', error);
+    return { success: false, error: error.message };
+  }
+}

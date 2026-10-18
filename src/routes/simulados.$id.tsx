@@ -11,6 +11,7 @@ import {
   finalizarSimulado,
   calcularResultado,
   excluirSimulado,
+  copiarSimuladoParaMinhaConta,
   buscarResultadoSimulado,
 } from "@/services/simuladoService";
 import {
@@ -28,7 +29,7 @@ import type {
 import {
   ArrowLeft, ArrowRight, Clock, Flag, Grid3X3, X,
   CheckCircle2, XCircle, MinusCircle, RotateCcw, ChevronLeft,
-  Loader2, Trash2,
+  Loader2, Trash2, Copy,
 } from "lucide-react";
 import type { SimuladoPlayer, QuestaoPlayer, ProgressoPlayer, Alternativa } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -81,7 +82,38 @@ export default function SimuladoPlayerPage() {
   const [excluindo, setExcluindo] = useState(false);
   // Simulado compartilhado por amiga é somente leitura: só a dona pode excluir
   const ehDona = !!simulado && simulado.created_by === user?.id;
-  const rotaVoltar = simulado && !ehDona ? "/compartilhados" : "/simulados";
+    const rotaVoltar = simulado && !ehDona ? "/compartilhados" : "/simulados";
+  const [copiando, setCopiando] = useState(false);
+
+  const handleCopiarSimulado = async () => {
+    if (!simulado || !user?.id || copiando) return;
+    const ok = await confirmDialog({
+      title: "Copiar para a sua conta?",
+      description: "Você recebe uma cópia só sua, que continua existindo mesmo que a dona apague o original. Suas respostas e resultados ficam só com você.",
+      confirmText: "Copiar",
+      cancelText: "Cancelar",
+    });
+    if (!ok) return;
+
+    setCopiando(true);
+    try {
+      const result = await copiarSimuladoParaMinhaConta(simulado.id, user.id);
+      if (result.success && result.simuladoId) {
+        toast.success("Simulado copiado!", {
+          description: result.imagensNaoCopiadas
+            ? `${result.imagensNaoCopiadas} imagem(ns) não puderam ser copiadas e continuam apontando para o original.`
+            : "Ele agora é seu.",
+        });
+        navigate(`/simulados/${result.simuladoId}`);
+      } else {
+        toast.error("Erro ao copiar", { description: result.error });
+      }
+    } catch (err: any) {
+      toast.error("Erro ao copiar", { description: err.message });
+    } finally {
+      setCopiando(false);
+    }
+  };
 
   const [progresso, setProgresso] = useState<ProgressoPlayer>({
     respostas: {},
@@ -496,6 +528,16 @@ export default function SimuladoPlayerPage() {
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar para simulados
           </button>
+                    {!ehDona && (
+            <button
+              onClick={handleCopiarSimulado}
+              disabled={copiando}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+            >
+              {copiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+              Copiar para minha conta
+            </button>
+          )}
           {ehDona && (
             <button
               onClick={handleExcluirSimulado}
@@ -701,6 +743,17 @@ export default function SimuladoPlayerPage() {
               <Grid3X3 className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Questões</span>
             </button>
+                        {!ehDona && (
+              <button
+                onClick={handleCopiarSimulado}
+                disabled={copiando}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                title="Copiar para minha conta"
+              >
+                {copiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">Copiar</span>
+              </button>
+            )}
             {ehDona && (
               <button
                 onClick={handleExcluirSimulado}
