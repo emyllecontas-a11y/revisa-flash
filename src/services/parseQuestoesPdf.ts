@@ -44,20 +44,29 @@ function findGabaritoStart(t: string): number {
 
 function parseGabarito(block: string): Map<number, Gab> {
   const out = new Map<number, Gab>();
+  const toGab = (letra: string | undefined, palavra: string | undefined): Gab => {
+    if (letra) return { tipo: 'letra', letra: letra.toUpperCase() };
+    const w = (palavra ?? '').toUpperCase();
+    if (w === 'ANULADA' || w === 'ANULADO') return { tipo: 'anulada' };
+    return { tipo: 'ce', correta: w === 'CORRETA' || w === 'CERTO' || w === 'CERTA' };
+  };
+  // Três formas, em ordem de leitura:
+  //  1) "N. LETRA X" / "N. CORRETA"  (par normal)
+  //  2) "N" sozinho  -> entra numa fila (tabelas em que o número e a resposta ficam em linhas diferentes)
+  //  3) "LETRA X" sem número -> responde ao primeiro número da fila
   const re =
-    /(?<!\d)(\d{1,3})\s*[.\-–)]\s*(?:LETRA\s*([A-E])(?![A-Za-z])|(INCORRETA|CORRETA|ERRADO|ERRADA|CERTO|CERTA|ANULADA|ANULADO)(?![A-Za-z]))/gi;
+    /(?<!\d)(\d{1,3})\s*[.\-–)]\s*(?:LETRA\s*([A-E])(?![A-Za-z])|(INCORRETA|CORRETA|ERRADO|ERRADA|CERTO|CERTA|ANULADA|ANULADO)(?![A-Za-z]))|(?<![\d.])(\d{1,3})(?![\d.\-–)])|(?:LETRA\s*([A-E])(?![A-Za-z])|\b(INCORRETA|CORRETA|ERRADO|ERRADA|CERTO|CERTA|ANULADA|ANULADO)(?![A-Za-z]))/gi;
+  const fila: number[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(block))) {
-    const n = Number(m[1]);
-    if (out.has(n)) continue;
-    if (m[2]) out.set(n, { tipo: 'letra', letra: m[2].toUpperCase() });
-    else {
-      const w = m[3].toUpperCase();
-      if (w === 'ANULADA' || w === 'ANULADO') { out.set(n, { tipo: 'anulada' }); continue; }
-      out.set(n, {
-        tipo: 'ce',
-        correta: w === 'CORRETA' || w === 'CERTO' || w === 'CERTA',
-      });
+    if (m[1]) {
+      const n = Number(m[1]);
+      if (!out.has(n)) out.set(n, toGab(m[2], m[3]));
+    } else if (m[4]) {
+      fila.push(Number(m[4]));
+    } else if (fila.length) {
+      const n = fila.shift()!;
+      if (!out.has(n)) out.set(n, toGab(m[5], m[6]));
     }
   }
   return out;
@@ -135,16 +144,23 @@ function splitAlternativas(body: string): {
   enunciado: string;
   alts: { letra: string; texto: string }[];
 } {
-  const marks: { letra: string; idx: number; end: number }[] = [];
-  let cursor = 0;
-  for (const letra of ['A', 'B', 'C', 'D', 'E']) {
-    const re = new RegExp(`(?:^|\\s)\\(?${letra}\\s*\\)\\s*`, 'g');
-    re.lastIndex = cursor;
-    const m = re.exec(body);
-    if (!m) break;
-    marks.push({ letra, idx: m.index, end: m.index + m[0].length });
-    cursor = m.index + m[0].length;
-  }
+  // Tenta primeiro "A) B) C)"; se não achar, aceita minúsculas "a) b) c)" (alguns PDFs usam).
+  const achar = (minuscula: boolean) => {
+    const marks: { letra: string; idx: number; end: number }[] = [];
+    let cursor = 0;
+    for (const letra of ['A', 'B', 'C', 'D', 'E']) {
+      const l = minuscula ? letra.toLowerCase() : letra;
+      const re = new RegExp(`(?:^|\\s)\\(?${l}\\s*\\)\\s*`, 'g');
+      re.lastIndex = cursor;
+      const m = re.exec(body);
+      if (!m) break;
+      marks.push({ letra, idx: m.index, end: m.index + m[0].length });
+      cursor = m.index + m[0].length;
+    }
+    return marks;
+  };
+  let marks = achar(false);
+  if (marks.length < 2) marks = achar(true);
   if (marks.length < 2) return { enunciado: clean(body), alts: [] };
   return {
     enunciado: clean(body.slice(0, marks[0].idx)),
@@ -299,6 +315,156 @@ export function stripNoise(raw: string): string {
   return lines.filter(keep).join('\n');
 }
 
+function montarQuestoes(
+  raws: Raw[],
+  comments: Map<number, string | null>,
+  gab: Map<number, Gab>,
+  areaPadrao: string,
+  warnings: string[]
+): QuestaoImportLista[] {
+  return raws.map((r) => {
+    const g = gab.get(r.numero);
+    const com = comments.get(r.numero) ?? null;
+    if (g?.tipo === 'anulada') warnings.push(`Q${r.numero}: questão ANULADA pela banca; sem alternativa correta.`);
+    const isCE = g ? g.tipo === 'ce' : r.alternativas.length < 2;
+
+    if (isCE) {
+      if (r.alternativas.length)
+        warnings.push(`Q${r.numero}: gabarito é certo/errado mas há alternativas A-E; confira.`);
+      if (!g)
+        warnings.push(`Q${r.numero}: sem gabarito; marquei como certo_errado=false por padrão.`);
+      const enun = r.alternativas.length
+        ? clean(
+            `${r.enunciado} ${r.alternativas
+              .map((a) => `${a.letra}) ${a.texto}`)
+              .join(' ')}`
+          )
+        : r.enunciado;
+      return {
+        numero: r.numero,
+        tipo: 'certo_errado' as const,
+        enunciado: enun,
+        area: areaPadrao,
+        comentario_geral: com ?? undefined,
+        correta: g?.tipo === 'ce' ? g.correta : false,
+      };
+    }
+
+    if (r.alternativas.length < 2)
+      warnings.push(`Q${r.numero}: gabarito é letra mas não achei alternativas.`);
+    const letra = g?.tipo === 'letra' ? g.letra : null;
+    if (!letra && g?.tipo !== 'anulada') warnings.push(`Q${r.numero}: sem gabarito.`);
+    else if (letra && !r.alternativas.some((a) => a.letra === letra))
+      warnings.push(`Q${r.numero}: gabarito ${letra} não existe nas alternativas.`);
+
+    const alternativas: AlternativaLista[] = r.alternativas.map((a) => ({
+      letra: a.letra as AlternativaLista['letra'],
+      texto: a.texto,
+      correta: a.letra === letra,
+      comentario: null,
+    }));
+
+    return {
+      numero: r.numero,
+      tipo: 'multipla_escolha' as const,
+      enunciado: r.enunciado,
+      area: areaPadrao,
+      comentario_geral: com ?? undefined,
+      alternativas,
+    };
+  });
+}
+
+/* ------------------------- PDF com vários tópicos ------------------------- */
+// Alguns PDFs reúnem vários tópicos (Substantivo, Adjetivo, Advérbio...). Cada tópico tem a sua
+// seção QUESTÕES COMENTADAS, a sua LISTA DE QUESTÕES e o seu GABARITO, e a numeração recomeça em 1.
+
+function titulosDaSecao(t: string, fim: number): string {
+  const trecho = t.slice(fim, fim + 160);
+  const m = trecho.match(/^\s*[-–:]\s*([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ ,/&–-]*?)\s+(?=\d{1,3}\s*\.\s)/);
+  if (!m) return '';
+  const partes = m[1].trim().split(/\s+[-–]\s+/);
+  if (partes.length > 1) partes.pop(); // tira a banca ("- MULTIBANCAS", "- FGV")
+  return partes
+    .join(' - ')
+    .toLowerCase()
+    .split(/\s+/)
+    .map((p) => (p.length > 2 ? p.charAt(0).toUpperCase() + p.slice(1) : p))
+    .join(' ');
+}
+
+/** Gabarito escrito dentro do comentário ("Gabarito letra B.", "Gabarito: Errado."). */
+function gabaritoDoComentario(c: string | null | undefined): Gab | null {
+  if (!c) return null;
+  const todos = [
+    ...c.matchAll(/Gabarito\s*(?:oficial\s*)?:?\s*(?:letra\s*)?([A-E])(?![A-Za-zÀ-ú])/gi),
+  ];
+  if (todos.length) return { tipo: 'letra', letra: todos[todos.length - 1][1].toUpperCase() };
+  const ce = [...c.matchAll(/Gabarito\s*:?\s*(Certo|Certa|Errado|Errada|Correto|Correta|Incorreto|Incorreta)\b/gi)];
+  if (ce.length) {
+    const w = ce[ce.length - 1][1].toLowerCase();
+    return { tipo: 'ce', correta: /^(certo|certa|correto|correta)$/.test(w) };
+  }
+  return null;
+}
+
+function parseVariosTopicos(
+  t: string,
+  areaPadrao: string,
+  warnings: string[]
+): QuestaoImportLista[] | null {
+  const heads = (re: RegExp) =>
+    [...t.matchAll(new RegExp(re.source, 'g'))].map((m) => ({ index: m.index!, end: m.index! + m[0].length }));
+  const coms = heads(/QUEST(?:Õ|O)ES COMENTADAS/);
+  const listas = heads(/LISTA DE QUEST(?:Õ|O)ES/);
+  if (coms.length < 2 || coms.length !== listas.length) return null;
+
+  const saida: QuestaoImportLista[] = [];
+  let offset = 0;
+
+  coms.forEach((c, i) => {
+    const titulo = titulosDaSecao(t, c.end) || `Tópico ${i + 1}`;
+    const comTexto = t.slice(c.end, i + 1 < coms.length ? coms[i + 1].index : listas[0].index);
+    let listaTexto = t.slice(listas[i].end, i + 1 < listas.length ? listas[i + 1].index : t.length);
+
+    // O gabarito do tópico vem colado no fim da lista do tópico.
+    let gab = new Map<number, Gab>();
+    const g = [...listaTexto.matchAll(/GABARITO/g)].map((m) => m.index!);
+    if (g.length) {
+      const gi = g[g.length - 1];
+      gab = parseGabarito(listaTexto.slice(gi));
+      listaTexto = listaTexto.slice(0, gi);
+    }
+
+    const total = gab.size ? Math.max(...gab.keys()) : 300;
+    const avisosSecao: string[] = [];
+    const raws: Raw[] = splitByNumber(listaTexto, total).map(({ n, body }) => {
+      const { enunciado, alts } = splitAlternativas(body);
+      return { numero: n, enunciado, alternativas: alts };
+    });
+    const comments = attachComments(raws, comTexto, avisosSecao);
+
+    // Quem não achou gabarito no bloco usa o "Gabarito letra X" escrito no comentário.
+    for (const r of raws) {
+      if (!gab.has(r.numero)) {
+        const gc = gabaritoDoComentario(comments.get(r.numero));
+        if (gc) gab.set(r.numero, gc);
+      }
+    }
+
+    const qs = montarQuestoes(raws, comments, gab, titulo || areaPadrao, avisosSecao);
+    for (const w of avisosSecao) warnings.push(`[${titulo}] ${w}`);
+    if (gab.size && qs.length !== gab.size)
+      warnings.push(`[${titulo}] Achei ${qs.length} questões, mas o gabarito tem ${gab.size}.`);
+
+    // Numeração única no arquivo inteiro (a de cada tópico recomeça em 1).
+    for (const q of qs) saida.push({ ...q, numero: offset + q.numero });
+    offset += qs.length;
+  });
+
+  return saida.length ? saida : null;
+}
+
 /* ------------------------------ Principal ------------------------------ */
 
 export function parseQuestoesPdf(
@@ -311,6 +477,10 @@ export function parseQuestoesPdf(
   const t = clean(
     stripNoise(Array.isArray(input) ? input.join('\n') : input).normalize('NFC')
   );
+
+  // PDF com vários tópicos, cada um com a sua lista, gabarito e numeração própria.
+  const varios = parseVariosTopicos(t, areaPadrao, warnings);
+  if (varios) return { titulo, questoes: varios, warnings };
 
   const gStart = findGabaritoStart(t);
   const gab = gStart >= 0 ? parseGabarito(t.slice(gStart)) : new Map<number, Gab>();
@@ -372,57 +542,7 @@ if (comH && titulo === 'Lista importada') {
     );
   }
 
-  const questoes: QuestaoImportLista[] = raws.map((r) => {
-    const g = gab.get(r.numero);
-    const com = comments.get(r.numero) ?? null;
-    if (g?.tipo === 'anulada') warnings.push(`Q${r.numero}: questão ANULADA pela banca; sem alternativa correta.`);
-    const isCE = g ? g.tipo === 'ce' : r.alternativas.length < 2;
-
-    if (isCE) {
-      if (r.alternativas.length)
-        warnings.push(`Q${r.numero}: gabarito é certo/errado mas há alternativas A-E; confira.`);
-      if (!g)
-        warnings.push(`Q${r.numero}: sem gabarito; marquei como certo_errado=false por padrão.`);
-      const enun = r.alternativas.length
-        ? clean(
-            `${r.enunciado} ${r.alternativas
-              .map((a) => `${a.letra}) ${a.texto}`)
-              .join(' ')}`
-          )
-        : r.enunciado;
-      return {
-        numero: r.numero,
-        tipo: 'certo_errado' as const,
-        enunciado: enun,
-        area: areaPadrao,
-        comentario_geral: com ?? undefined,
-        correta: g?.tipo === 'ce' ? g.correta : false,
-      };
-    }
-
-    if (r.alternativas.length < 2)
-      warnings.push(`Q${r.numero}: gabarito é letra mas não achei alternativas.`);
-    const letra = g?.tipo === 'letra' ? g.letra : null;
-    if (!letra && g?.tipo !== 'anulada') warnings.push(`Q${r.numero}: sem gabarito.`);
-    else if (letra && !r.alternativas.some((a) => a.letra === letra))
-      warnings.push(`Q${r.numero}: gabarito ${letra} não existe nas alternativas.`);
-
-    const alternativas: AlternativaLista[] = r.alternativas.map((a) => ({
-      letra: a.letra as AlternativaLista['letra'],
-      texto: a.texto,
-      correta: a.letra === letra,
-      comentario: null,
-    }));
-
-    return {
-      numero: r.numero,
-      tipo: 'multipla_escolha' as const,
-      enunciado: r.enunciado,
-      area: areaPadrao,
-      comentario_geral: com ?? undefined,
-      alternativas,
-    };
-  });
+  const questoes = montarQuestoes(raws, comments, gab, areaPadrao, warnings);
 
   if (gab.size && questoes.length !== gab.size)
     warnings.push(`Achei ${questoes.length} questões, mas o gabarito tem ${gab.size}.`);
