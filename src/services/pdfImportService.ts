@@ -187,7 +187,30 @@ function reconstruirTextoDaPagina(items: any[]): string {
     const limpo = texto.trim();
     if (limpo) resultado.push(limpo);
   }
-  return resultado.join('\n');
+  return reordenarAlternativasEmGrade(resultado).join('\n');
+}
+
+/**
+ * Alternativas em colunas (ex.: A) e C) e E) na mesma linha, B) e D) na linha de baixo)
+ * saem do PDF embaralhadas. Aqui cada célula "X) ..." vira uma linha própria, em ordem de letra.
+ */
+const RE_CELULA = /(?:^|\s)(?=[A-E]\)\s)/;
+function reordenarAlternativasEmGrade(linhas: string[]): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < linhas.length) {
+    if (!/^[A-E]\)\s/.test(linhas[i])) { out.push(linhas[i++]); continue; }
+    let j = i;
+    while (j < linhas.length && /^[A-E]\)\s/.test(linhas[j])) j++;
+    const bloco = linhas.slice(i, j);
+    const temGrade = bloco.some((l) => l.split(RE_CELULA).filter(Boolean).length > 1);
+    if (!temGrade) { out.push(...bloco); i = j; continue; }
+    const celulas = bloco.flatMap((l) => l.split(RE_CELULA).map((c) => c.trim()).filter(Boolean));
+    celulas.sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0));
+    out.push(...celulas);
+    i = j;
+  }
+  return out;
 }
 
 /**

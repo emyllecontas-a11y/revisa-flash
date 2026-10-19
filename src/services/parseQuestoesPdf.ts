@@ -18,7 +18,10 @@ export interface ParseResult extends ListaImport {
   warnings: string[];
 }
 
-type Gab = { tipo: 'letra'; letra: string } | { tipo: 'ce'; correta: boolean };
+type Gab =
+  | { tipo: 'letra'; letra: string }
+  | { tipo: 'ce'; correta: boolean }
+  | { tipo: 'anulada' };
 
 const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -30,7 +33,9 @@ function findGabaritoStart(t: string): number {
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     const tail = t.slice(m.index + 8, m.index + 8 + 60);
-    if (/^\W*1\s*[.\-–)]\s*(LETRA|CORRETA|INCORRETA|CERTO|ERRADO|CERTA|ERRADA)/i.test(tail)) {
+    // O gabarito pode vir em 2 colunas (ex.: "47. LETRA C 1. LETRA E 48. ..."), então o
+    // primeiro item não é necessariamente o 1. Basta "GABARITO" seguido de "N. LETRA/CERTO/...".
+    if (/^\W*\d{1,3}\s*[.\-–)]\s*(LETRA|CORRETA|INCORRETA|CERTO|ERRADO|CERTA|ERRADA|ANULAD[AO])/i.test(tail)) {
       best = m.index;
     }
   }
@@ -40,7 +45,7 @@ function findGabaritoStart(t: string): number {
 function parseGabarito(block: string): Map<number, Gab> {
   const out = new Map<number, Gab>();
   const re =
-    /(?<!\d)(\d{1,3})\s*[.\-–)]\s*(?:LETRA\s*([A-E])(?![A-Za-z])|(INCORRETA|CORRETA|ERRADO|ERRADA|CERTO|CERTA)(?![A-Za-z]))/gi;
+    /(?<!\d)(\d{1,3})\s*[.\-–)]\s*(?:LETRA\s*([A-E])(?![A-Za-z])|(INCORRETA|CORRETA|ERRADO|ERRADA|CERTO|CERTA|ANULADA|ANULADO)(?![A-Za-z]))/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(block))) {
     const n = Number(m[1]);
@@ -48,6 +53,7 @@ function parseGabarito(block: string): Map<number, Gab> {
     if (m[2]) out.set(n, { tipo: 'letra', letra: m[2].toUpperCase() });
     else {
       const w = m[3].toUpperCase();
+      if (w === 'ANULADA' || w === 'ANULADO') { out.set(n, { tipo: 'anulada' }); continue; }
       out.set(n, {
         tipo: 'ce',
         correta: w === 'CORRETA' || w === 'CERTO' || w === 'CERTA',
@@ -179,7 +185,11 @@ function attachComments(
   const starts: (number | null)[] = [];
   let cursor = 0;
   for (const r of raws) {
-    const full = norm(r.enunciado).n;
+    // A linha "(FGV / BANCA / ano)" pode mudar entre as seções (ex.: "CGM BELO HORIZONTE" x
+    // "CGM de Belo Horizonte"); âncora no texto que vem DEPOIS dela.
+    const semCabecalho = r.enunciado.replace(/^\s*\(?\s*FGV\b.{0,90}?\/\s*\d{4}\s*\)?\s*/i, '');
+    const nSem = norm(semCabecalho).n;
+    const full = nSem.length >= 12 ? nSem : norm(r.enunciado).n;
     let idx = -1;
     for (const len of [40, 25, 14]) {
       const a = full.slice(0, len);
@@ -227,7 +237,7 @@ function attachComments(
         endNormIdx - 1 < map.length ? map[endNormIdx - 1] + 1 : com.length;
       comment = com
         .slice(startOrig, blockEndOrig)
-        .replace(/^[\s.;:!?]+/, '')
+        .replace(/^[\s.;:!?)\]”"»’']+/, '')
         .replace(/\s*\b\d{1,3}\s*\.\s*[("“\s]*$/, '')
         .trim();
     } else {
@@ -259,13 +269,19 @@ export function stripNoise(raw: string): string {
   const key = (l: string) => l.replace(/\s+/g, ' ').replace(/\d+/g, '#');
   const freq = new Map<string, number>();
   for (const l of lines) if (l) freq.set(key(l), (freq.get(key(l)) ?? 0) + 1);
+  // Cabeçalho/rodapé repete em (quase) TODA página. Já uma questão pode aparecer repetida
+  // (ex.: Q1 e Q2 idênticas, nas seções COMENTADAS e LISTA = 4+ vezes) e NÃO é ruído.
+  // As páginas chegam separadas por linha em branco.
+  const paginas = Math.max(1, raw.split(/\r?\n\s*\r?\n/).length);
+  const limiarRepeticao = Math.max(6, Math.ceil(paginas * 0.4));
   const keep = (l: string) => {
     if (!l) return false;
     if (/estrategiaconcursos\.com\.br/i.test(l)) return false;
     if (/^\d{11}\s*-\s*\S/.test(l)) return false;
     if (/^Aula\s+\d+$/i.test(l)) return false;
+    if (/^Equipe\s.+Estrat[ée]gia Concursos/i.test(l)) return false;
     const structural = /^(?:\d{1,3}\s*\.|\(?[A-E]\s*\))/.test(l);
-    if (!structural && l.length < 120 && (freq.get(key(l)) ?? 0) >= 4) return false;
+    if (!structural && l.length < 120 && (freq.get(key(l)) ?? 0) >= limiarRepeticao) return false;
     return true;
   };
   return lines.filter(keep).join('\n');
@@ -347,6 +363,7 @@ if (comH && titulo === 'Lista importada') {
   const questoes: QuestaoImportLista[] = raws.map((r) => {
     const g = gab.get(r.numero);
     const com = comments.get(r.numero) ?? null;
+    if (g?.tipo === 'anulada') warnings.push(`Q${r.numero}: questão ANULADA pela banca; sem alternativa correta.`);
     const isCE = g ? g.tipo === 'ce' : r.alternativas.length < 2;
 
     if (isCE) {
@@ -374,8 +391,8 @@ if (comH && titulo === 'Lista importada') {
     if (r.alternativas.length < 2)
       warnings.push(`Q${r.numero}: gabarito é letra mas não achei alternativas.`);
     const letra = g?.tipo === 'letra' ? g.letra : null;
-    if (!letra) warnings.push(`Q${r.numero}: sem gabarito.`);
-    else if (!r.alternativas.some((a) => a.letra === letra))
+    if (!letra && g?.tipo !== 'anulada') warnings.push(`Q${r.numero}: sem gabarito.`);
+    else if (letra && !r.alternativas.some((a) => a.letra === letra))
       warnings.push(`Q${r.numero}: gabarito ${letra} não existe nas alternativas.`);
 
     const alternativas: AlternativaLista[] = r.alternativas.map((a) => ({

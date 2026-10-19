@@ -126,11 +126,24 @@ interface CaixaPath {
   x0: number; y0: number; x1: number; y1: number;
   paint: 'fill' | 'stroke' | 'both';
   traco: number;
+  /** preenchimento (sem contorno) em branco/quase branco: fundo de linha de texto, não é figura */
+  branco: boolean;
 }
 interface PinturaImagem {
   id: string | null;
   inline: any | null;
   x0: number; y0: number; x1: number; y1: number;
+}
+
+/** Aceita '#rrggbb' (pdf.js novo) ou [r,g,b] (0-255, pdf.js antigo). Cor desconhecida = NÃO branca. */
+function corEhBranca(c: unknown): boolean {
+  let r = -1, g = -1, b = -1;
+  if (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) {
+    r = parseInt(c.slice(1, 3), 16); g = parseInt(c.slice(3, 5), 16); b = parseInt(c.slice(5, 7), 16);
+  } else if (Array.isArray(c) && c.length >= 3) {
+    [r, g, b] = c as number[];
+  }
+  return r >= 245 && g >= 245 && b >= 245;
 }
 
 const FILL_OPS = new Set<number>([OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
@@ -192,6 +205,8 @@ async function percorrerPagina(page: PDFPageProxy): Promise<any> {
 
     let ctm: Mat = [1, 0, 0, 1, 0, 0];
     const pilha: Mat[] = [];
+    const pilhaCor: boolean[] = [];
+    let preenchimentoBranco = false;
     let lw = 1;
     let pendente: Pt[][] | null = null;
     const paths: CaixaPath[] = [];
@@ -207,6 +222,7 @@ async function percorrerPagina(page: PDFPageProxy): Promise<any> {
           x0: Math.min(...p.map((q) => q[0])), x1: Math.max(...p.map((q) => q[0])),
           y0: Math.min(...p.map((q) => q[1])), y1: Math.max(...p.map((q) => q[1])),
           paint, traco: lw * esc,
+          branco: paint === 'fill' && preenchimentoBranco,
         });
       }
     };
@@ -224,8 +240,11 @@ async function percorrerPagina(page: PDFPageProxy): Promise<any> {
       const fn = fnArray[i];
       const args: any = argsArray[i];
 
-      if (fn === OPS.save) pilha.push([...ctm] as Mat);
-      else if (fn === OPS.restore) ctm = pilha.pop() ?? ctm;
+      if (fn === OPS.save) { pilha.push([...ctm] as Mat); pilhaCor.push(preenchimentoBranco); }
+      else if (fn === OPS.restore) { ctm = pilha.pop() ?? ctm; preenchimentoBranco = pilhaCor.pop() ?? preenchimentoBranco; }
+      else if (fn === OPS.setFillRGBColor) preenchimentoBranco = corEhBranca(args?.length >= 3 ? args : args?.[0]);
+      else if (fn === OPS.setFillGray) preenchimentoBranco = typeof args?.[0] === 'number' && args[0] >= 245;
+      else if (fn === OPS.setFillColorN || fn === OPS.setFillColorSpace || fn === OPS.setFillColor || fn === OPS.setFillCMYKColor) preenchimentoBranco = false;
       else if (fn === OPS.transform) ctm = mul(ctm, args as Mat);
       else if (fn === OPS.paintFormXObjectBegin) { pilha.push([...ctm] as Mat); if (args?.[0]) ctm = mul(ctm, args[0] as Mat); }
       else if (fn === OPS.paintFormXObjectEnd) ctm = pilha.pop() ?? ctm;
@@ -859,6 +878,7 @@ export async function extrairRegioesVetoriais(
   const W = vp.width, H = vp.height, PAD = 8;
 
   let caixas = paths
+    .filter((p) => !p.branco)
     .filter((p) => !((p.y1 - p.y0) <= 2.5 && (p.x1 - p.x0) / Math.max(p.y1 - p.y0, 0.01) >= 3))
     .filter((p) => (p.x1 - p.x0) < W * o.larguraMaximaRel)
     .filter((p) => { const cy = (p.y0 + p.y1) / 2 / H; return cy > o.margemSuperior && cy < o.margemInferior; })
