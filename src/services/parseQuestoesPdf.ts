@@ -230,7 +230,19 @@ function attachComments(
         break;
       }
     }
-    const blockEndOrig = nextStart < N.length ? map[nextStart] : com.length;
+    let blockEndOrig = nextStart < N.length ? map[nextStart] : com.length;
+    // A âncora da próxima questão começa DEPOIS do número e do cabeçalho "(FGV / banca / ano)".
+    // Recua até o número da próxima questão para esse pedaço não entrar no comentário atual.
+    const jProx = starts.findIndex((x, j) => j > i && x != null);
+    if (jProx >= 0 && nextStart < N.length) {
+      const ini = Math.max(0, blockEndOrig - 320);
+      const janela = com.slice(ini, blockEndOrig);
+      const reNum = new RegExp(`(?:^|\\s)${raws[jProx].numero}\\s*\\.\\s`, 'g');
+      let ult = -1;
+      let mm: RegExpExecArray | null;
+      while ((mm = reNum.exec(janela))) ult = mm.index;
+      if (ult >= 0) blockEndOrig = ini + ult;
+    }
     let comment: string | null = null;
     if (endNormIdx >= 0) {
       const startOrig =
