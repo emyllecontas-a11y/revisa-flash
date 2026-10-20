@@ -122,7 +122,11 @@ function splitByNumber(t: string, max: number): { n: number; body: string }[] {
   let cursor = 0;
   for (let n = 1; n <= max; n++) {
     let m: RegExpExecArray | null = null;
-    for (const lookahead of ['(?=[("“A-ZÁÉÍÓÚÂÊÔÃÕÇ])', '(?=\\S)']) {
+    // 1º: número seguido do cabeçalho da questão ("(BANCA / ano)" ou "FGV / BANCA / ano"). Isso evita
+    //     confundir alternativas numéricas ("A) 2. B) 3. C) 4.") com o número de outra questão.
+    const cabecalho =
+      '(?=\\((?:[^()]|\\([^()]*\\)){0,140}?\\/\\s*\\d{4}|[A-ZÁÉÍÓÚÂÊÔÃÕÇ]{2,}\\b[^()\\n]{0,100}?\\/\\s*\\d{4})';
+    for (const lookahead of [cabecalho, '(?=[("“A-ZÁÉÍÓÚÂÊÔÃÕÇ])', '(?=\\S)']) {
       const re = new RegExp(`(?<![\\w.,/§-])${n}\\s*\\.\\s*${lookahead}`, 'g');
       re.lastIndex = cursor;
       m = re.exec(t);
