@@ -109,7 +109,6 @@ export function BancoQuestoesTab() {
     if (res.success) { if (pastaSelecionada === p.id) setPastaSelecionada(null); load(); toast.success("Pasta excluída"); } else toast.error("Erro", { description: res.error });
   };
 
-  // --- MONTAGEM DA HIERARQUIA (CÓDIGO + BANCO) ---
   const hierarquia = useMemo(() => {
     const tree: Record<string, Record<string, Set<string>>> = {};
     const tax = getTaxonomia();
@@ -226,20 +225,28 @@ export function BancoQuestoesTab() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => setViewMode("cadernos")} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"><Folder className="h-4 w-4" /> Meus Cadernos</button>
-              {filtradas.length > 0 && (<button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"><Play className="h-4 w-4" /> Praticar</button>)}
+              {filtradas.length > 0 && (<button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"><Play className="h-4 w-4" /> Responder</button>)}
             </div>
           </div>
 
           <div className="mb-4 rf-card p-3 space-y-4">
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="relative lg:col-span-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/40" />
-                <input type="text" placeholder="Buscar no enunciado, matéria, cargo…" value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40" />
+                <input type="text" placeholder="Buscar no enunciado..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40" />
               </div>
-              <Select value={fBanca} onChange={setFBanca} label="Banca" options={bancasDisponiveis} emptyLabel="Todas as bancas" />
-              <Select value={fAno} onChange={setFAno} label="Ano" options={anosDisponiveis.map(String)} emptyLabel="Todos os anos" />
+              <button onClick={() => setModalFiltro(true)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium hover:border-primary transition-colors">
+                <Filter className="h-4 w-4 text-primary" />
+                {fMateria || fBanca || fAno ? (
+                  <span className="text-primary truncate max-w-[200px]">
+                    {fMateria || "Filtros" } {fBanca && `· ${fBanca}`} {fAno && `· ${fAno}`}
+                  </span>
+                ) : (
+                  "Filtrar Questões"
+                )}
+              </button>
             </div>
-            
+
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45">Tipo:</span>
               <Chip active={fTipo === ""} onClick={() => setFTipo("")}>Todos</Chip>
@@ -248,24 +255,6 @@ export function BancoQuestoesTab() {
             </div>
 
             <hr className="border-border/60" />
-
-            {/* NOVO BOTÃO DE FILTRO HIERÁRQUICO */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button onClick={() => setModalFiltro(true)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium hover:border-primary transition-colors">
-                <Filter className="h-4 w-4 text-primary" />
-                {fMateria ? (
-                  <span className="text-primary">{fMateria} {fAssunto && `› ${fAssunto}`}</span>
-                ) : (
-                  "Filtrar por Matéria / Tópico"
-                )}
-              </button>
-              
-              {fMateria && (
-                <button onClick={() => { setFDisciplina(""); setFMateria(""); setFAssunto(""); }} className="text-xs text-foreground/50 hover:text-accent underline">
-                  Limpar matéria
-                </button>
-              )}
-            </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
               <span className="text-foreground/55 font-medium">{filtradas.length} de {todasQuestoes.length} questões encontradas</span>
@@ -338,6 +327,12 @@ export function BancoQuestoesTab() {
           setFMateria={setFMateria}
           fAssunto={fAssunto}
           setFAssunto={setFAssunto}
+          bancasDisponiveis={bancasDisponiveis}
+          fBanca={fBanca}
+          setFBanca={setFBanca}
+          anosDisponiveis={anosDisponiveis}
+          fAno={fAno}
+          setFAno={setFAno}
           onClose={() => setModalFiltro(false)}
         />
       )}
@@ -402,6 +397,5 @@ function CadernoModal({ userId, pastas, questoesIds, caderno, onClose, onSuccess
 }
 
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" onClick={onClick} className={["inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors", active ? "bg-primary text-primary-foreground" : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"].join(" ")}>{children}</button>; }
-function Select({ value, onChange, label, options, emptyLabel }: { value: string; onChange: (v: string) => void; label: string; options: string[]; emptyLabel: string; }) { return <label className="block"><span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-foreground/45">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-border bg-surface px-2.5 py-2 text-xs text-foreground outline-none focus:border-primary"><option value="">{emptyLabel}</option>{options.map((o) => (<option key={o} value={o}>{o}</option>))}</select></label>; }
 function Badge({ children, className }: { children: React.ReactNode; className?: string }) { return <span className={["inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium", className || "bg-muted text-foreground/65"].join(" ")}>{children}</span>; }
 function BadgeSoft({ children }: { children: React.ReactNode }) { return <span className="inline-flex shrink-0 items-center rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium text-foreground/55">{children}</span>; }

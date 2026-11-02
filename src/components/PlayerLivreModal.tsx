@@ -17,7 +17,7 @@ interface Props {
 export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const toast = useToast();
   const [fase, setFase] = useState<"config" | "jogando" | "resultado">("config");
-  const [quantidade, setQuantidade] = useState(10);
+  const [quantidade, setQuantidade] = useState(Math.min(10, questoes.length));
   const [questoesSorteio, setQuestoesSorteio] = useState<QuestaoBanco[]>([]);
   
   const [idx, setIdx] = useState(0);
@@ -27,8 +27,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   
   const [acertos, setAcertos] = useState(0);
   const [erros, setErros] = useState(0);
-  
-  // Guarda a questão e a resposta do usuário para enviar ao Caderno de Erros
   const [questoesErradas, setQuestoesErradas] = useState<{ q: QuestaoBanco, suaResposta: string, respostaCorreta: string }[]>([]);
   
   const [tempoQuestao, setTempoQuestao] = useState(0);
@@ -39,7 +37,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   
   const [modalEnviar, setModalEnviar] = useState(false);
 
-  // Cronômetro da questão
   useEffect(() => {
     if (fase === "jogando" && !revelar) {
       timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
@@ -49,16 +46,14 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [fase, revelar, idx]);
 
-  // Carregar grifos
   useEffect(() => {
     if (!userId || questoesSorteio.length === 0) return;
     const ids = questoesSorteio.map(q => q.id);
-    getAnotacoesDeQuestoes(userId, 'banco' as any, ids)
-      .then(setAnotacoes)
-      .catch(() => {});
+    getAnotacoesDeQuestoes(userId, 'banco' as any, ids).then(setAnotacoes).catch(() => {});
   }, [userId, questoesSorteio]);
 
   const iniciar = () => {
+    // Garante que a quantidade não seja maior que o total disponível
     const qtd = Math.min(quantidade, questoes.length);
     const embaralhadas = [...questoes].sort(() => Math.random() - 0.5).slice(0, qtd);
     setQuestoesSorteio(embaralhadas);
@@ -117,7 +112,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     if (selecionada === letra) setSelecionada(null);
   };
 
-  // --- GRIFOS ---
   const handleGrifar = async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
     const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
     if (!nova) return;
@@ -154,7 +148,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     });
   };
 
-  // Formatar as questões erradas para o EnviarErrosModal
   const errosFormatados: QuestaoErrada[] = questoesErradas.map((item, index) => {
     const q = item.q;
     const altFormatadas = q.tipo_questao === 'multipla_escolha' ? (q.alternativas || []).map(a => ({
@@ -180,28 +173,61 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     };
   });
 
-  // --- RENDERIZAÇÃO ---
   if (fase === "config") {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
         <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-elevated">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Praticar Livremente</h3>
+            <h3 className="text-lg font-semibold">Responder Questões</h3>
             <button onClick={onClose} className="text-foreground/50 hover:text-foreground"><X className="h-5 w-5" /></button>
           </div>
           <p className="text-xs text-foreground/60 mb-4">Você tem {questoes.length} questões filtradas. Quantas deseja responder agora?</p>
           
-          <label className="text-sm font-medium text-foreground/70">Quantidade de questões</label>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {[10, 20, 30, 50].filter(n => n < questoes.length).map(qtd => (
+              <button 
+                key={qtd} 
+                onClick={() => setQuantidade(qtd)}
+                className={[
+                  "flex-1 py-2 text-sm font-semibold rounded-lg border transition-colors",
+                  quantidade === qtd 
+                    ? "bg-primary text-primary-foreground border-primary" 
+                    : "bg-background text-foreground/70 border-border hover:border-primary"
+                ].join(" ")}
+              >
+                {qtd}
+              </button>
+            ))}
+            {questoes.length <= 50 && (
+              <button 
+                onClick={() => setQuantidade(questoes.length)}
+                className={[
+                  "flex-1 py-2 text-sm font-semibold rounded-lg border transition-colors",
+                  quantidade === questoes.length 
+                    ? "bg-primary text-primary-foreground border-primary" 
+                    : "bg-background text-foreground/70 border-border hover:border-primary"
+                ].join(" ")}
+              >
+                Todas ({questoes.length})
+              </button>
+            )}
+          </div>
+
+          <label className="text-sm font-medium text-foreground/70">Ou digite um número exato:</label>
           <input 
             type="number" 
             min="1" 
             max={questoes.length} 
             value={quantidade}
-            onChange={(e) => setQuantidade(Number(e.target.value))}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              if (val > questoes.length) setQuantidade(questoes.length);
+              else setQuantidade(val);
+            }}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1 mb-6"
           />
 
-          <div className="mt-6 flex gap-2">
+          <div className="flex gap-2">
             <button onClick={onClose} className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium hover:bg-surface-2">Cancelar</button>
             <button onClick={iniciar} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
               <Play className="h-4 w-4" /> Começar
@@ -336,7 +362,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           <EnviarErrosModal
             listaId="banco-questoes"
             listaTitulo="Banco de Questões"
-            // DisciplineId omitido para forçar o select de disciplinas
             questoesErradas={errosFormatados}
             onClose={(enviou) => { setModalEnviar(false); onClose(); }}
           />
