@@ -848,6 +848,133 @@ const revisaoSubtopicoSchema = {
 };
 
 // ============================================================
+// BANCO DE QUESTÕES E CADERNOS — v15
+// ============================================================
+
+const bancoQuestaoSchema = {
+  title: 'banco questao schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    banca: { type: 'string' },
+    ano: { type: ['number', 'null'] },
+    concurso: { type: ['string', 'null'] },
+    cargo: { type: ['string', 'null'] },
+    disciplina: { type: 'string' },
+    assunto: { type: ['string', 'null'] },
+    subassunto: { type: ['string', 'null'] },
+    tipo_questao: { type: 'string' },
+    enunciado: { type: 'string' },
+    alternativas: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    gabarito_letra: { type: ['string', 'null'] },
+    gabarito_ce: { type: ['boolean', 'null'] },
+    comentario: { type: ['string', 'null'] },
+    imagem_url: { type: ['string', 'null'] },
+    hash_dedup: { type: 'string' },
+    url_origem: { type: ['string', 'null'] },
+    arquivo_origem: { type: ['string', 'null'] },
+    importado_em: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'banca', 'disciplina', 'tipo_questao', 'enunciado', 'hash_dedup'],
+};
+
+const pastaCadernoSchema = {
+  title: 'pasta caderno schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    name: { type: 'string' },
+    order: { type: 'number', default: 0 },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'name'],
+};
+
+const cadernoSchema = {
+  title: 'caderno schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    nome: { type: 'string' },
+    descricao: { type: ['string', 'null'] },
+    pasta_id: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'nome'],
+};
+
+const cadernoQuestaoSchema = {
+  title: 'caderno questao schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    caderno_id: { type: 'string' },
+    questao_banco_id: { type: 'string' },
+    ordem: { type: 'number', default: 0 },
+    created_at: { type: 'string' },
+  },
+  required: ['id', 'caderno_id', 'questao_banco_id'],
+};
+
+const cadernoResultadoSchema = {
+  title: 'caderno resultado schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    caderno_id: { type: 'string' },
+    total_questoes: { type: 'number', default: 0 },
+    acertos: { type: 'number', default: 0 },
+    erros: { type: 'number', default: 0 },
+    nao_respondidas: { type: 'number', default: 0 },
+    porcentagem: { type: 'number', default: 0 },
+    tempo_segundos: { type: 'number', default: 0 },
+    respostas: { type: ['object', 'null'], additionalProperties: true },
+    created_at: { type: 'string' },
+  },
+  required: ['id', 'user_id', 'caderno_id'],
+};
+
+const bancoTentativaSchema = {
+  title: 'banco tentativa schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    questao_banco_id: { type: 'string' },
+    resposta: { type: ['string', 'null'] },
+    acertou: { type: ['boolean', 'null'] },
+    tempo_segundos: { type: 'number', default: 0 },
+    contexto: { type: 'string' },
+    caderno_resultado_id: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+  },
+  required: ['id', 'user_id', 'questao_banco_id', 'contexto'],
+};
+
+// ============================================================
 // INSTÂNCIA
 // ============================================================
 
@@ -873,7 +1000,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v14';
+    const DB_NAME = 'revisaflash_db_v15';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
@@ -886,14 +1013,15 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v11'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v12'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v13'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v14'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v14') {
+      if (markerVersion !== 'v15') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
         clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v14');
+        localStorage.setItem('revisaflash_db_version', 'v15');
       }
     } catch (e) {}
 
@@ -937,9 +1065,16 @@ export async function getDb(): Promise<RxDatabase> {
       plano_feitos: { schema: planoFeitoSchema },
       subtopicos: { schema: subtopicoSchema },
       revisoes_subtopico: { schema: revisaoSubtopicoSchema },
+      // v15: banco de questões e cadernos
+      banco_questoes: { schema: bancoQuestaoSchema },
+      pastas_caderno: { schema: pastaCadernoSchema },
+      cadernos: { schema: cadernoSchema },
+      caderno_questoes: { schema: cadernoQuestaoSchema },
+      caderno_resultados: { schema: cadernoResultadoSchema },
+      banco_tentativas: { schema: bancoTentativaSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v14).');
+    console.log('✅ Banco local criado com sucesso (v15).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -992,6 +1127,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'files',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
       'anotacoes_questao',
+      'banco_questoes', 'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
     ];
     const emptyCollections = new Set<string>();
     for (const name of collectionsToCheck) {
@@ -1015,6 +1151,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_text_boxes',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
       'anotacoes_questao',
+      'banco_questoes', 'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
     ];
 
     for (const name of collections) {
@@ -1197,6 +1334,50 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         } catch (pushErr) {
           console.error('❌ Push resultados_simulado:', pushErr);
           houveErro = true;
+        }
+      }
+    }
+
+    // caderno_questoes (link, sem user_id — sincroniza via caderno_id)
+    {
+      const collection = database.collections.caderno_questoes;
+      const cadernosCollection = database.collections.cadernos;
+      const userCadernos = await cadernosCollection.find({
+        selector: { user_id: userIdStr, isdeleted: false }
+      }).exec();
+      const cadernoIds = userCadernos.map(d => d.get('id'));
+
+      if (cadernoIds.length > 0) {
+        const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+          const chunks: T[][] = [];
+          for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+          return chunks;
+        };
+        const chunks = chunkArray(cadernoIds, 100);
+        for (const chunk of chunks) {
+          const { data, error } = await supabaseClient
+            .from('caderno_questoes')
+            .select('*')
+            .in('caderno_id', chunk);
+          if (error) { console.error('❌ Pull caderno_questoes (chunk):', error); houveErro = true; continue; }
+          if (!data) continue;
+          for (const doc of data) {
+            const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+            if (!existing) { await collection.insert(doc); }
+          }
+        }
+        const localLinks = await collection.find({ selector: { caderno_id: { $in: cadernoIds } } }).exec();
+        const toPush = localLinks.map(d => d.toJSON());
+        if (toPush.length > 0) {
+          try {
+            const result = await pushWithConflictCheck(supabaseClient, 'caderno_questoes', collection, toPush);
+            if (result.pushed > 0 || result.skipped > 0) {
+              console.log(`✅ Push caderno_questoes: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+            }
+          } catch (pushErr) {
+            console.error('❌ Push caderno_questoes:', pushErr);
+            houveErro = true;
+          }
         }
       }
     }
