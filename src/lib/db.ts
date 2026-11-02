@@ -213,8 +213,6 @@ const topicSchema = {
   required: ['id', 'name', 'user_id']
 };
 
-// ⚠️ SCHEMA ENRIQUECIDO — 13 campos novos (nullable) para permitir gerar
-// simulados fiéis a partir dos erros.
 const errorSchema = {
   title: 'error schema',
   version: 0,
@@ -239,9 +237,8 @@ const errorSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     isDeleted: { type: 'boolean', default: false },
-    // ---- NOVOS CAMPOS (todos nullable) ----
     questao_origem_id: { type: ['string', 'null'] },
-    tipo_questao: { type: ['string', 'null'] },  // 'multipla_escolha' | 'certo_errado'
+    tipo_questao: { type: ['string', 'null'] },
     alternativas: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
     gabarito_ce: { type: ['boolean', 'null'] },
     imagem_url: { type: ['string', 'null'] },
@@ -593,6 +590,7 @@ const resultadoListaSchema = {
   required: ['id', 'lista_id', 'user_id'],
 };
 
+// ⚠️ v14: campo folder_id adicionado
 const simuladoSchema = {
   title: 'simulado schema',
   version: 0,
@@ -611,8 +609,26 @@ const simuladoSchema = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isdeleted: { type: 'boolean', default: false },
+    folder_id: { type: ['string', 'null'] },
   },
   required: ['id', 'titulo', 'area'],
+};
+
+const simuladoPastaSchema = {
+  title: 'simulado pasta schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    name: { type: 'string' },
+    order: { type: 'number', default: 0 },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
+  },
+  required: ['id', 'user_id', 'name'],
 };
 
 const simuladoQuestaoSchema = {
@@ -729,10 +745,6 @@ const anotacaoQuestaoSchema = {
   },
   required: ['id', 'user_id', 'questao_origem', 'questao_id', 'campo_alvo', 'cor'],
 };
-
-// ============================================================
-// NOVOS SCHEMAS (plano + subtópicos) — v11
-// ============================================================
 
 const planoSchema = {
   title: 'plano schema',
@@ -861,7 +873,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v13';
+    const DB_NAME = 'revisaflash_db_v14';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
@@ -873,14 +885,15 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v10'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v11'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v12'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v13'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v13') {
+      if (markerVersion !== 'v14') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
         clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v13');
+        localStorage.setItem('revisaflash_db_version', 'v14');
       }
     } catch (e) {}
 
@@ -910,6 +923,7 @@ export async function getDb(): Promise<RxDatabase> {
       progresso_lista: { schema: progressoListaSchema },
       resultados_lista: { schema: resultadoListaSchema },
       simulados: { schema: simuladoSchema },
+      simulados_pastas: { schema: simuladoPastaSchema },
       questoes: { schema: simuladoQuestaoSchema },
       alternativas: { schema: alternativaSchema },
       progresso_simulado: { schema: progressoSimuladoSchema },
@@ -925,7 +939,7 @@ export async function getDb(): Promise<RxDatabase> {
       revisoes_subtopico: { schema: revisaoSubtopicoSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v13).');
+    console.log('✅ Banco local criado com sucesso (v14).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -938,7 +952,6 @@ export async function getDb(): Promise<RxDatabase> {
 
 // ============================================================
 // SYNC
-// (mantido igual ao v12, sem alterações — só a versão mudou)
 // ============================================================
 
 let isSyncing = false;
@@ -973,7 +986,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'revisoes', 'study_records', 'user_settings',
       'listas_pastas', 'listas', 'questoes_lista', 'progresso_lista',
       'progresso_simulado', 'resultados_lista', 'resultados_simulado',
-      'simulados',
+      'simulados', 'simulados_pastas',
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
       'files',
@@ -997,6 +1010,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'revisoes', 'study_records', 'user_settings',
       'listas_pastas', 'listas', 'questoes_lista',
       'progresso_lista', 'progresso_simulado',
+      'simulados_pastas',
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
@@ -1308,6 +1322,23 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           }
         }
       }
+
+      // Push dos simulados (agora inclui folder_id automaticamente)
+      const localSimsToPush = await simuladosCollection.find({
+        selector: { created_by: userIdStr, updated_at: { $gt: lastSyncGlobal } }
+      }).exec();
+      if (localSimsToPush.length > 0) {
+        const toPush = localSimsToPush.map((d: any) => d.toJSON());
+        try {
+          const result = await pushWithConflictCheck(supabaseClient, 'simulados', simuladosCollection, toPush);
+          if (result.pushed > 0 || result.skipped > 0) {
+            console.log(`✅ Push simulados: ${result.pushed} enviados, ${result.skipped} em conflito.`);
+          }
+        } catch (pushErr) {
+          console.error('❌ Push simulados:', pushErr);
+          houveErro = true;
+        }
+      }
     }
 
     // study_sessions
@@ -1373,7 +1404,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     }
 
     if (houveErro) {
-      console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
+      console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado.');
     } else {
       writeLastSync(userId, syncStartTime);
       console.log('✅ Sincronização concluída.');
