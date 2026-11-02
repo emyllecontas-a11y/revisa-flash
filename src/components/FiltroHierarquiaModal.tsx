@@ -26,10 +26,15 @@ export function FiltroHierarquiaModal({
 }: Props) {
   const [materiaAtiva, setMateriaAtiva] = useState(fMateria);
 
-  const disciplinas = Object.keys(hierarquia).sort();
+  // REMOVIDO O .sort() AQUI
+  const disciplinas = Object.keys(hierarquia);
   const discAtual = fDisciplina || disciplinas[0] || "";
-  const materias = discAtual ? Object.keys(hierarquia[discAtual] || {}).sort() : [];
-  const topicos = (discAtual && materiaAtiva) ? Array.from(hierarquia[discAtual]?.[materiaAtiva] || []).sort() : [];
+  
+  // REMOVIDO O .sort() AQUI
+  const materias = discAtual ? Object.keys(hierarquia[discAtual] || {}) : [];
+  
+  // REMOVIDO O .sort() AQUI
+  const topicos = (discAtual && materiaAtiva) ? Array.from(hierarquia[discAtual]?.[materiaAtiva] || []) : [];
 
   const handleSelecionarMateria = (m: string) => {
     setMateriaAtiva(m);

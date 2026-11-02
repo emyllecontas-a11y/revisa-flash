@@ -130,6 +130,11 @@ export function BancoQuestoesTab() {
     return tree;
   }, [todasQuestoes]);
 
+  // REMOVIDO O .sort() DESTAS 3 VARIÁVEIS
+  const disciplinasDisponiveis = useMemo(() => Object.keys(hierarquia), [hierarquia]);
+  const materiasDisponiveis = useMemo(() => fDisciplina ? Object.keys(hierarquia[fDisciplina] || {}) : [], [hierarquia, fDisciplina]);
+  const assuntosDisponiveis = useMemo(() => (fDisciplina && fMateria) ? Array.from(hierarquia[fDisciplina]?.[fMateria] || []) : [], [hierarquia, fDisciplina, fMateria]);
+
   const bancasDisponiveis = useMemo(() => { const set = new Set<string>(); todasQuestoes.forEach(q => { if (q.banca) set.add(q.banca); }); return Array.from(set).sort(); }, [todasQuestoes]);
   const anosDisponiveis = useMemo(() => { const set = new Set<number>(); todasQuestoes.forEach(q => { if (q.ano) set.add(q.ano); }); return Array.from(set).sort((a, b) => b - a); }, [todasQuestoes]);
 
