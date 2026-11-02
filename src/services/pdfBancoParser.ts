@@ -173,6 +173,16 @@ function parseTexto(textoOriginal: string, arquivoNome: string): QuestaoParsed[]
   return questoes;
 }
 
+// Utilitário para quebrar a hierarquia (Disciplina - Matéria - Assunto)
+function parseHierarquia(str: string) {
+  const partes = str.split(/\s+-\s+/);
+  return {
+    disciplina: partes[0]?.trim() || '',
+    assunto: partes[1]?.trim() || null,
+    subassunto: partes[2]?.trim() || null,
+  };
+}
+
 function parseQuestao(
   corpo: string,
   urlOrigem: string | null,
@@ -195,13 +205,19 @@ function parseQuestao(
   let prox = primeira + 1;
   let disciplina = meta.disciplina;
   let assunto = meta.assunto;
+  let subassunto = meta.subassunto;
 
-  // FGV: disciplina em linha separada ("DISCIPLINA - ASSUNTO")
+  // FGV: disciplina/matéria/assunto em linha separada (ex: "Odontologia - Endodontia - Anatomia...")
   if (!disciplina && prox < linhas.length) {
-    const dm = linhas[prox].match(/^(.+?)\s+-\s+(.+)$/);
-    if (dm) {
-      disciplina = dm[1].trim();
-      assunto = dm[2].trim();
+    if (linhas[prox].includes(' - ')) {
+      const hier = parseHierarquia(linhas[prox]);
+      disciplina = hier.disciplina;
+      assunto = hier.assunto;
+      subassunto = hier.subassunto;
+      prox++;
+    } else {
+      // Apenas o nome da disciplina numa linha solta
+      disciplina = linhas[prox].trim();
       prox++;
     }
   }
@@ -219,7 +235,7 @@ function parseQuestao(
     cargo: meta.cargo,
     disciplina,
     assunto,
-    subassunto: null,
+    subassunto,
     urlOrigem,
     arquivoNome,
     warnings,
@@ -242,6 +258,7 @@ function parseMetadata(linha: string): {
   cargo: string | null;
   disciplina: string;
   assunto: string | null;
+  subassunto: string | null;
 } | null {
   const m = linha.match(/^([A-ZÀ-Ú][A-Z0-9À-Ú\s\(\)\.\-]{1,50}?)\s+-\s+(.+)$/);
   if (!m) return null;
@@ -254,29 +271,30 @@ function parseMetadata(linha: string): {
 
   const anoOnly = ultimo.match(/^(\d{4})$/);
   if (anoOnly) {
-    return { banca, ano: parseInt(anoOnly[1], 10), concurso, cargo, disciplina: '', assunto: null };
+    return { banca, ano: parseInt(anoOnly[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
   }
 
   const anoDisc = ultimo.match(/^(\d{4})\s+(.+)$/);
   if (anoDisc) {
-    const partes = anoDisc[2].trim().split(/\s+-\s+/);
+    const hier = parseHierarquia(anoDisc[2]);
     return {
       banca,
       ano: parseInt(anoDisc[1], 10),
       concurso,
       cargo,
-      disciplina: partes[0]?.trim() || '',
-      assunto: partes[1]?.trim() || null,
+      disciplina: hier.disciplina,
+      assunto: hier.assunto,
+      subassunto: hier.subassunto,
     };
   }
 
   for (const s of segs) {
     const mm = s.match(/\b(\d{4})\b/);
     if (mm) {
-      return { banca, ano: parseInt(mm[1], 10), concurso, cargo, disciplina: '', assunto: null };
+      return { banca, ano: parseInt(mm[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
     }
   }
-  return { banca, ano: null, concurso, cargo, disciplina: '', assunto: null };
+  return { banca, ano: null, concurso, cargo, disciplina: '', assunto: null, subassunto: null };
 }
 
 function parseCorpo(
@@ -418,7 +436,6 @@ function extrairAlternativasMC(
   texto: string
 ): { letra: string; texto: string; posicao: number }[] | null {
   // Aceita "a) texto" e "a)texto" (com ou sem espaço depois do parêntese).
-  // A letra pode ser minúscula ou maiúscula (A) ou a)).
   const regex = /(?:^|\s|\n)([a-eA-E])\)\s*/g;
   const matches: { letra: string; inicioTexto: number; posicao: number }[] = [];
   let m;
@@ -495,8 +512,5 @@ function limparTexto(s: string): string {
 }
 
 function isFontTestLine(line: string): boolean {
-  // Detecta a linha de "teste de fonte" gerada pelo reportlab do Claude.
-  // Ex: ¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇ...
-  // Usa 5+ caracteres consecutivos da faixa de símbolos Latin-1.
   return /[¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿]{5,}/.test(line);
 }
