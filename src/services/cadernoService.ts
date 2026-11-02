@@ -76,6 +76,41 @@ export async function criarPastaCaderno(userId: string, name: string): Promise<{
   }
 }
 
+export async function atualizarPasta(userId: string, id: string, name: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const doc = await db.pastas_caderno.findOne({ selector: { id } }).exec();
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Pasta não encontrada.' };
+    const agora = nowIso();
+    await doc.patch({ name: name.trim(), updated_at: agora });
+    await enqueueOperation('update', 'pastas_caderno', { id, name: name.trim(), updated_at: agora });
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao atualizar pasta.' };
+  }
+}
+
+export async function excluirPasta(userId: string, id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const doc = await db.pastas_caderno.findOne({ selector: { id } }).exec();
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Pasta não encontrada.' };
+    const agora = nowIso();
+    await doc.patch({ isdeleted: true, updated_at: agora });
+    await enqueueOperation('update', 'pastas_caderno', { id, isdeleted: true, updated_at: agora });
+
+    // Desvincula cadernos desta pasta (volta para "Sem pasta")
+    const cadernos = await db.cadernos.find({ selector: { pasta_id: id, isdeleted: false } }).exec();
+    for (const c of cadernos) {
+      await c.patch({ pasta_id: null, updated_at: agora });
+      await enqueueOperation('update', 'cadernos', { id: c.get('id'), pasta_id: null, updated_at: agora });
+    }
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao excluir pasta.' };
+  }
+}
+
 export async function criarCaderno(userId: string, nome: string, pastaId: string | null, questoesIds: string[]): Promise<{ success: boolean; error?: string }> {
   if (!nome.trim()) return { success: false, error: 'O nome do caderno é obrigatório.' };
   if (questoesIds.length === 0) return { success: false, error: 'Selecione pelo menos uma questão.' };
@@ -100,42 +135,94 @@ export async function criarCaderno(userId: string, nome: string, pastaId: string
   }
 }
 
-// NOVA FUNÇÃO: Busca as questões reais que estão dentro do caderno
+export async function atualizarCaderno(userId: string, id: string, dados: { nome: string; pasta_id: string | null }): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const doc = await db.cadernos.findOne({ selector: { id } }).exec();
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Caderno não encontrado.' };
+    const agora = nowIso();
+    const patch = { nome: dados.nome.trim(), pasta_id: dados.pasta_id === 'sem-pasta' ? null : dados.pasta_id, updated_at: agora };
+    await doc.patch(patch);
+    await enqueueOperation('update', 'cadernos', { id, ...patch });
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao atualizar caderno.' };
+  }
+}
+
+export async function excluirCaderno(userId: string, id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const doc = await db.cadernos.findOne({ selector: { id } }).exec();
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Caderno não encontrado.' };
+    const agora = nowIso();
+    
+    // Soft delete no caderno
+    await doc.patch({ isdeleted: true, updated_at: agora });
+    await enqueueOperation('update', 'cadernos', { id, isdeleted: true, updated_at: agora });
+
+    // Remove os vínculos das questões (hard delete)
+    const links = await db.caderno_questoes.find({ selector: { caderno_id: id } }).exec();
+    for (const link of links) {
+      await link.remove();
+      await enqueueOperation('delete', 'caderno_questoes', { id: link.get('id') });
+    }
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao excluir caderno.' };
+  }
+}
+
 export async function getQuestoesDoCaderno(cadernoId: string): Promise<{ success: boolean; data?: QuestaoBanco[]; error?: string }> {
   try {
     const db = await getDb();
-    
-    // 1. Pega os IDs das questões no caderno
     const links = await db.caderno_questoes.find({ selector: { caderno_id: cadernoId } }).exec();
     const ids = links.map(l => l.get('questao_banco_id'));
-    
     if (ids.length === 0) return { success: true, data: [] };
 
-    // 2. Busca os dados reais das questões
     const questoes = await db.banco_questoes.find({ selector: { id: { $in: ids }, isdeleted: false } }).exec();
     const data = questoes.map((d: any) => d.toJSON() as QuestaoBanco);
-    
     return { success: true, data };
   } catch (e: any) {
-    console.error('[cadernoService] Erro ao buscar questões do caderno:', e);
     return { success: false, error: e?.message || 'Erro ao buscar questões.' };
   }
 }
 
-// NOVA FUNÇÃO: Remove uma questão de dentro do caderno
 export async function removerQuestaoDoCaderno(cadernoId: string, questaoId: string): Promise<{ success: boolean; error?: string }> {
   try {
     const db = await getDb();
     const link = await db.caderno_questoes.findOne({ selector: { caderno_id: cadernoId, questao_banco_id: questaoId } }).exec();
-    
     if (!link) return { success: false, error: 'Questão não encontrada neste caderno.' };
-    
     await link.remove();
     await enqueueOperation('delete', 'caderno_questoes', { id: link.get('id') });
-    
     return { success: true };
   } catch (e: any) {
-    console.error('[cadernoService] Erro ao remover questão:', e);
     return { success: false, error: e?.message || 'Erro ao remover questão.' };
+  }
+}
+
+// NOVA FUNÇÃO: Adicionar novas questões a um caderno que já existe
+export async function adicionarQuestoesAoCaderno(cadernoId: string, questoesIds: string[]): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const agora = nowIso();
+    
+    // Busca a última ordem para continuar a numeração
+    const existentes = await db.caderno_questoes.find({ selector: { caderno_id: cadernoId } }).exec();
+    let maxOrdem = -1;
+    for (const e of existentes) {
+      const o = e.get('ordem');
+      if (o > maxOrdem) maxOrdem = o;
+    }
+
+    for (let i = 0; i < questoesIds.length; i++) {
+      const link = { id: crypto.randomUUID(), caderno_id: cadernoId, questao_banco_id: questoesIds[i], ordem: maxOrdem + 1 + i, created_at: agora };
+      await db.caderno_questoes.insert(link);
+      await enqueueOperation('create', 'caderno_questoes', link);
+    }
+    return { success: true };
+  } catch (e: any) {
+    console.error('[cadernoService] Erro ao adicionar questões:', e);
+    return { success: false, error: e?.message || 'Erro ao adicionar questões.' };
   }
 }
