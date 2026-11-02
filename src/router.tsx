@@ -16,6 +16,7 @@ import Simulados from './routes/simulados';
 import SimuladoPlayer from './routes/simulados.$id';
 import ListaPlayer from './routes/listas.$id';
 import TestePdf from './routes/teste-pdf';
+import TesteParser from './routes/teste-parser';
 import PdfPage from './routes/pdf.$fileId';
 import Sessoes from './routes/sessoes';
 // 🔥 NOVA: tela única que junta "Compartilhado comigo" + "Amizades"
@@ -182,6 +183,14 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <TestePdf />
+      </ClerkProtectedRoute>
+    ),
+  },
+  {
+    path: '/teste-parser',
+    element: (
+      <ClerkProtectedRoute>
+        <TesteParser />
       </ClerkProtectedRoute>
     ),
   },
