@@ -22,10 +22,11 @@ import {
 } from "@/services/cadernoService";
 import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
-  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2
+  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
+import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
 
@@ -54,6 +55,8 @@ export function BancoQuestoesTab() {
   const [modalEditarCaderno, setModalEditarCaderno] = useState<Caderno | null>(null);
   const [modalPraticar, setModalPraticar] = useState(false);
   const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
+  
+  const [modalFiltro, setModalFiltro] = useState(false);
 
   const [fDisciplina, setFDisciplina] = useState("");
   const [fMateria, setFMateria] = useState("");
@@ -109,8 +112,6 @@ export function BancoQuestoesTab() {
   // --- MONTAGEM DA HIERARQUIA (CÓDIGO + BANCO) ---
   const hierarquia = useMemo(() => {
     const tree: Record<string, Record<string, Set<string>>> = {};
-    
-    // 1. Puxa as matérias direto do código (TAXONOMIA_BASE)
     const tax = getTaxonomia();
     tax.forEach(t => {
       if (!tree[t.disciplina]) tree[t.disciplina] = {};
@@ -119,8 +120,6 @@ export function BancoQuestoesTab() {
         m.topicos.forEach(top => tree[t.disciplina][m.nome].add(top.nome));
       });
     });
-
-    // 2. Mescla com as questões que estão no banco
     todasQuestoes.forEach((q) => {
       const disc = q.disciplina || "Sem disciplina";
       const materia = q.assunto || "Geral"; 
@@ -129,13 +128,8 @@ export function BancoQuestoesTab() {
       if (!tree[disc][materia]) tree[disc][materia] = new Set();
       tree[disc][materia].add(assunto);
     });
-    
     return tree;
   }, [todasQuestoes]);
-
-  const disciplinasDisponiveis = useMemo(() => Object.keys(hierarquia).sort(), [hierarquia]);
-  const materiasDisponiveis = useMemo(() => fDisciplina ? Object.keys(hierarquia[fDisciplina] || {}).sort() : [], [hierarquia, fDisciplina]);
-  const assuntosDisponiveis = useMemo(() => (fDisciplina && fMateria) ? Array.from(hierarquia[fDisciplina]?.[fMateria] || []).sort() : [], [hierarquia, fDisciplina, fMateria]);
 
   const bancasDisponiveis = useMemo(() => { const set = new Set<string>(); todasQuestoes.forEach(q => { if (q.banca) set.add(q.banca); }); return Array.from(set).sort(); }, [todasQuestoes]);
   const anosDisponiveis = useMemo(() => { const set = new Set<number>(); todasQuestoes.forEach(q => { if (q.ano) set.add(q.ano); }); return Array.from(set).sort((a, b) => b - a); }, [todasQuestoes]);
@@ -235,6 +229,7 @@ export function BancoQuestoesTab() {
               {filtradas.length > 0 && (<button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"><Play className="h-4 w-4" /> Praticar</button>)}
             </div>
           </div>
+
           <div className="mb-4 rf-card p-3 space-y-4">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <div className="relative lg:col-span-2">
@@ -244,42 +239,43 @@ export function BancoQuestoesTab() {
               <Select value={fBanca} onChange={setFBanca} label="Banca" options={bancasDisponiveis} emptyLabel="Todas as bancas" />
               <Select value={fAno} onChange={setFAno} label="Ano" options={anosDisponiveis.map(String)} emptyLabel="Todos os anos" />
             </div>
+            
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45">Tipo:</span>
               <Chip active={fTipo === ""} onClick={() => setFTipo("")}>Todos</Chip>
               <Chip active={fTipo === "multipla_escolha"} onClick={() => setFTipo("multipla_escolha")}>Múltipla escolha</Chip>
               <Chip active={fTipo === "certo_errado"} onClick={() => setFTipo("certo_errado")}>Certo / Errado</Chip>
             </div>
+
             <hr className="border-border/60" />
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Disciplina:</span>
-                <Chip active={fDisciplina === ""} onClick={() => { setFDisciplina(""); setFMateria(""); setFAssunto(""); }}>Todas</Chip>
-                {disciplinasDisponiveis.map(d => (<Chip key={d} active={fDisciplina === d} onClick={() => { setFDisciplina(d); setFMateria(""); setFAssunto(""); }}>{d}</Chip>))}
-              </div>
-              {fDisciplina && materiasDisponiveis.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 pl-4 border-l-2 border-primary/20">
-                  <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Matéria:</span>
-                  <Chip active={fMateria === ""} onClick={() => { setFMateria(""); setFAssunto(""); }}>Todas</Chip>
-                  {materiasDisponiveis.map(m => (<Chip key={m} active={fMateria === m} onClick={() => { setFMateria(m); setFAssunto(""); }}>{m}</Chip>))}
-                </div>
-              )}
-              {fDisciplina && fMateria && assuntosDisponiveis.length > 1 && (
-                <div className="flex flex-wrap items-center gap-1.5 pl-8 border-l-2 border-primary/20">
-                  <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Assunto:</span>
-                  <Chip active={fAssunto === ""} onClick={() => setFAssunto("")}>Todos</Chip>
-                  {assuntosDisponiveis.map(a => (<Chip key={a} active={fAssunto === a} onClick={() => setFAssunto(a)}>{a}</Chip>))}
-                </div>
+
+            {/* NOVO BOTÃO DE FILTRO HIERÁRQUICO */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => setModalFiltro(true)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium hover:border-primary transition-colors">
+                <Filter className="h-4 w-4 text-primary" />
+                {fMateria ? (
+                  <span className="text-primary">{fMateria} {fAssunto && `› ${fAssunto}`}</span>
+                ) : (
+                  "Filtrar por Matéria / Tópico"
+                )}
+              </button>
+              
+              {fMateria && (
+                <button onClick={() => { setFDisciplina(""); setFMateria(""); setFAssunto(""); }} className="text-xs text-foreground/50 hover:text-accent underline">
+                  Limpar matéria
+                </button>
               )}
             </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
               <span className="text-foreground/55 font-medium">{filtradas.length} de {todasQuestoes.length} questões encontradas</span>
               <div className="flex items-center gap-3">
                 {filtradas.length > 0 && (<button onClick={selecionarTodasFiltradas} className="text-primary hover:underline">Selecionar todas</button>)}
-                {temFiltroAtivo && (<button onClick={limparFiltros} className="inline-flex items-center gap-1 text-foreground/55 hover:text-foreground"><X className="h-3 w-3" /> Limpar</button>)}
+                {temFiltroAtivo && (<button onClick={limparFiltros} className="inline-flex items-center gap-1 text-foreground/55 hover:text-foreground"><X className="h-3 w-3" /> Limpar filtros</button>)}
               </div>
             </div>
           </div>
+
           {selecionadas.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <CheckCircle2 className="h-4 w-4 text-primary" />
@@ -288,6 +284,7 @@ export function BancoQuestoesTab() {
               <button onClick={() => setSelecionadas(new Set())} className="text-xs text-foreground/55 hover:text-foreground">Limpar seleção</button>
             </div>
           )}
+
           {todasQuestoes.length === 0 ? (
             <div className="grid place-items-center rounded-2xl border border-dashed border-border/80 bg-surface/25 p-12 text-center">
               <BookOpen className="h-10 w-10 text-foreground/20" /><h3 className="mt-3 font-display text-sm font-semibold">Nenhuma questão no banco</h3>
@@ -331,6 +328,19 @@ export function BancoQuestoesTab() {
       {modalEditarCaderno && user?.id && (<CadernoModal userId={user.id} pastas={pastas} caderno={modalEditarCaderno} onClose={() => setModalEditarCaderno(null)} onSuccess={() => { setModalEditarCaderno(null); load(); toast.success("Caderno atualizado!"); }} />)}
       {modalPraticar && user?.id && (<PlayerLivreModal userId={user.id} questoes={filtradas} onClose={() => { setModalPraticar(false); load(); }} />)}
       {cadernoAberto && user?.id && (<CadernoDetalhesModal caderno={cadernoAberto} userId={user.id} onClose={() => setCadernoAberto(null)} onUpdate={load} />)}
+      
+      {modalFiltro && (
+        <FiltroHierarquiaModal
+          hierarquia={hierarquia}
+          fDisciplina={fDisciplina}
+          setFDisciplina={setFDisciplina}
+          fMateria={fMateria}
+          setFMateria={setFMateria}
+          fAssunto={fAssunto}
+          setFAssunto={setFAssunto}
+          onClose={() => setModalFiltro(false)}
+        />
+      )}
     </>
   );
 }
