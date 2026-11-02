@@ -8,6 +8,8 @@ import {
   type QuestaoParsed,
 } from '@/services/pdfBancoParser';
 import { importarQuestoesNoBanco } from '@/services/bancoQuestoesService';
+import { uploadImagemQuestao, fileToBase64 } from '@/services/listaService';
+import { Image as ImageIcon } from 'lucide-react';
 
 export default function TesteParserPage() {
   const { user } = useAppUser();
@@ -19,6 +21,9 @@ export default function TesteParserPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [nome, setNome] = useState('');
   const [fileRef, setFileRef] = useState<File | null>(null);
+  
+  // NOVO: Estado para as imagens
+  const [imagensFiles, setImagensFiles] = useState<File[]>([]);
 
   const [resultadoSalvar, setResultadoSalvar] = useState<{
     novas: number;
@@ -73,8 +78,34 @@ export default function TesteParserPage() {
     setLoadingSalvar(true);
     setErroSalvar(null);
     setResultadoSalvar(null);
+
     try {
-      const res = await importarQuestoesNoBanco(resultado, user.id);
+      // 1. Prepara o mapa de imagens selecionadas pelo usuário
+      const imagensMap = new Map<string, File>();
+      imagensFiles.forEach(f => imagensMap.set(f.name.toLowerCase(), f));
+
+      // 2. Faz uma cópia das questões para poder atualizar o imagem_url
+      const questoesParaSalvar = [...resultado];
+
+      // 3. Procura e faz o upload das imagens necessárias
+      for (let i = 0; i < questoesParaSalvar.length; i++) {
+        const q = questoesParaSalvar[i];
+        if (q.__nome_imagem) {
+          const file = imagensMap.get(q.__nome_imagem.toLowerCase());
+          if (file) {
+            const base64 = await fileToBase64(file);
+            const upload = await uploadImagemQuestao(base64, user.id);
+            if (upload.success && upload.url) {
+              q.imagem_url = upload.url; // Salva a URL pública do Supabase
+            } else {
+              console.warn(`Erro ao subir imagem ${q.__nome_imagem}:`, upload.error);
+            }
+          }
+        }
+      }
+
+      // 4. Salva no banco
+      const res = await importarQuestoesNoBanco(questoesParaSalvar, user.id);
       if (res.success) {
         setResultadoSalvar({
           novas: res.novas,
@@ -155,25 +186,40 @@ export default function TesteParserPage() {
               <h2 className="text-sm font-semibold">
                 {resultado.length} questão(ões) em <span className="text-primary">{nome}</span>
               </h2>
-              <button
-                onClick={handleSalvar}
-                disabled={loadingSalvar || !user?.id}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-              >
-                {loadingSalvar ? 'Salvando...' : 'Salvar no banco'}
-              </button>
             </div>
+
+            {/* NOVO: Campo de Upload de Imagens */}
+            {resultado.some(q => q.__nome_imagem) && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                <p className="text-xs font-semibold text-primary mb-2 flex items-center gap-1.5">
+                  <ImageIcon className="h-4 w-4" /> Imagens Necessárias
+                </p>
+                <p className="text-[11px] text-foreground/70 mb-2">
+                  O PDF pediu imagens. Baixe-as do TEC (ou recorte do PDF) e selecione aqui para que sejam salvas junto com as questões:
+                </p>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={(e) => setImagensFiles(Array.from(e.target.files || []))}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            )}
+
+            <button
+              onClick={handleSalvar}
+              disabled={loadingSalvar || !user?.id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {loadingSalvar ? 'Salvando...' : 'Salvar no banco'}
+            </button>
 
             {resultadoSalvar && (
               <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-primary">
                 <b>Salvo com sucesso.</b> {resultadoSalvar.novas} nova(s),{' '}
                 {resultadoSalvar.jaExistentes} já existente(s),{' '}
                 {resultadoSalvar.erros} erro(s).
-                {resultadoSalvar.novas === 0 && resultadoSalvar.jaExistentes > 0 && (
-                  <p className="mt-1 text-foreground/60">
-                    Todas já estavam no banco (dedup por hash funcionou).
-                  </p>
-                )}
               </div>
             )}
             {erroSalvar && (
@@ -188,18 +234,21 @@ export default function TesteParserPage() {
                   <summary className="cursor-pointer text-xs font-semibold">
                     Q{q.__numero} — {q.banca} {q.ano} — {q.disciplina} —{' '}
                     {q.tipo_questao === 'multipla_escolha' ? 'Múltipla' : 'C/E'}
-                    {q.__warnings.length > 0 && (
-                      <span className="ml-2 text-warning">⚠ {q.__warnings.length}</span>
-                    )}
+                    {q.__nome_imagem && <span className="ml-2 text-warning">(Contém Imagem)</span>}
                   </summary>
                   <div className="mt-3 space-y-1.5 text-xs">
                     <p><b>Banca:</b> {q.banca}</p>
                     <p><b>Cargo:</b> {q.cargo || '—'}</p>
-                    <p><b>Concurso/Órgão:</b> {q.concurso || '—'}</p>
                     <p><b>Ano:</b> {q.ano || '—'}</p>
                     <p><b>Disciplina:</b> {q.disciplina}</p>
-                    <p><b>Assunto:</b> {q.assunto || '—'}</p>
+                    <p><b>Matéria:</b> {q.assunto || '—'}</p>
+                    <p><b>Assunto:</b> {q.subassunto || '—'}</p>
                     <p><b>URL:</b> {q.url_origem || '—'}</p>
+                    {q.__nome_imagem && (
+                      <p className="text-warning font-semibold">
+                        <b>Imagem:</b> {q.__nome_imagem} (Lembre-se de selecionar esta imagem!)
+                      </p>
+                    )}
                     <p>
                       <b>Enunciado:</b> {q.enunciado.slice(0, 400)}
                       {q.enunciado.length > 400 ? '…' : ''}
@@ -217,19 +266,7 @@ export default function TesteParserPage() {
                         </ul>
                       </div>
                     )}
-                    {q.tipo_questao === 'certo_errado' && (
-                      <p><b>Gabarito:</b> {q.gabarito_ce ? 'Certo' : 'Errado'}</p>
-                    )}
                     {q.gabarito_letra && <p><b>Gabarito:</b> {q.gabarito_letra}</p>}
-                    <p className="text-foreground/50"><b>Hash:</b> {q.hash_dedup}</p>
-                    {q.__warnings.length > 0 && (
-                      <div className="mt-2 rounded border border-warning/30 bg-warning/10 p-2 text-warning">
-                        <b>Avisos:</b>
-                        <ul className="mt-1 ml-4">
-                          {q.__warnings.map((w, j) => <li key={j}>• {w}</li>)}
-                        </ul>
-                      </div>
-                    )}
                   </div>
                 </details>
               ))}
