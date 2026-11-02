@@ -19,13 +19,22 @@ import { RevisarImportacaoPdfModal } from "@/components/RevisarImportacaoPdfModa
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
-  BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack, Share2
+  BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack, Share2,
+  Folder, FolderPlus, FolderInput
 } from "lucide-react";
 import type { Simulado } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { GerenciarQuestoesSimuladoModal } from "@/components/GerenciarQuestoesSimuladoModal";
 import { CompartilharModal } from "@/components/compartilhar-modal";
+import {
+  getPastasSimulado,
+  type SimuladoPasta,
+} from "@/services/simuladoPastaService";
+import {
+  GerenciarPastasSimuladoModal,
+  MoverSimuladoParaPastaModal,
+} from "@/components/PastasSimuladoModals";
 
 export default function SimuladosPage() {
   const navigate = useNavigate();
@@ -68,7 +77,19 @@ export default function SimuladosPage() {
   const [historicoFilter, setHistoricoFilter] = useState('');
 
   const [gerenciandoSimulado, setGerenciandoSimulado] = useState<Simulado | null>(null);
-  const [simuladoParaCompartilhar, setSimuladoParaCompartilhar] = useState<Simulado | null>(null);
+    const [simuladoParaCompartilhar, setSimuladoParaCompartilhar] = useState<Simulado | null>(null);
+
+  // ---- Pastas de simulados ----
+  const [pastas, setPastas] = useState<SimuladoPasta[]>([]);
+  const [pastaFiltro, setPastaFiltroState] = useState<string>(() => {
+    try { return localStorage.getItem('simulados_pasta_filtro') || 'todas'; } catch { return 'todas'; }
+  });
+  const setPastaFiltro = (v: string) => {
+    setPastaFiltroState(v);
+    try { localStorage.setItem('simulados_pasta_filtro', v); } catch { /* ignore */ }
+  };
+  const [gerenciandoPastas, setGerenciandoPastas] = useState(false);
+  const [simuladoParaMover, setSimuladoParaMover] = useState<Simulado | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -90,6 +111,12 @@ export default function SimuladosPage() {
           });
           setResultadosUsuario(mapa);
           setResultadosLista(resultResult.data);
+        }
+
+        // Pastas de simulados
+        const pastasResult = await getPastasSimulado(user.id);
+        if (pastasResult.success && pastasResult.data) {
+          setPastas(pastasResult.data);
         }
       }
     } catch (err: any) {
@@ -438,6 +465,13 @@ export default function SimuladosPage() {
   const evolucaoData = evolucao();
   const insightsData = insights();
 
+  const simuladosFiltrados = simulados.filter((s: any) => {
+    const fid = s.folder_id ?? null;
+    if (pastaFiltro === 'todas') return true;
+    if (pastaFiltro === 'sem-pasta') return !fid;
+    return fid === pastaFiltro;
+  });
+
   return (
     <AppShell breadcrumb="Simulados" title="Simulados">
       <div className="mb-6 flex gap-1 border-b border-border">
@@ -477,6 +511,57 @@ export default function SimuladosPage() {
           </div>
         ) : (
           <>
+            {/* Chips de pasta */}
+            <div className="mb-4 flex flex-wrap items-center gap-1.5 overflow-x-auto">
+              <button
+                onClick={() => setPastaFiltro('todas')}
+                className={[
+                  'inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                  pastaFiltro === 'todas'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'border border-border bg-surface text-foreground/65 hover:bg-surface-2',
+                ].join(' ')}
+              >
+                Todas ({simulados.length})
+              </button>
+              <button
+                onClick={() => setPastaFiltro('sem-pasta')}
+                className={[
+                  'inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                  pastaFiltro === 'sem-pasta'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'border border-border bg-surface text-foreground/65 hover:bg-surface-2',
+                ].join(' ')}
+              >
+                Sem pasta ({simulados.filter((s: any) => !s.folder_id).length})
+              </button>
+              {pastas.map((p) => {
+                const count = simulados.filter((s: any) => s.folder_id === p.id).length;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setPastaFiltro(p.id)}
+                    className={[
+                      'inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                      pastaFiltro === p.id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'border border-border bg-surface text-foreground/65 hover:bg-surface-2',
+                    ].join(' ')}
+                  >
+                    <Folder className="h-3 w-3" />
+                    {p.name} ({count})
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setGerenciandoPastas(true)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2"
+                title="Gerenciar pastas"
+              >
+                <FolderPlus className="h-3 w-3" /> Pastas
+              </button>
+            </div>
+
             <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
               {resultadosLista.length > 0 && (
                 <button
@@ -494,10 +579,10 @@ export default function SimuladosPage() {
               </button>
             </div>
 
-            {simulados.length > 0 ? (
+            {simuladosFiltrados.length > 0 ? (
               <div className="rf-card p-2 sm:p-3">
                 <ul className="divide-y divide-border">
-                  {simulados.map((s) => {
+                  {simuladosFiltrados.map((s) => {
                     const resultado = resultadosUsuario[s.id] || null;
                     const temResultado = !!resultado;
                     const pct = temResultado ? resultado.porcentagem || 0 : 0;
@@ -513,8 +598,18 @@ export default function SimuladosPage() {
 
                           <div className="min-w-0 flex-1">
                             <button onClick={() => handleStartSimulado(s.id)} className="block w-full text-left">
-                              <h3 className="font-display text-base font-bold tracking-tight truncate">
-                                {s.titulo}
+                              <h3 className="font-display text-base font-bold tracking-tight truncate flex items-center gap-1.5">
+                                <span className="truncate">{s.titulo}</span>
+                                {(s as any).folder_id && (() => {
+                                  const nomePasta = pastas.find((p) => p.id === (s as any).folder_id)?.name;
+                                  if (!nomePasta) return null;
+                                  return (
+                                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                                      <Folder className="h-2.5 w-2.5" />
+                                      {nomePasta}
+                                    </span>
+                                  );
+                                })()}
                               </h3>
                               <p className="text-xs text-foreground/45 mt-0.5">
                                 {s.questoes_count || 0} questões
@@ -539,6 +634,15 @@ export default function SimuladosPage() {
                             )}
 
                             <div className="flex items-center gap-1.5">
+                              {/* Botão Mover para pasta */}
+                              <button
+                                onClick={() => setSimuladoParaMover(s)}
+                                className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-foreground/60 hover:bg-surface-2 transition-colors"
+                                title="Mover para pasta"
+                              >
+                                <FolderInput className="h-3.5 w-3.5" />
+                              </button>
+
                               {/* Botão Gerenciar — SEMPRE visível */}
                               <button
                                 onClick={() => setGerenciandoSimulado(s)}
@@ -601,6 +705,20 @@ export default function SimuladosPage() {
                     );
                   })}
                 </ul>
+              </div>
+            ) : simulados.length > 0 && pastaFiltro !== 'todas' ? (
+              <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
+                <div className="text-center">
+                  <p className="text-sm text-foreground/40">
+                    Nenhum simulado nesta pasta.
+                  </p>
+                  <button
+                    onClick={() => setPastaFiltro('todas')}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground/70 hover:bg-surface-2"
+                  >
+                    Ver todas
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
@@ -1081,6 +1199,31 @@ export default function SimuladosPage() {
           itemType="simulado"
           itemId={simuladoParaCompartilhar.id}
           itemName={simuladoParaCompartilhar.titulo}
+        />
+      )}
+
+      {gerenciandoPastas && user?.id && (
+        <GerenciarPastasSimuladoModal
+          userId={user.id}
+          pastas={pastas}
+          onClose={() => setGerenciandoPastas(false)}
+          onChanged={async () => {
+            const r = await getPastasSimulado(user.id);
+            if (r.success && r.data) setPastas(r.data);
+          }}
+        />
+      )}
+
+      {simuladoParaMover && user?.id && (
+        <MoverSimuladoParaPastaModal
+          simulado={simuladoParaMover as any}
+          pastas={pastas}
+          userId={user.id}
+          onClose={() => setSimuladoParaMover(null)}
+          onSuccess={async () => {
+            setSimuladoParaMover(null);
+            await loadData();
+          }}
         />
       )}
     </AppShell>
