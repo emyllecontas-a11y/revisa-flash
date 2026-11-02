@@ -15,7 +15,7 @@ export interface TaxonomiaDisciplina {
   materias: TaxonomiaMateria[];
 }
 
-// AQUI ESTÁ O JSON DO CLAUDE EMBUTIDO NO CÓDIGO
+// TAXONOMIA COMPLETA
 const TAXONOMIA_BASE: TaxonomiaDisciplina[] = [
   {
     "disciplina": "Odontologia",
@@ -361,14 +361,551 @@ const TAXONOMIA_BASE: TaxonomiaDisciplina[] = [
       { "nome": "Procedimentos Clínicos Integrados", "topicos": [] },
       { "nome": "Anatomia Geral, Fisiologia, Funções e Outros", "topicos": [] }
     ]
+  },
+  {
+    "disciplina": "Português",
+    "materias": [
+      {
+        "nome": "Ortografia",
+        "topicos": [
+          { "nome": "Ortografia - Casos Gerais e Emprego das Letras", "subtopicos": [] },
+          { "nome": "Fatos da Língua Portuguesa (Porque, Por Que, Po...", "subtopicos": [] },
+          { "nome": "Inicial Maiúscula", "subtopicos": [] },
+          { "nome": "Acentuação", "subtopicos": [] },
+          { "nome": "Uso do Hífen", "subtopicos": [] },
+          { "nome": "Convenções de Escrita (Itálico, Siglas, etc)", "subtopicos": [] },
+          { "nome": "Questões Mescladas de Ortografia", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Fonética (Fonemas, Dígrafos, Encontros Consonantais...", "topicos": [] },
+      {
+        "nome": "Morfologia",
+        "topicos": [
+          { "nome": "Formação e Estrutura das Palavras", "subtopicos": [] },
+          {
+            "nome": "Classes de Palavras",
+            "subtopicos": [
+              "Artigo", "Substantivo", "Adjetivo",
+              "Verbo - Conjugação. Reconhecimento e Empreg...",
+              "Verbo - Correlação Verbal", "Verbo - Locução Verbal",
+              "Verbo - Questões Variadas de Verbo",
+              "Pronomes - Pronomes Pessoais", "Pronomes - Pronomes de Tratamento",
+              "Pronomes - Pronomes Possessivos", "Pronomes - Pronomes Indefinidos",
+              "Pronomes - Pronomes Interrogativos", "Pronomes - Pronomes Demonstrativos",
+              "Pronomes - Pronomes Relativos", "Pronomes - Questões Mescladas sobre Pronomes",
+              "Advérbio", "Numeral", "Preposição", "Conjunção", "Interjeição"
+            ]
+          }
+        ]
+      },
+      { "nome": "Colocação Pronominal", "topicos": [] },
+      {
+        "nome": "Semântica",
+        "topicos": [
+          { "nome": "Sinônimos e Antônimos", "subtopicos": [] },
+          { "nome": "Homônimos e Parônimos", "subtopicos": [] },
+          { "nome": "Denotação e Conotação", "subtopicos": [] },
+          { "nome": "Polissemia", "subtopicos": [] },
+          { "nome": "Ordenação de Parágrafos", "subtopicos": [] },
+          { "nome": "Significação de Vocábulo e Expressões", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Sintaxe",
+        "topicos": [
+          { "nome": "Frase, Oração e Período", "subtopicos": [] },
+          {
+            "nome": "Funções Sintáticas",
+            "subtopicos": [
+              "Termos Essenciais da Oração - Sujeito",
+              "Termos Essenciais da Oração - Predicado",
+              "Transitividade Verbal e Termos Integrantes (C...",
+              "Termos Acessórios (Adjunto Adnominal, Adju...",
+              "Adjunto adnominal x Complemento Nomina..."
+            ]
+          },
+          { "nome": "Orações Coordenadas", "subtopicos": [] },
+          { "nome": "Orações Subordinadas Substantivas", "subtopicos": [] },
+          { "nome": "Orações Subordinadas Adjetivas", "subtopicos": [] },
+          { "nome": "Orações Subordinadas Adverbiais", "subtopicos": [] },
+          { "nome": "Orações Reduzidas", "subtopicos": [] },
+          { "nome": "Funções Sintáticas dos Pronomes Relativos", "subtopicos": [] },
+          { "nome": "Função Sintática dos Pronomes Pessoais Átonos...", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Pontuação (Ponto, Vírgula, Travessão, Aspas, Parêntes...", "topicos": [] },
+      {
+        "nome": "Regência",
+        "topicos": [
+          { "nome": "Regência Nominal e Verbal (Casos Gerais)", "subtopicos": [] },
+          { "nome": "Crase", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Concordância (Verbal e Nominal)", "topicos": [] },
+      { "nome": "Vozes (Voz Passiva e Voz Ativa)", "topicos": [] },
+      { "nome": "Coerência. Coesão (Anáfora, Catáfora, Uso dos Conect...", "topicos": [] },
+      { "nome": "Tipos de Discurso (Direto, Indireto e Indireto Livre)", "topicos": [] },
+      {
+        "nome": "Linguagem",
+        "topicos": [
+          { "nome": "Variações da Linguagem: Não Verbal, Regional, H...", "subtopicos": [] },
+          { "nome": "Linguagem Formal e Informal", "subtopicos": [] },
+          { "nome": "Figuras de Linguagem", "subtopicos": [] },
+          { "nome": "Vícios de Linguagem (Pleonasmo, Ambiguidade, ...", "subtopicos": [] },
+          { "nome": "Elementos da Comunicação e Funções da Lingua...", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Partícula \"Se\"", "topicos": [] },
+      { "nome": "Vocábulo \"Como\"", "topicos": [] },
+      { "nome": "Vocábulo \"Que\"", "topicos": [] },
+      { "nome": "Interpretação de Textos (Compreensão)", "topicos": [] },
+      { "nome": "Tipologia e Gênero Textual", "topicos": [] },
+      { "nome": "Paralelismo", "topicos": [] },
+      { "nome": "Reescrita de Frases. Substituição de Palavras ou Trech...", "topicos": [] },
+      { "nome": "Clareza e Correção", "topicos": [] }
+    ]
+  },
+  {
+    "disciplina": "Matemática",
+    "materias": [
+      {
+        "nome": "Conjuntos",
+        "topicos": [
+          { "nome": "Definição, Subconjuntos, Inclusão e Pertinência, ...", "subtopicos": [] },
+          { "nome": "Número de Elementos da União, da Intersecção, ...", "subtopicos": [] },
+          {
+            "nome": "Números Naturais",
+            "subtopicos": [
+              "Números Naturais: Introdução, Representaçã...",
+              "Adição, Subtração, Multiplicação e Divisão de...",
+              "Divisibilidade, Números Primos, Fatores Prim..."
+            ]
+          },
+          { "nome": "Números Inteiros (Propriedades, Operações, Mód...", "subtopicos": [] },
+          {
+            "nome": "Números Racionais",
+            "subtopicos": [
+              "Números Racionais: Introdução, Representaçã...",
+              "Frações e Dízimas Periódicas",
+              "Operações com Números Decimais"
+            ]
+          },
+          { "nome": "Radiciação e Potenciação", "subtopicos": [] },
+          { "nome": "Números Irracionais", "subtopicos": [] },
+          { "nome": "Números Reais (Propriedades e Operações; Interv...", "subtopicos": [] },
+          { "nome": "Expressões Aritméticas", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Expressões Algébricas", "topicos": [] },
+      { "nome": "Sistemas de Numeração (Decimal, Binário, Hexadecim...", "topicos": [] },
+      {
+        "nome": "Proporcionalidade",
+        "topicos": [
+          { "nome": "Proporções. Grandezas Proporcionais. Divisão em...", "subtopicos": [] },
+          {
+            "nome": "Regra de Três",
+            "subtopicos": [
+              "Regra de Três Simples",
+              "Regra de Três Composta"
+            ]
+          },
+          { "nome": "Exercícios envolvendo Velocidade, Espaço, Temp...", "subtopicos": [] },
+          { "nome": "Porcentagem", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Interpretação de Gráficos e Tabelas", "topicos": [] },
+      { "nome": "Unidades de Medida (Distância, Massa, Volume, Temp...", "topicos": [] },
+      { "nome": "Sistema Monetário", "topicos": [] },
+      { "nome": "Análise Combinatória (Princípio Fundamental da Cont...", "topicos": [] },
+      {
+        "nome": "Equações",
+        "topicos": [
+          { "nome": "Equações de Primeiro Grau", "subtopicos": [] },
+          { "nome": "Equações de Segundo Grau e Equações Biquadra...", "subtopicos": [] },
+          { "nome": "Equações Exponenciais", "subtopicos": [] },
+          { "nome": "Equações Logarítmicas", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Produtos Notáveis", "topicos": [] },
+      { "nome": "Polinômios e Equações Polinomiais. Expansão de Binô...", "topicos": [] },
+      { "nome": "Logaritmo", "topicos": [] },
+      {
+        "nome": "Sequências numéricas",
+        "topicos": [
+          { "nome": "Progressão Aritmética", "subtopicos": [] },
+          { "nome": "Progressão Geométrica", "subtopicos": [] },
+          { "nome": "Outras Sequências Numéricas (Termo Geral, Reco...", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Funções e Inequações",
+        "topicos": [
+          { "nome": "Definição, Interpretação Gráfica, Injetora/Sobreje...", "subtopicos": [] },
+          { "nome": "Função de Primeiro Grau", "subtopicos": [] },
+          { "nome": "Inequações de Primeiro Grau (Inequações Simult...", "subtopicos": [] },
+          { "nome": "Função de Segundo Grau", "subtopicos": [] },
+          { "nome": "Inequações de Segundo Grau", "subtopicos": [] },
+          { "nome": "Função Exponencial e Inequações Exponenciais", "subtopicos": [] },
+          { "nome": "Função Logarítmica e Inequações Logarítmicas", "subtopicos": [] },
+          { "nome": "Funções Modulares, Equações Modulares e Inequ...", "subtopicos": [] },
+          { "nome": "Função Composta", "subtopicos": [] },
+          { "nome": "Função Inversa", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Razões e Funções Trigonométricas. Ciclo Trigonométr...", "topicos": [] },
+      {
+        "nome": "Álgebra Linear Elementar",
+        "topicos": [
+          { "nome": "Matrizes", "subtopicos": [] },
+          { "nome": "Determinantes", "subtopicos": [] },
+          { "nome": "Sistemas Lineares", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Números Complexos", "topicos": [] },
+      {
+        "nome": "Geometria Plana",
+        "topicos": [
+          { "nome": "Ponto, Reta, Plano, Segmentos de Reta: Proposiç...", "subtopicos": [] },
+          { "nome": "Teorema de Tales", "subtopicos": [] },
+          {
+            "nome": "Ângulos",
+            "subtopicos": [
+              "Definição, Medida, Congruência, Classificaçã...",
+              "Ângulos Alternos, Colaterais, Correspondente...",
+              "Cálculo de Ângulos entre Ponteiros do Relóg...",
+              "Outras Questões sobre Ângulos"
+            ]
+          },
+          {
+            "nome": "Triângulos",
+            "subtopicos": [
+              "Triângulos: Conceito, Elementos e Classificaç...",
+              "Congruência e Semelhança de Triângulos. Ra...",
+              "Desigualdade Triangular",
+              "Soma dos Ângulos Internos do Triângulo",
+              "Área e Perímetro do Triângulo",
+              "Pontos Notáveis (Baricentro, Incentro, Circun...",
+              "Teoremas da Bissetriz Interna e Externa",
+              "Cálculo de Seno e Cosseno no Triângulo Retâ...",
+              "Relações Métricas no Triângulo Retângulo (Ir...",
+              "Lei dos Senos e Lei dos Cossenos"
+            ]
+          },
+          { "nome": "Quadriláteros (Propriedades, Área, Perímetro, So...", "subtopicos": [] },
+          {
+            "nome": "Outros Polígonos",
+            "subtopicos": [
+              "Definição e Classificação de Polígonos",
+              "Número de Diagonais de Um Polígono Qualqu...",
+              "Soma dos Ângulos Internos de Um Polígono...",
+              "Área e Perímetro de Um Polígono Qualquer",
+              "Polígonos Regulares (Medida do Lado, Diago...",
+              "Semelhança entre Polígonos. Razão de Seme...",
+              "Outros Tópicos e Questões Mescladas sobre ..."
+            ]
+          },
+          {
+            "nome": "Circunferência e Círculo",
+            "subtopicos": [
+              "Definição, Elementos e Propriedades (Circun...",
+              "Setor e Segmento Circular. Comprimento de...",
+              "Comprimento da Circunferência e do Arco de...",
+              "Área do Círculo, do Setor Circular e do Segme...",
+              "Reta Tangente e Secante à Circunferência",
+              "Posições Relativas de Duas Circunferências",
+              "Potência de Ponto",
+              "Polígonos Inscritos e Circunscritos à Circunfe...",
+              "Ângulos Central, Inscrito e Semi-Inscrito"
+            ]
+          }
+        ]
+      },
+      {
+        "nome": "Geometria Espacial",
+        "topicos": [
+          { "nome": "Conceitos Iniciais de Geometria Espacial (poliedr...", "subtopicos": [] },
+          { "nome": "Prismas", "subtopicos": [] },
+          { "nome": "Pirâmides", "subtopicos": [] },
+          { "nome": "Cilindros", "subtopicos": [] },
+          { "nome": "Cones", "subtopicos": [] },
+          { "nome": "Esferas", "subtopicos": [] },
+          { "nome": "Sólidos Compostos", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Geometria Analítica", "topicos": [] },
+      { "nome": "Notação Científica", "topicos": [] }
+    ]
+  },
+  {
+    "disciplina": "Raciocínio Lógico",
+    "materias": [
+      {
+        "nome": "Lógica de Proposições",
+        "topicos": [
+          { "nome": "Proposições: Definição, Reconhecimento, Princíp...", "subtopicos": [] },
+          { "nome": "Operadores Lógicos (Representação Simbólica; D...", "subtopicos": [] },
+          { "nome": "Tabela Verdade das Proposições Compostas", "subtopicos": [] },
+          { "nome": "Ordem de Precedência entre os Conectivos", "subtopicos": [] },
+          { "nome": "Condição Necessária e Suficiente", "subtopicos": [] },
+          { "nome": "Tautologia, Contradição e Contingência", "subtopicos": [] },
+          { "nome": "Equivalências Lógicas (Inclui Negação de Proposi...", "subtopicos": [] },
+          { "nome": "Álgebra de Proposições", "subtopicos": [] },
+          {
+            "nome": "Lógica de Argumentação",
+            "subtopicos": [
+              "Argumentos - Métodos Decorrentes da Tabel...",
+              "Diagramas Lógicos, Proposições Categóricas...",
+              "Raciocínio Crítico",
+              "Argumentos Indutivos, Argumentos por Abdu...",
+              "Falácias"
+            ]
+          },
+          { "nome": "Lógica de Primeira Ordem", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Associação de Informações", "topicos": [] },
+      { "nome": "Exercícios de \"Verdade/Mentira\"", "topicos": [] },
+      { "nome": "Sequências de Números, Figuras, Letras e Palavras", "topicos": [] },
+      { "nome": "Orientação no Plano, no Espaço e no Tempo", "topicos": [] },
+      { "nome": "Princípio da Casa dos Pombos", "topicos": [] },
+      { "nome": "Problemas Envolvendo Balança de Pratos", "topicos": [] },
+      { "nome": "Exercícios Envolvendo Datas e Calendários", "topicos": [] },
+      { "nome": "Sudoku e Jogos Similares", "topicos": [] },
+      { "nome": "Planificação de Sólidos. Projeções de Objetos Tridime...", "topicos": [] },
+      { "nome": "Problemas Envolvendo Palitos", "topicos": [] },
+      { "nome": "Questões Envolvendo Parentesco e Árvores Genealógi...", "topicos": [] }
+    ]
+  },
+  {
+    "disciplina": "Informática",
+    "materias": [
+      { "nome": "Conceitos Gerais de Informática e Introdução...", "topicos": [] },
+      {
+        "nome": "Hardware",
+        "topicos": [
+          { "nome": "Processador (CPU) e Arquitetura de Computador", "subtopicos": [] },
+          { "nome": "Memórias (RAM, ROM, CACHE, HD, etc.)", "subtopicos": [] },
+          { "nome": "Barramentos, Placa-mãe e BIOS", "subtopicos": [] },
+          { "nome": "Periféricos (Dispositivos de Entrada e Saída)", "subtopicos": [] },
+          { "nome": "Nobreak e Estabilizadores", "subtopicos": [] },
+          { "nome": "Tipos de Computadores", "subtopicos": [] },
+          { "nome": "Questões Mescladas de Hardware", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Sistemas Operacionais",
+        "topicos": [
+          { "nome": "Conceitos Gerais de Sistemas Operacionais e Sist...", "subtopicos": [] },
+          {
+            "nome": "Windows",
+            "subtopicos": [
+              "Windows 11", "Windows 10", "Windows 8", "Windows 7", "Windows Vista", "Windows XP", "Windows 2000 e Versões Anteriores"
+            ]
+          },
+          { "nome": "Linux / Unix", "subtopicos": [] },
+          { "nome": "MS-DOS", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Suítes de Escritório",
+        "topicos": [
+          { "nome": "Editores de Texto", "subtopicos": ["Word", "Writer (LibreOffice)"] },
+          { "nome": "Planilhas Eletrônicas", "subtopicos": ["Excel", "Calc (LibreOffice)"] },
+          { "nome": "Editores de Apresentações", "subtopicos": ["Powerpoint", "Impress (LibreOffice)"] },
+          { "nome": "OneNote", "subtopicos": [] },
+          { "nome": "Questões Mescladas de Microsoft Office", "subtopicos": [] },
+          { "nome": "Questões Mescladas de Libre Office", "subtopicos": [] },
+          { "nome": "Questões Mescladas de Suítes de Escritório", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Redes de Computadores",
+        "topicos": [
+          { "nome": "Conceitos, Modelos, Tipos e Topologias de Redes", "subtopicos": [] },
+          { "nome": "Equipamentos, Meios de Transmissão e Conexão", "subtopicos": [] },
+          { "nome": "Protocolos de Redes", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Internet",
+        "topicos": [
+          { "nome": "Conceitos de Internet", "subtopicos": [] },
+          { "nome": "Intranet e Extranet", "subtopicos": [] },
+          {
+            "nome": "Navegadores (Browsers)",
+            "subtopicos": ["Internet Explorer", "Mozilla Firefox", "Google Chrome", "Microsoft Edge", "Safari"]
+          },
+          {
+            "nome": "Correio Eletrônico (E-mail)",
+            "subtopicos": ["Recursos, Campos, Endereçamento (Correio...", "Outlook", "Outlook Express", "Mozilla Thunderbird", "Webmails"]
+          },
+          { "nome": "Sites de Busca (Google, Bing, Yahoo, etc.)", "subtopicos": [] },
+          { "nome": "Redes Sociais (Facebook, WhatsApp, etc.)", "subtopicos": [] },
+          { "nome": "Grupos Colaborativos e de Discussão", "subtopicos": [] },
+          {
+            "nome": "Computação em Nuvem (Cloud Computing)",
+            "subtopicos": ["Conceitos e Tipos de Computação em Nuvem", "Google Workspace", "Nuvens Microsoft (OneDrive e Azure)", "Dropbox"]
+          },
+          { "nome": "Serviços de Mapas e Localização (Google Maps, W...", "subtopicos": [] },
+          { "nome": "Microsoft Teams", "subtopicos": [] },
+          { "nome": "Aplicativos para Videoconferência (Zoom, Google...", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Segurança da Informação",
+        "topicos": [
+          { "nome": "Conceitos e Princípios de Segurança da Informaç...", "subtopicos": [] },
+          { "nome": "Ameaças (Vírus, Worms, Trojans, Malware, etc.)", "subtopicos": [] },
+          {
+            "nome": "Recursos (Segurança da Informação)",
+            "subtopicos": [
+              "Firewall e Proxy",
+              "Antivírus e Antispyware",
+              "Procedimentos de Segurança da Informação",
+              "Demais Recursos (IDS, VPN, etc.)"
+            ]
+          },
+          { "nome": "Criptografia, Assinatura e Certificado Digital", "subtopicos": [] },
+          { "nome": "Backup", "subtopicos": [] }
+        ]
+      },
+      { "nome": "Compactadores e Descompactadores (Winzip, Winrar,...", "topicos": [] },
+      { "nome": "Extensão de Arquivos", "topicos": [] },
+      { "nome": "Adobe PDF", "topicos": [] }
+    ]
+  },
+  {
+    "disciplina": "Legislação Aplicada à EBSERH",
+    "materias": [
+      {
+        "nome": "Legislação Aplicada à EBSERH",
+        "topicos": [
+          { "nome": "Lei nº 12.550/2011 - Cria a Empresa Brasileira de Serviços Hospitalares", "subtopicos": [] },
+          { "nome": "Estatuto Social da EBSERH", "subtopicos": [] },
+          { "nome": "Norma Operacional de Controle Disciplinar da EBSERH", "subtopicos": [] },
+          { "nome": "Regimento Interno da EBSERH", "subtopicos": [] },
+          { "nome": "Regulamento de Pessoal da EBSERH", "subtopicos": [] },
+          { "nome": "Demais Normas e Documentos da EBSERH", "subtopicos": [] }
+        ]
+      }
+    ]
+  },
+  {
+    "disciplina": "SUS",
+    "materias": [
+      {
+        "nome": "Lei nº 8.080/1990 (Lei Orgânica da Saúde) e Saúde Pública",
+        "topicos": [
+          { "nome": "Das Disposições Gerais (arts. 1º a 3º da Lei nº 8.080/1990)", "subtopicos": [] },
+          {
+            "nome": "Do Sistema Único de Saúde (arts. 4º a 19-U da Lei nº 8.080/1990)",
+            "subtopicos": [
+              "Dos Objetivos e Atribuições",
+              "Dos Princípios e Diretrizes",
+              "Da Organização, da Direção e da Gestão",
+              "Da Competência e das Atribuições",
+              "Do Subsistema de Atenção à Saúde Indígena",
+              "Do Subsistema de Atendimento e Internação Domiciliar",
+              "Do Subsistema de Acompanhamento durante o Trabalho de Parto, Parto e Pós-Parto",
+              "Da Assistência Terapêutica e da Incorporação de Tecnologia em Saúde"
+            ]
+          },
+          { "nome": "Dos Serviços Privados de Assistência à Saúde (arts. 20 a 26 da Lei nº 8.080/1990)", "subtopicos": [] },
+          { "nome": "Da Telessaúde (arts. 26-A a 26-H da Lei nº 8.080/1990)", "subtopicos": [] },
+          { "nome": "Dos Recursos Humanos (arts. 27 a 30 da Lei nº 8.080/1990)", "subtopicos": [] },
+          { "nome": "Do Financiamento (arts. 31 a 38 da Lei nº 8.080/1990)", "subtopicos": [] },
+          { "nome": "Das Disposições Finais e Transitórias (arts. 39 a 55 da Lei nº 8.080/1990)", "subtopicos": [] },
+          { "nome": "Tópicos Mesclados e Doutrinários da Lei nº 8.080/1990", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Decreto nº 7.508/2011 - Regulamenta a Lei nº 8.080/1990",
+        "topicos": []
+      },
+      {
+        "nome": "Lei nº 8.142/1990 - Participação na Gestão do SUS e Transferências Intergovernamentais de Recursos Financeiros",
+        "topicos": []
+      },
+      {
+        "nome": "Lei Complementar nº 141/2012 - Regulamenta o § 3º do art. 198 da Constituição Federal",
+        "topicos": []
+      },
+      {
+        "nome": "Normas e Portarias do Ministério da Saúde",
+        "topicos": [
+          { "nome": "Assistência Farmacêutica", "subtopicos": [] },
+          { "nome": "Direitos e Deveres dos Usuários do SUS (Portaria MS nº 1.820/2009)", "subtopicos": [] },
+          { "nome": "Educação em Saúde", "subtopicos": [] },
+          { "nome": "Estrutura, Financiamento, Gestão e Planejamento do SUS", "subtopicos": [] },
+          { "nome": "Medicamentos", "subtopicos": [] },
+          { "nome": "Normas Operacionais do SUS", "subtopicos": [] },
+          { "nome": "Pactos do Ministério da Saúde", "subtopicos": [] },
+          {
+            "nome": "Políticas, Planos e Programas de Saúde Pública",
+            "subtopicos": [
+              "Política Nacional de Atenção Básica - Saúde da Família",
+              "Política Nacional de Saúde Bucal",
+              "Política Nacional de Alimentação e Nutrição",
+              "Política Nacional de Humanização - HumanizaSUS",
+              "Política Nacional de Promoção da Saúde",
+              "Lei nº 12.871/2013 - Programa Mais Médicos",
+              "Decreto nº 9.761/2019 - Política Nacional sobre Drogas",
+              "Portaria MS nº 2.979/2019 - Programa Previne Brasil"
+            ]
+          },
+          { "nome": "Redes de Atenção à Saúde (RAS)", "subtopicos": [] },
+          { "nome": "Vigilância em Saúde", "subtopicos": [] }
+        ]
+      },
+      {
+        "nome": "Saúde do Servidor Público Federal",
+        "topicos": []
+      },
+      {
+        "nome": "Classificação Internacional de Funcionalidade (CIF)",
+        "topicos": []
+      },
+      {
+        "nome": "Saúde Pública Internacional - Organização Mundial da Saúde",
+        "topicos": []
+      },
+      {
+        "nome": "Resoluções do CNS",
+        "topicos": []
+      },
+      {
+        "nome": "Portaria Interministerial nº 1.010/2006 - Alimentação Saudável nas Escolas",
+        "topicos": []
+      },
+      {
+        "nome": "Decreto nº 6.286/2007 - Programa Saúde na Escola",
+        "topicos": []
+      },
+      {
+        "nome": "Lei nº 13.979/2020 - Medidas para Enfrentamento da Emergência de Saúde Pública",
+        "topicos": []
+      },
+      {
+        "nome": "Lei Complementar nº 173/2020 - Programa Federativo de Enfrentamento ao Coronavírus",
+        "topicos": []
+      },
+      {
+        "nome": "Manual Brasileiro de Acreditação Hospitalar (MBAH)",
+        "topicos": []
+      },
+      {
+        "nome": "Normas Estaduais e Municipais da Saúde",
+        "topicos": []
+      },
+      {
+        "nome": "História da Saúde no Brasil",
+        "topicos": []
+      }
+    ]
   }
 ];
 
-// Agora o app sempre lê o código. (Mantive o localStorage apenas por segurança, caso queira editar no futuro).
+// Força o app a ler sempre o código, ignorando cache antigo do navegador
 export function getTaxonomia(): TaxonomiaDisciplina[] {
-  try {
-    const raw = localStorage.getItem('revisaflash_taxonomia_tec');
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
   return TAXONOMIA_BASE;
 }
