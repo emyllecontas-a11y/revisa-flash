@@ -8,6 +8,17 @@ import { enqueueOperation } from '@/services/queueService';
 
 export type ErrorType = 'Conceito' | 'Interpretação' | 'Memória' | 'Atenção';
 
+export type TipoQuestao = 'multipla_escolha' | 'certo_errado';
+
+export interface AlternativaErro {
+  letra: string;
+  texto: string;
+  correta: boolean;
+  sublinhados?: { inicio: number; fim: number }[] | null;
+  negritos?: { inicio: number; fim: number }[] | null;
+  italicos?: { inicio: number; fim: number }[] | null;
+}
+
 export interface ErrorRecord {
   id: string;
   user_id: string;
@@ -30,6 +41,19 @@ export interface ErrorRecord {
   createdAt: string;
   updated_at?: string;
   isDeleted?: boolean;
+  // ---- Campos enriquecidos (para gerar simulados posteriormente) ----
+  questao_origem_id?: string | null;
+  tipo_questao?: TipoQuestao | null;
+  alternativas?: AlternativaErro[] | null;
+  gabarito_ce?: boolean | null;
+  imagem_url?: string | null;
+  comentario_geral?: string | null;
+  sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+  sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+  negritos_enunciado?: { inicio: number; fim: number }[] | null;
+  negritos_comentario?: { inicio: number; fim: number }[] | null;
+  italicos_enunciado?: { inicio: number; fim: number }[] | null;
+  italicos_comentario?: { inicio: number; fim: number }[] | null;
 }
 
 export interface Discipline {
@@ -70,60 +94,49 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [disciplinesLoading, setDisciplinesLoading] = useState(true);
 
-  // ============================================================
-  // CARREGAR DISCIPLINAS DO SUPABASE (só as ativas)
-  // ============================================================
-// Carrega disciplinas: primeiro do RxDB (offline), senão do Supabase
-const loadDisciplines = useCallback(async (uid: string) => {
-  try {
-    setDisciplinesLoading(true);
-
-    // 1) Tenta do banco local primeiro (funciona offline)
+  const loadDisciplines = useCallback(async (uidStr: string) => {
     try {
-      const db = await getDb();
-      const docs = await db.disciplines.find({
-        selector: { user_id: uid, isDeleted: { $ne: true } },
-      }).exec();
+      setDisciplinesLoading(true);
 
-      if (docs.length > 0) {
-        const locais = docs
-          .map((d: any) => {
-            const j = d.toJSON();
-            return { id: j.id, name: j.name } as Discipline;
-          })
-          .sort((a, b) => a.name.localeCompare(b.name));
+      try {
+        const db = await getDb();
+        const docs = await db.disciplines.find({
+          selector: { user_id: uidStr, isDeleted: { $ne: true } },
+        }).exec();
 
-        setDisciplines(locais);
-        console.log(`✅ [ErrorContext] ${locais.length} disciplinas carregadas do banco local.`);
-        return;
+        if (docs.length > 0) {
+          const locais = docs
+            .map((d: any) => {
+              const j = d.toJSON();
+              return { id: j.id, name: j.name } as Discipline;
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+          setDisciplines(locais);
+          return;
+        }
+      } catch (localErr) {
+        console.warn('⚠️ [ErrorContext] Falha ao ler disciplinas do RxDB:', localErr);
       }
-    } catch (localErr) {
-      console.warn('⚠️ [ErrorContext] Falha ao ler disciplinas do RxDB:', localErr);
+
+      const client = await getSupabaseWithToken();
+      const { data, error } = await client
+        .from('disciplines')
+        .select('id, name')
+        .eq('user_id', uidStr)
+        .eq('isDeleted', false)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setDisciplines((data || []) as Discipline[]);
+    } catch (e) {
+      console.warn('⚠️ [ErrorContext] Erro ao carregar disciplinas:', e);
+      setDisciplines([]);
+    } finally {
+      setDisciplinesLoading(false);
     }
+  }, []);
 
-    // 2) Se não tem nada local, busca do Supabase (precisa de internet)
-    const client = await getSupabaseWithToken();
-    const { data, error } = await client
-      .from('disciplines')
-      .select('id, name')
-      .eq('user_id', uid)
-      .eq('isDeleted', false)
-      .order('name', { ascending: true });
-
-    if (error) throw error;
-    setDisciplines((data || []) as Discipline[]);
-    console.log(`✅ [ErrorContext] ${data?.length || 0} disciplinas carregadas do Supabase.`);
-  } catch (e) {
-    console.warn('⚠️ [ErrorContext] Erro ao carregar disciplinas:', e);
-    setDisciplines([]);
-  } finally {
-    setDisciplinesLoading(false);
-  }
-}, []);
-
-  // ============================================================
-  // CARREGAR ERROS (RxDB local)
-  // ============================================================
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -132,15 +145,12 @@ const loadDisciplines = useCallback(async (uid: string) => {
       const cachedId = localStorage.getItem('revisaflash_user_id');
       if (cachedId) {
         userIdFromAuth = cachedId;
-        console.log('✅ [ErrorContext] Usuário recuperado do cache local (Clerk):', userIdFromAuth);
       } else {
-        console.warn('⚠️ [ErrorContext] Nenhum usuário disponível.');
         setLoading(false);
         return;
       }
 
       setUserId(userIdFromAuth);
-
       loadDisciplines(userIdFromAuth);
 
       const db = await getDb();
@@ -153,7 +163,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
       }).exec();
       const loadedRecords = errorsResult.map((doc: any) => doc.toJSON() as ErrorRecord);
       setRecords(loadedRecords);
-      console.log(`✅ [ErrorContext] ${loadedRecords.length} erros carregados.`);
     } catch (error) {
       console.error('❌ [ErrorContext] Erro ao carregar dados:', error);
     } finally {
@@ -161,9 +170,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
     }
   }, [loadDisciplines]);
 
-  // ============================================================
-  // LISTENER
-  // ============================================================
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
     let isSubscribed = true;
@@ -178,10 +184,7 @@ const loadDisciplines = useCallback(async (uid: string) => {
           const subscription = db.collections.errors.$.subscribe(() => {
             if (timeoutId) clearTimeout(timeoutId);
             timeoutId = setTimeout(() => {
-              if (isSubscribed) {
-                console.log('🔄 Mudança detectada na coleção errors, recarregando...');
-                loadData();
-              }
+              if (isSubscribed) loadData();
               timeoutId = null;
             }, 500);
           });
@@ -199,17 +202,21 @@ const loadDisciplines = useCallback(async (uid: string) => {
     loadAndSubscribe();
   }, [loadData]);
 
-  // ============================================================
-  // ADICIONAR ERRO
-  // ============================================================
   const addError = useCallback(
     async (data: AddErrorData): Promise<ErrorRecord> => {
       if (!userId) throw new Error('Usuário não autenticado');
 
       const now = new Date().toISOString();
+
+      // Limpa chaves undefined para não poluir o objeto (RxDB e Supabase preferem ausência a undefined)
+      const dadosLimpos: Record<string, any> = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (v !== undefined) dadosLimpos[k] = v;
+      }
+
       const newError: ErrorRecord = {
-        ...data,
-        area: data.area ?? '',
+        ...(dadosLimpos as any),
+        area: (dadosLimpos as any).area ?? '',
         id: uid(),
         user_id: userId,
         repetitions: 0,
@@ -224,7 +231,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
         const db = await getDb();
         await db.errors.insert(newError);
         setRecords(prev => [...prev, newError]);
-        console.log('📝 Erro registrado e salvo no RxDB:', newError);
 
         try {
           const supabaseClient = await getSupabaseWithToken();
@@ -232,7 +238,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
             .from('errors')
             .insert(newError);
           if (error) throw error;
-          console.log('✅ [ErrorContext] Erro sincronizado com Supabase.');
         } catch (supabaseError) {
           console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
           await enqueueOperation('create', 'errors', newError);
@@ -247,9 +252,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
     [userId]
   );
 
-  // ============================================================
-  // EDITAR ERRO
-  // ============================================================
   const editError = useCallback(
     async (
       id: string,
@@ -258,10 +260,7 @@ const loadDisciplines = useCallback(async (uid: string) => {
       try {
         const db = await getDb();
         const doc = await db.errors.findOne({ selector: { id } }).exec();
-        if (!doc) {
-          console.warn('⚠️ Erro não encontrado no RxDB:', id);
-          return;
-        }
+        if (!doc) return;
 
         const updatedData = {
           ...data,
@@ -278,9 +277,7 @@ const loadDisciplines = useCallback(async (uid: string) => {
             .update(updatedData)
             .eq('id', id);
           if (error) throw error;
-          console.log('✅ [ErrorContext] Erro atualizado no Supabase.');
         } catch (supabaseError) {
-          console.warn('⚠️ [ErrorContext] Falha ao sincronizar (offline?), adicionando à fila.');
           await enqueueOperation('update', 'errors', { id, ...updatedData });
         }
       } catch (error) {
@@ -291,9 +288,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
     []
   );
 
-  // ============================================================
-  // ADICIONAR OU INCREMENTAR (depois de editError!)
-  // ============================================================
   const addOrIncrementError = useCallback(
     async (data: AddErrorData): Promise<{ error: ErrorRecord; wasIncremented: boolean }> => {
       if (!userId) throw new Error('Usuário não autenticado');
@@ -310,7 +304,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
           updated_at: new Date().toISOString(),
         };
         await editError(existente.id, updated);
-        console.log(`♻️ Erro existente incrementado: ${existente.id} (rep: ${updated.repetitions})`);
         return { error: { ...existente, ...updated }, wasIncremented: true };
       }
 
@@ -320,24 +313,17 @@ const loadDisciplines = useCallback(async (uid: string) => {
     [userId, records, addError, editError]
   );
 
-  // ============================================================
-  // EXCLUIR ERRO
-  // ============================================================
   const deleteError = useCallback(
     async (id: string) => {
       if (!userId) return;
       try {
         const db = await getDb();
         const doc = await db.errors.findOne({ selector: { id } }).exec();
-        if (!doc) {
-          console.warn('⚠️ Erro não encontrado no RxDB:', id);
-          return;
-        }
+        if (!doc) return;
 
         const now = new Date().toISOString();
         await doc.incrementalPatch({ isDeleted: true, updated_at: now });
         setRecords(prev => prev.filter(r => r.id !== id));
-        console.log('🗑️ Erro marcado como deletado localmente.');
 
         try {
           const supabaseClient = await getSupabaseWithToken();
@@ -346,9 +332,7 @@ const loadDisciplines = useCallback(async (uid: string) => {
             .update({ isDeleted: true, updated_at: now })
             .eq('id', id);
           if (error) throw error;
-          console.log('✅ [ErrorContext] Erro marcado como deletado no Supabase.');
         } catch (supabaseError) {
-          console.warn('⚠️ [ErrorContext] Falha ao sincronizar soft delete, enfileirando.');
           await enqueueOperation('update', 'errors', { id, isDeleted: true, updated_at: now });
         }
       } catch (error) {
@@ -359,9 +343,6 @@ const loadDisciplines = useCallback(async (uid: string) => {
     [userId]
   );
 
-  // ============================================================
-  // GETTERS
-  // ============================================================
   const getErrorsByDiscipline = useCallback(
     (disciplineId: string | null) => {
       if (disciplineId === null) {

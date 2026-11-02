@@ -507,6 +507,27 @@ export default function ListaPlayerPage() {
         suaResposta: textoUsuario,
         respostaCorreta: textoCorreta,
         tipo: q.tipo,
+        // ---- Campos enriquecidos (para gerar simulados a partir do caderno) ----
+        questao_origem_id: q.id,
+        alternativas: q.tipo === 'multipla_escolha'
+          ? (q.alternativas || []).map((a: any) => ({
+              letra: a.letra,
+              texto: a.texto,
+              correta: a.correta,
+              sublinhados: a.sublinhados ?? null,
+              negritos: a.negritos ?? null,
+              italicos: a.italicos ?? null,
+            }))
+          : undefined,
+        gabarito_ce: q.tipo === 'certo_errado' ? q.gabarito_ce : undefined,
+        imagem_url: (q as any).imagem_url ?? null,
+        comentario_geral: (q as any).comentario_geral ?? null,
+        sublinhados_enunciado: (q as any).sublinhados_enunciado ?? null,
+        sublinhados_comentario: (q as any).sublinhados_comentario ?? null,
+        negritos_enunciado: (q as any).negritos_enunciado ?? null,
+        negritos_comentario: (q as any).negritos_comentario ?? null,
+        italicos_enunciado: (q as any).italicos_enunciado ?? null,
+        italicos_comentario: (q as any).italicos_comentario ?? null,
       });
     }
     return erros;

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { X, Check, Loader2, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useErrorSync } from "@/hooks/useErrorSync";
+import type { AlternativaErro, TipoQuestao } from "@/contexts/ErrorContext";
 
 export interface QuestaoErrada {
   numero: number;
@@ -10,6 +11,18 @@ export interface QuestaoErrada {
   suaResposta: string;
   respostaCorreta: string;
   tipo: 'multipla_escolha' | 'certo_errado';
+  // ---- Campos enriquecidos (opcionais; se presentes, salvam no caderno) ----
+  questao_origem_id?: string;
+  alternativas?: AlternativaErro[];
+  gabarito_ce?: boolean;
+  imagem_url?: string | null;
+  comentario_geral?: string | null;
+  sublinhados_enunciado?: { inicio: number; fim: number }[] | null;
+  sublinhados_comentario?: { inicio: number; fim: number }[] | null;
+  negritos_enunciado?: { inicio: number; fim: number }[] | null;
+  negritos_comentario?: { inicio: number; fim: number }[] | null;
+  italicos_enunciado?: { inicio: number; fim: number }[] | null;
+  italicos_comentario?: { inicio: number; fim: number }[] | null;
 }
 
 interface Props {
@@ -57,13 +70,26 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             question: q.enunciado,
             correctAnswer: q.respostaCorreta,
             yourAnswer: q.suaResposta,
-            // Quando a lista é de um amigo e não temos disciplina equivalente
-            // na conta, salvamos sem discipline_id (vai para "Sem disciplina").
-            ...(disciplineId ? { discipline_id: disciplineId } : {}),
             topic: listaTitulo,
             source: `Lista: ${listaTitulo}`,
             source_lista_id: listaId,
             type: 'Conceito',
+            // Quando a lista é de um amigo e não temos disciplina equivalente
+            // na conta, salvamos sem discipline_id (vai para "Sem disciplina").
+            ...(disciplineId ? { discipline_id: disciplineId } : {}),
+            // ---- Campos enriquecidos (só envia os que existirem) ----
+            ...(q.questao_origem_id ? { questao_origem_id: q.questao_origem_id } : {}),
+            ...(q.tipo ? { tipo_questao: q.tipo as TipoQuestao } : {}),
+            ...(q.alternativas ? { alternativas: q.alternativas } : {}),
+            ...(typeof q.gabarito_ce === 'boolean' ? { gabarito_ce: q.gabarito_ce } : {}),
+            ...(q.imagem_url !== undefined ? { imagem_url: q.imagem_url } : {}),
+            ...(q.comentario_geral !== undefined ? { comentario_geral: q.comentario_geral } : {}),
+            ...(q.sublinhados_enunciado !== undefined ? { sublinhados_enunciado: q.sublinhados_enunciado } : {}),
+            ...(q.sublinhados_comentario !== undefined ? { sublinhados_comentario: q.sublinhados_comentario } : {}),
+            ...(q.negritos_enunciado !== undefined ? { negritos_enunciado: q.negritos_enunciado } : {}),
+            ...(q.negritos_comentario !== undefined ? { negritos_comentario: q.negritos_comentario } : {}),
+            ...(q.italicos_enunciado !== undefined ? { italicos_enunciado: q.italicos_enunciado } : {}),
+            ...(q.italicos_comentario !== undefined ? { italicos_comentario: q.italicos_comentario } : {}),
           });
 
           if (wasIncremented) {

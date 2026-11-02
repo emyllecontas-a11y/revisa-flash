@@ -4,12 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
   Plus, X, AlertTriangle, Filter, ChevronLeft, Pencil, Trash2,
-  RotateCw, Sparkles, Loader2, FolderOpen,
+  RotateCw, Sparkles, Loader2, FolderOpen, FileText,
 } from "lucide-react";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useErrorSync } from "@/hooks/useErrorSync";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
+import { GerarSimuladoErrosModal } from "@/components/GerarSimuladoErrosModal";
 import type { ErrorType, ErrorRecord } from "@/contexts/ErrorContext";
 
 const CARD_COLORS = [
@@ -29,6 +30,7 @@ export default function ErrosPage() {
 
   const [selectedDiscipline, setSelectedDiscipline] = useState<{ id: string | null; name: string } | null>(null);
   const [filterType, setFilterType] = useState<string>("Todos");
+  const [showGerarSimulado, setShowGerarSimulado] = useState(false);
 
   const [isSavingCreate, setIsSavingCreate] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -44,6 +46,7 @@ export default function ErrosPage() {
     getTotalErrors,
     disciplines,
     disciplinesLoading,
+    userId,
   } = useErrors();
 
   const { syncAddError, syncEditError, syncDeleteError } = useErrorSync();
@@ -365,12 +368,23 @@ export default function ErrosPage() {
               Todos os erros registrados nesta disciplina.
             </p>
           </div>
-          <button
-            onClick={() => openCreateModal(selectedDiscipline.id)}
-            className="inline-flex items-center gap-1.5 self-start rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 sm:self-auto"
-          >
-            <Plus className="h-3.5 w-3.5" /> Registrar erro
-          </button>
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            {activeErrors > 0 && userId && selectedDiscipline.id && (
+              <button
+                onClick={() => setShowGerarSimulado(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+                title="Gerar um simulado com os erros desta disciplina"
+              >
+                <FileText className="h-3.5 w-3.5" /> Gerar simulado
+              </button>
+            )}
+            <button
+              onClick={() => openCreateModal(selectedDiscipline.id)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+            >
+              <Plus className="h-3.5 w-3.5" /> Registrar erro
+            </button>
+          </div>
         </header>
 
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -494,6 +508,20 @@ export default function ErrosPage() {
           editingError={editingError}
           disciplines={disciplines}
           isSaving={isSavingEdit}
+        />
+      )}
+
+      {showGerarSimulado && userId && selectedDiscipline.id && (
+        <GerarSimuladoErrosModal
+          userId={userId}
+          disciplineId={selectedDiscipline.id}
+          disciplineName={selectedDiscipline.name}
+          onClose={() => setShowGerarSimulado(false)}
+          onSuccess={(simuladoId) => {
+            setShowGerarSimulado(false);
+            toast.success("Simulado criado! Abrindo...");
+            navigate(`/simulados/${simuladoId}`);
+          }}
         />
       )}
     </>
