@@ -1,25 +1,16 @@
 // src/hooks/useErrorSync.ts
-
 import { useCallback } from 'react';
 import { useFlashcardContext } from '@/contexts/FlashcardContext';
 import type { ErrorRecord } from '@/contexts/ErrorContext';
 
 export function useErrorSync() {
-  const { getOrCreateErrorDeck, addCard, editCard, deleteCard } = useFlashcardContext();
+  const { editCard, deleteCard } = useFlashcardContext();
 
   const syncAddError = useCallback(async (error: ErrorRecord): Promise<ErrorRecord> => {
-    try {
-      const deck = await getOrCreateErrorDeck();
-      const cardId = await addCard(deck.id, error.question, error.correctAnswer, {
-        topico: error.topic || 'Erro',
-        errorId: error.id,
-      });
-      return { ...error, flashcardId: cardId };
-    } catch (e) {
-      console.error('Erro ao sincronizar erro com flashcard:', e);
-      return error;
-    }
-  }, [getOrCreateErrorDeck, addCard]);
+    // Criação automática de flashcards DESATIVADA a pedido da usuária.
+    // O erro agora é apenas salvo no banco de dados de erros.
+    return error;
+  }, []);
 
   const syncEditError = useCallback(async (error: ErrorRecord) => {
     if (!error.flashcardId) return;

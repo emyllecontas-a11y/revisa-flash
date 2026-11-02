@@ -2,10 +2,11 @@
 import { useState, useEffect, useRef } from "react";
 import { QuestaoCard } from "@/components/QuestaoCard";
 import { salvarTentativaAvulsa, type QuestaoBanco } from "@/services/bancoQuestoesService";
-import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, X } from "lucide-react";
+import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, X, Send } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
 import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotacao } from "@/services/anotacaoQuestaoService";
 import type { AnotacaoQuestao, CampoAlvo, CorGrifo, RectGrifo } from "@/lib/anotacoes-types";
+import { EnviarErrosModal, type QuestaoErrada } from "@/components/EnviarErrosModal";
 
 interface Props {
   userId: string;
@@ -27,11 +28,16 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const [acertos, setAcertos] = useState(0);
   const [erros, setErros] = useState(0);
   
+  // Guarda a questão e a resposta do usuário para enviar ao Caderno de Erros
+  const [questoesErradas, setQuestoesErradas] = useState<{ q: QuestaoBanco, suaResposta: string, respostaCorreta: string }[]>([]);
+  
   const [tempoQuestao, setTempoQuestao] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
   const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
+  
+  const [modalEnviar, setModalEnviar] = useState(false);
 
   // Cronômetro da questão
   useEffect(() => {
@@ -59,6 +65,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     setIdx(0);
     setAcertos(0);
     setErros(0);
+    setQuestoesErradas([]);
     setTempoQuestao(0);
     setSelecionada(null);
     setRevelar(false);
@@ -76,8 +83,13 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     else correta = q.gabarito_ce ? 'C' : 'E';
 
     const acertou = selecionada.toUpperCase() === correta;
-    if (acertou) setAcertos(prev => prev + 1);
-    else setErros(prev => prev + 1);
+    
+    if (acertou) {
+      setAcertos(prev => prev + 1);
+    } else {
+      setErros(prev => prev + 1);
+      setQuestoesErradas(prev => [...prev, { q, suaResposta: selecionada.toUpperCase(), respostaCorreta: correta || '' }]);
+    }
 
     setSalvando(true);
     await salvarTentativaAvulsa(userId, q.id, selecionada, acertou, tempoQuestao);
@@ -141,6 +153,32 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
       return next;
     });
   };
+
+  // Formatar as questões erradas para o EnviarErrosModal
+  const errosFormatados: QuestaoErrada[] = questoesErradas.map((item, index) => {
+    const q = item.q;
+    const altFormatadas = q.tipo_questao === 'multipla_escolha' ? (q.alternativas || []).map(a => ({
+      letra: a.letra,
+      texto: a.texto,
+      correta: a.letra.toUpperCase() === item.respostaCorreta.toUpperCase(),
+      sublinhados: null,
+      negritos: null,
+      italicos: null
+    })) : undefined;
+
+    return {
+      numero: index + 1,
+      enunciado: q.enunciado,
+      suaResposta: item.suaResposta,
+      respostaCorreta: item.respostaCorreta,
+      tipo: q.tipo_questao,
+      questao_origem_id: q.id,
+      alternativas: altFormatadas,
+      gabarito_ce: q.gabarito_ce ?? undefined,
+      imagem_url: q.imagem_url,
+      comentario_geral: q.comentario,
+    };
+  });
 
   // --- RENDERIZAÇÃO ---
   if (fase === "config") {
@@ -260,29 +298,50 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
 
   if (fase === "resultado") {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-        <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated text-center">
-          <h3 className="font-display text-xl font-bold mb-2">Sessão Concluída!</h3>
-          <p className="text-xs text-foreground/60 mb-6">Você respondeu {questoesSorteio.length} questões.</p>
+      <>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated text-center">
+            <h3 className="font-display text-xl font-bold mb-2">Sessão Concluída!</h3>
+            <p className="text-xs text-foreground/60 mb-6">Você respondeu {questoesSorteio.length} questões.</p>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-              <CheckCircle2 className="h-6 w-6 text-primary mx-auto mb-1" />
-              <div className="text-2xl font-bold text-primary">{acertos}</div>
-              <div className="text-[10px] uppercase tracking-widest text-primary/60">Acertos</div>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <CheckCircle2 className="h-6 w-6 text-primary mx-auto mb-1" />
+                <div className="text-2xl font-bold text-primary">{acertos}</div>
+                <div className="text-[10px] uppercase tracking-widest text-primary/60">Acertos</div>
+              </div>
+              <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+                <XCircle className="h-6 w-6 text-accent mx-auto mb-1" />
+                <div className="text-2xl font-bold text-accent">{erros}</div>
+                <div className="text-[10px] uppercase tracking-widest text-accent/60">Erros</div>
+              </div>
             </div>
-            <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
-              <XCircle className="h-6 w-6 text-accent mx-auto mb-1" />
-              <div className="text-2xl font-bold text-accent">{erros}</div>
-              <div className="text-[10px] uppercase tracking-widest text-accent/60">Erros</div>
-            </div>
+
+            {erros > 0 && (
+              <button 
+                onClick={() => setModalEnviar(true)} 
+                className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-full border border-accent/30 bg-accent/10 py-2.5 text-sm font-semibold text-accent hover:bg-accent/20 transition-colors"
+              >
+                <Send className="h-4 w-4" /> Enviar {erros} {erros === 1 ? 'erro' : 'erros'} para o Caderno de Erros
+              </button>
+            )}
+
+            <button onClick={onClose} className="w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+              Voltar ao Banco
+            </button>
           </div>
-
-          <button onClick={onClose} className="w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-            Voltar ao Banco
-          </button>
         </div>
-      </div>
+
+        {modalEnviar && (
+          <EnviarErrosModal
+            listaId="banco-questoes"
+            listaTitulo="Banco de Questões"
+            // DisciplineId omitido para forçar o select de disciplinas
+            questoesErradas={errosFormatados}
+            onClose={(enviou) => { setModalEnviar(false); onClose(); }}
+          />
+        )}
+      </>
     );
   }
 

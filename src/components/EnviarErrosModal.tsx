@@ -1,9 +1,10 @@
 // src/components/EnviarErrosModal.tsx
-import { useState } from "react";
-import { X, Check, Loader2, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Check, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useErrors } from "@/contexts/ErrorContext";
 import { useErrorSync } from "@/hooks/useErrorSync";
 import type { AlternativaErro, TipoQuestao } from "@/contexts/ErrorContext";
+import { getDb } from "@/lib/db";
 
 export interface QuestaoErrada {
   numero: number;
@@ -11,7 +12,6 @@ export interface QuestaoErrada {
   suaResposta: string;
   respostaCorreta: string;
   tipo: 'multipla_escolha' | 'certo_errado';
-  // ---- Campos enriquecidos (opcionais; se presentes, salvam no caderno) ----
   questao_origem_id?: string;
   alternativas?: AlternativaErro[];
   gabarito_ce?: boolean;
@@ -28,8 +28,8 @@ export interface QuestaoErrada {
 interface Props {
   listaId: string;
   listaTitulo: string;
-  /** Pode ser null quando a lista é de um amigo e a disciplina original não existe na sua conta. */
-  disciplineId: string | null;
+  /** Se for undefined, o modal mostrará um select para escolher a disciplina */
+  disciplineId?: string | null;
   questoesErradas: QuestaoErrada[];
   onClose: (enviou: boolean) => void;
 }
@@ -45,6 +45,22 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
   const [resultado, setResultado] = useState<{ criados: number; incrementados: number } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
+  // Estados para escolha de disciplina (quando disciplineId não é passado)
+  const [disciplinas, setDisciplinas] = useState<{id: string, name: string}[]>([]);
+  const [disciplinaEscolhida, setDisciplinaEscolhida] = useState<string>("");
+
+  useEffect(() => {
+    if (disciplineId === undefined) {
+      getDb().then(db => db.disciplines.find({ selector: { isDeleted: { $ne: true } } }).exec())
+        .then(docs => {
+          const ds = docs.map((d: any) => ({ id: d.id, name: d.name }));
+          setDisciplinas(ds);
+          if (ds.length > 0) setDisciplinaEscolhida(ds[0].id);
+        })
+        .catch(console.error);
+    }
+  }, [disciplineId]);
+
   const toggle = (numero: number) => {
     setSelecionadas(prev => {
       const novo = new Set(prev);
@@ -56,6 +72,15 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
 
   const handleEnviar = async () => {
     setErro(null);
+
+    // Define a disciplina final
+    const finalDisciplineId = disciplineId === undefined ? disciplinaEscolhida : disciplineId;
+    
+    if (finalDisciplineId === undefined || (disciplineId === undefined && !finalDisciplineId)) {
+       setErro("Por favor, selecione uma disciplina.");
+       return;
+    }
+
     setEnviando(true);
 
     let criados = 0;
@@ -74,10 +99,7 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             source: `Lista: ${listaTitulo}`,
             source_lista_id: listaId,
             type: 'Conceito',
-            // Quando a lista é de um amigo e não temos disciplina equivalente
-            // na conta, salvamos sem discipline_id (vai para "Sem disciplina").
-            ...(disciplineId ? { discipline_id: disciplineId } : {}),
-            // ---- Campos enriquecidos (só envia os que existirem) ----
+            ...(finalDisciplineId ? { discipline_id: finalDisciplineId } : {}),
             ...(q.questao_origem_id ? { questao_origem_id: q.questao_origem_id } : {}),
             ...(q.tipo ? { tipo_questao: q.tipo as TipoQuestao } : {}),
             ...(q.alternativas ? { alternativas: q.alternativas } : {}),
@@ -92,9 +114,8 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             ...(q.italicos_comentario !== undefined ? { italicos_comentario: q.italicos_comentario } : {}),
           });
 
-          if (wasIncremented) {
-            incrementados++;
-          } else {
+          if (wasIncremented) incrementados++;
+          else {
             criados++;
             await syncAddError(error);
           }
@@ -119,18 +140,11 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             <CheckCircle2 className="mx-auto h-12 w-12 text-primary" />
             <h3 className="mt-3 font-display text-lg font-semibold">Erros enviados!</h3>
             <p className="mt-1 text-sm text-foreground/60">
-              {resultado.criados > 0 && (
-                <>{resultado.criados} {resultado.criados === 1 ? 'erro novo' : 'erros novos'}</>
-              )}
+              {resultado.criados > 0 && <>{resultado.criados} {resultado.criados === 1 ? 'erro novo' : 'erros novos'}</>}
               {resultado.criados > 0 && resultado.incrementados > 0 && ' · '}
-              {resultado.incrementados > 0 && (
-                <>{resultado.incrementados} {resultado.incrementados === 1 ? 'reincidência' : 'reincidências'}</>
-              )}
+              {resultado.incrementados > 0 && <>{resultado.incrementados} {resultado.incrementados === 1 ? 'reincidência' : 'reincidências'}</>}
             </p>
-            <button
-              onClick={() => onClose(true)}
-              className="mt-5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-            >
+            <button onClick={() => onClose(true)} className="mt-5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
               Fechar
             </button>
           </div>
@@ -138,28 +152,28 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
           <>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-display text-lg font-semibold">
-                  Enviar erros ao caderno?
-                </h3>
-                <p className="text-xs text-foreground/50 mt-0.5">
-                  {selecionadas.size} de {questoesErradas.length} selecionadas
-                </p>
+                <h3 className="font-display text-lg font-semibold">Enviar erros ao caderno?</h3>
+                <p className="text-xs text-foreground/50 mt-0.5">{selecionadas.size} de {questoesErradas.length} selecionadas</p>
               </div>
-              <button
-                onClick={() => onClose(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-foreground/50 hover:bg-white/5"
-              >
+              <button onClick={() => onClose(false)} className="grid h-8 w-8 place-items-center rounded-lg text-foreground/50 hover:bg-white/5">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs">
-              <Sparkles className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
-              <span className="text-foreground/70">
-                Cada erro enviado também criará um <strong>flashcard no deck "Erros"</strong> automaticamente.
-                Se a questão já estava no caderno, ela será marcada como <strong>reincidência</strong>.
-              </span>
-            </div>
+            {/* SELECT DE DISCIPLINA (aparece só se disciplineId for undefined) */}
+            {disciplineId === undefined && (
+              <div className="mb-4">
+                <label className="text-sm font-medium text-foreground/70 mb-1 block">Disciplina de destino</label>
+                <select
+                  value={disciplinaEscolhida}
+                  onChange={(e) => setDisciplinaEscolhida(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
+                >
+                  {disciplinas.length === 0 && <option value="">Nenhuma disciplina encontrada</option>}
+                  {disciplinas.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+            )}
 
             <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
               {questoesErradas.map((q) => {
@@ -168,47 +182,22 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
                   <button
                     key={q.numero}
                     onClick={() => toggle(q.numero)}
-                    className={[
-                      "w-full flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                      marcada
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-border bg-surface/40 hover:bg-surface/60",
-                    ].join(" ")}
+                    className={["w-full flex items-start gap-3 rounded-lg border p-3 text-left transition-colors", marcada ? "border-primary/40 bg-primary/5" : "border-border bg-surface/40 hover:bg-surface/60"].join(" ")}
                   >
-                    <span
-                      className={[
-                        "grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors mt-0.5",
-                        marcada
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background",
-                      ].join(" ")}
-                    >
+                    <span className={["grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors mt-0.5", marcada ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"].join(" ")}>
                       {marcada && <Check className="h-3 w-3" />}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[11px] font-medium text-foreground/50">
-                          Questão {q.numero}
-                        </span>
-                        <span className={[
-                          "rounded-full px-1.5 py-0.5 text-[9px] font-medium",
-                          q.tipo === 'multipla_escolha'
-                            ? "bg-primary/10 text-primary"
-                            : "bg-warning/10 text-warning",
-                        ].join(" ")}>
+                        <span className="text-[11px] font-medium text-foreground/50">Questão {q.numero}</span>
+                        <span className={["rounded-full px-1.5 py-0.5 text-[9px] font-medium", q.tipo === 'multipla_escolha' ? "bg-primary/10 text-primary" : "bg-warning/10 text-warning"].join(" ")}>
                           {q.tipo === 'multipla_escolha' ? 'Múltipla' : 'C/E'}
                         </span>
                       </div>
-                      <p className="text-xs text-foreground/80 line-clamp-2 leading-snug">
-                        {q.enunciado}
-                      </p>
+                      <p className="text-xs text-foreground/80 line-clamp-2 leading-snug">{q.enunciado}</p>
                       <div className="mt-1.5 flex flex-wrap gap-x-3 text-[10px] text-foreground/45">
-                        <span>
-                          <span className="text-accent">Sua:</span> {q.suaResposta}
-                        </span>
-                        <span>
-                          <span className="text-primary">Correta:</span> {q.respostaCorreta}
-                        </span>
+                        <span><span className="text-accent">Sua:</span> {q.suaResposta}</span>
+                        <span><span className="text-primary">Correta:</span> {q.respostaCorreta}</span>
                       </div>
                     </div>
                   </button>
@@ -224,21 +213,15 @@ export function EnviarErrosModal({ listaId, listaTitulo, disciplineId, questoesE
             )}
 
             <div className="mt-5 flex gap-2">
-              <button
-                onClick={() => onClose(false)}
-                disabled={enviando}
-                className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 disabled:opacity-50"
-              >
+              <button onClick={() => onClose(false)} disabled={enviando} className="flex-1 rounded-lg border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 disabled:opacity-50">
                 Não enviar
               </button>
-              <button
-                onClick={handleEnviar}
-                disabled={enviando || selecionadas.size === 0}
+              <button 
+                onClick={handleEnviar} 
+                disabled={enviando || selecionadas.size === 0 || (disciplineId === undefined && disciplinas.length === 0)} 
                 className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                {enviando
-                  ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                  : `Enviar ${selecionadas.size} ${selecionadas.size === 1 ? 'erro' : 'erros'}`}
+                {enviando ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : `Enviar ${selecionadas.size} ${selecionadas.size === 1 ? 'erro' : 'erros'}`}
               </button>
             </div>
           </>
