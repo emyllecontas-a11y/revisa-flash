@@ -59,7 +59,7 @@ export async function extrairQuestoesDePdf(
     if (questoes.length === 0) {
       return {
         success: false,
-        erro: 'Nenhuma questão identificada. Clique em "Ver texto bruto" e me envie o que aparecer.',
+        erro: 'Nenhuma questão identificada. Verifique se o PDF tem a estrutura esperada.',
       };
     }
     return { success: true, questoes };
@@ -335,9 +335,14 @@ function parseCorpo(
     enunciado = textoQ.substring(0, alts[0].posicao).trim();
 
     if (gabRaw) {
-      const g = gabRaw.toUpperCase().charAt(0);
-      if (/^[A-E]$/.test(g)) gabaritoLetra = g;
-      else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
+      if (gabRaw.startsWith('[')) {
+        // Marcadores do Claude quando não conseguiu ler o gabarito
+        base.warnings.push(`Gabarito ${gabRaw}`);
+      } else {
+        const g = gabRaw.toUpperCase().charAt(0);
+        if (/^[A-E]$/.test(g)) gabaritoLetra = g;
+        else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
+      }
     } else {
       base.warnings.push('Sem gabarito');
     }
@@ -350,10 +355,14 @@ function parseCorpo(
     const cePattern = /(?:^|\n)\s*Certo\s+Errado\s*[\.\?!]?\s*(?:\n|$)/gi;
     enunciado = textoQ.replace(cePattern, '\n').replace(/\n{3,}/g, '\n\n').trim();
     if (gabRaw) {
-      const g = gabRaw.toLowerCase().trim();
-      if (g === 'certo' || g === 'c') gabaritoCe = true;
-      else if (g === 'errado' || g === 'e') gabaritoCe = false;
-      else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
+      if (gabRaw.startsWith('[')) {
+        base.warnings.push(`Gabarito ${gabRaw}`);
+      } else {
+        const g = gabRaw.toLowerCase().trim();
+        if (g === 'certo' || g === 'c') gabaritoCe = true;
+        else if (g === 'errado' || g === 'e') gabaritoCe = false;
+        else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
+      }
     } else {
       base.warnings.push('Sem gabarito');
     }
@@ -408,7 +417,9 @@ function detectarTipo(texto: string): 'multipla_escolha' | 'certo_errado' | null
 function extrairAlternativasMC(
   texto: string
 ): { letra: string; texto: string; posicao: number }[] | null {
-  const regex = /(?:^|\s|\n)([a-e])\)\s+/g;
+  // Aceita "a) texto" e "a)texto" (com ou sem espaço depois do parêntese).
+  // A letra pode ser minúscula ou maiúscula (A) ou a)).
+  const regex = /(?:^|\s|\n)([a-eA-E])\)\s*/g;
   const matches: { letra: string; inicioTexto: number; posicao: number }[] = [];
   let m;
   while ((m = regex.exec(texto)) !== null) {
@@ -467,6 +478,9 @@ function fnv1a64(s: string): string {
   return hash.toString(16).padStart(16, '0');
 }
 
+// ============================================================
+// LIMPEZA E FILTROS
+// ============================================================
 function limparTexto(s: string): string {
   return s
     .replace(/\r\n/g, '\n')
@@ -474,5 +488,15 @@ function limparTexto(s: string): string {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
+    .split('\n')
+    .filter((line) => !isFontTestLine(line))
+    .join('\n')
     .trim();
+}
+
+function isFontTestLine(line: string): boolean {
+  // Detecta a linha de "teste de fonte" gerada pelo reportlab do Claude.
+  // Ex: ¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇ...
+  // Usa 5+ caracteres consecutivos da faixa de símbolos Latin-1.
+  return /[¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿]{5,}/.test(line);
 }
