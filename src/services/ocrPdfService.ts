@@ -57,8 +57,7 @@ export async function extrairTextoViaOCR(
 
       const page = await pdf.getPage(i);
 
-      // Renderiza com DPI alto (scale 3 ≈ 200-300 DPI dependendo do PDF)
-      const viewport = page.getViewport({ scale: 3 });
+      const viewport = page.getViewport({ scale: 5 });
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
