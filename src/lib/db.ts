@@ -213,6 +213,8 @@ const topicSchema = {
   required: ['id', 'name', 'user_id']
 };
 
+// ⚠️ SCHEMA ENRIQUECIDO — 13 campos novos (nullable) para permitir gerar
+// simulados fiéis a partir dos erros.
 const errorSchema = {
   title: 'error schema',
   version: 0,
@@ -236,7 +238,20 @@ const errorSchema = {
     flashcardId: { type: 'string' },
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
-    isDeleted: { type: 'boolean', default: false }
+    isDeleted: { type: 'boolean', default: false },
+    // ---- NOVOS CAMPOS (todos nullable) ----
+    questao_origem_id: { type: ['string', 'null'] },
+    tipo_questao: { type: ['string', 'null'] },  // 'multipla_escolha' | 'certo_errado'
+    alternativas: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    gabarito_ce: { type: ['boolean', 'null'] },
+    imagem_url: { type: ['string', 'null'] },
+    comentario_geral: { type: ['string', 'null'] },
+    sublinhados_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    sublinhados_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    negritos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_enunciado: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+    italicos_comentario: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
   },
   required: ['id', 'user_id', 'question', 'area', 'correctAnswer']
 };
@@ -685,8 +700,6 @@ const resultadoSimuladoSchema = {
     respostas: { type: 'object', additionalProperties: true },
     areas: { type: 'object', additionalProperties: true },
     comentarios_gerais: { type: ['string', 'null'] },
-    // NOVOS: guardam o título/área no momento da finalização,
-    // para o histórico não depender do simulado ainda existir localmente.
     simulado_titulo: { type: ['string', 'null'] },
     simulado_area: { type: ['string', 'null'] },
     created_at: { type: 'string' },
@@ -848,7 +861,7 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v12';
+    const DB_NAME = 'revisaflash_db_v13';
 
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
@@ -859,14 +872,15 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v9'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v10'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v11'); } catch (e) {}
+    try { indexedDB.deleteDatabase('revisaflash_db_v12'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
 
     try {
       const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v12') {
+      if (markerVersion !== 'v13') {
         console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
         clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v12');
+        localStorage.setItem('revisaflash_db_version', 'v13');
       }
     } catch (e) {}
 
@@ -905,14 +919,13 @@ export async function getDb(): Promise<RxDatabase> {
       pdf_text_boxes: { schema: pdfTextBoxSchema },
       files: { schema: fileSchema },
       anotacoes_questao: { schema: anotacaoQuestaoSchema },
-      // NOVAS:
       planos: { schema: planoSchema },
       plano_feitos: { schema: planoFeitoSchema },
       subtopicos: { schema: subtopicoSchema },
       revisoes_subtopico: { schema: revisaoSubtopicoSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v12).');
+    console.log('✅ Banco local criado com sucesso (v13).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -925,6 +938,7 @@ export async function getDb(): Promise<RxDatabase> {
 
 // ============================================================
 // SYNC
+// (mantido igual ao v12, sem alterações — só a versão mudou)
 // ============================================================
 
 let isSyncing = false;
@@ -935,10 +949,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     return;
   }
   isSyncing = true;
-  
-  // MUDANÇA: Captura a hora de INÍCIO do sync
   const syncStartTime = new Date().toISOString();
-
   let houveErro = false;
 
   try {
@@ -996,7 +1007,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const collection = database.collections[name];
       if (!collection) continue;
 
-      // MUDANÇA: user_settings sempre puxa completo
       const pullFrom = (name === 'user_settings' || name === 'anotacoes_questao' || emptyCollections.has(name))
         ? '1970-01-01T00:00:00Z' 
         : lastSyncGlobal;
@@ -1276,7 +1286,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         }
 
         const altCollection = database.collections.alternativas;
-                const localQ = await questoesCollection.find({ selector: { simulado_id: { $in: simIds } } }).exec();
+        const localQ = await questoesCollection.find({ selector: { simulado_id: { $in: simIds } } }).exec();
         const qIds = localQ.map(d => d.get('id'));
         if (qIds.length > 0) {
           const qIdChunks = chunkArray(qIds, 100);
@@ -1352,7 +1362,8 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       console.error('❌ Erro na sincronização de study_sessions:', err);
       houveErro = true;
     }
-      // Conteúdo compartilhado por amigas (somente leitura, não afeta o lastSync)
+
+    // Conteúdo compartilhado por amigos (somente leitura)
     try {
       const { syncSharedContent } = await import('./sharedSync');
       const okShared = await syncSharedContent(userIdStr);
@@ -1360,10 +1371,10 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     } catch (sharedErr) {
       console.error('❌ Erro no sync de compartilhados:', sharedErr);
     }
+
     if (houveErro) {
       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado — os itens faltantes serão retentados no próximo sync.');
     } else {
-      // MUDANÇA: Grava o horário de INÍCIO
       writeLastSync(userId, syncStartTime);
       console.log('✅ Sincronização concluída.');
     }
