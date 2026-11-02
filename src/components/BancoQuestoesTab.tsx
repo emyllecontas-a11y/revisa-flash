@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/useToast";
 import {
   getQuestoesDoBanco,
   getEstatisticasBanco,
+  limparDuplicatasLocais,
   type QuestaoBanco,
 } from "@/services/bancoQuestoesService";
 import {
@@ -20,7 +21,7 @@ import {
   ArrowLeft, FolderOpen, ChevronRight, FileText
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
-import { limparDuplicatasLocais } from "@/services/bancoQuestoesService";
+import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -44,6 +45,7 @@ export function BancoQuestoesTab() {
   const [modalNovaPasta, setModalNovaPasta] = useState(false);
   const [modalNovoCaderno, setModalNovoCaderno] = useState(false);
   const [modalPraticar, setModalPraticar] = useState(false);
+  const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
 
   // Filtros
   const [fDisciplina, setFDisciplina] = useState("");
@@ -56,13 +58,14 @@ export function BancoQuestoesTab() {
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
 
-
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setError(null);
     try {
-      await limparDuplicatasLocais(user.id); // <--- Adicione esta linha
+      // Limpa duplicatas locais antes de carregar
+      await limparDuplicatasLocais(user.id);
+
       const [r1, r2, r3, r4] = await Promise.all([
         getEstatisticasBanco(user.id),
         getQuestoesDoBanco(user.id),
@@ -194,7 +197,7 @@ export function BancoQuestoesTab() {
               {cadernosFiltrados.map(c => {
                 const pasta = pastas.find(p => p.id === c.pasta_id);
                 return (
-                  <div key={c.id} className="rf-card p-4 flex flex-col hover:border-primary/50 transition-colors cursor-pointer" onClick={() => toast.info("Em breve", { description: "O player do caderno chega no próximo passo." })}>
+                  <div key={c.id} className="rf-card p-4 flex flex-col hover:border-primary/50 transition-colors cursor-pointer" onClick={() => setCadernoAberto(c)}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
@@ -364,6 +367,15 @@ export function BancoQuestoesTab() {
           userId={user.id}
           questoes={filtradas}
           onClose={() => { setModalPraticar(false); load(); }}
+        />
+      )}
+
+      {cadernoAberto && user?.id && (
+        <CadernoDetalhesModal
+          caderno={cadernoAberto}
+          userId={user.id}
+          onClose={() => setCadernoAberto(null)}
+          onUpdate={load}
         />
       )}
     </>
