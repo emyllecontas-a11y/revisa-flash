@@ -4,6 +4,8 @@ import { QuestaoCard } from "@/components/QuestaoCard";
 import { salvarTentativaAvulsa, type QuestaoBanco } from "@/services/bancoQuestoesService";
 import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, X } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
+import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotacao } from "@/services/anotacaoQuestaoService";
+import type { AnotacaoQuestao, CampoAlvo, CorGrifo, RectGrifo } from "@/lib/anotacoes-types";
 
 interface Props {
   userId: string;
@@ -28,6 +30,9 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const [tempoQuestao, setTempoQuestao] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
+  const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
+
   // Cronômetro da questão
   useEffect(() => {
     if (fase === "jogando" && !revelar) {
@@ -37,6 +42,15 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [fase, revelar, idx]);
+
+  // Carregar grifos
+  useEffect(() => {
+    if (!userId || questoesSorteio.length === 0) return;
+    const ids = questoesSorteio.map(q => q.id);
+    getAnotacoesDeQuestoes(userId, 'banco' as any, ids)
+      .then(setAnotacoes)
+      .catch(() => {});
+  }, [userId, questoesSorteio]);
 
   const iniciar = () => {
     const qtd = Math.min(quantidade, questoes.length);
@@ -48,6 +62,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     setTempoQuestao(0);
     setSelecionada(null);
     setRevelar(false);
+    setEliminadas({});
     setFase("jogando");
   };
 
@@ -57,10 +72,10 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     const q = questoesSorteio[idx];
     
     let correta = null;
-    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra;
+    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra?.toUpperCase() || null;
     else correta = q.gabarito_ce ? 'C' : 'E';
 
-    const acertou = selecionada === correta;
+    const acertou = selecionada.toUpperCase() === correta;
     if (acertou) setAcertos(prev => prev + 1);
     else setErros(prev => prev + 1);
 
@@ -78,6 +93,53 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
       setRevelar(false);
       setTempoQuestao(0);
     }
+  };
+
+  const toggleEliminada = (letra: string) => {
+    if (revelar) return;
+    setEliminadas(prev => {
+      const atual = prev[idx] || [];
+      const nova = atual.includes(letra) ? atual.filter(l => l !== letra) : [...atual, letra];
+      return { ...prev, [idx]: nova };
+    });
+    if (selecionada === letra) setSelecionada(null);
+  };
+
+  // --- GRIFOS ---
+  const handleGrifar = async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
+    const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
+    if (!nova) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      const atual = next.get(questaoId) ?? [];
+      next.set(questaoId, [...atual, nova]);
+      return next;
+    });
+  };
+
+  const handleRemoverGrifo = async (anotacaoId: string) => {
+    const ok = await removerAnotacao(anotacaoId);
+    if (!ok) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        const filtrados = lista.filter(a => a.id !== anotacaoId);
+        if (filtrados.length !== lista.length) next.set(qid, filtrados);
+      }
+      return next;
+    });
+  };
+
+  const handleTrocarCorGrifo = async (anotacaoId: string, cor: CorGrifo) => {
+    const ok = await trocarCorAnotacao(anotacaoId, cor);
+    if (!ok) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        next.set(qid, lista.map(a => a.id === anotacaoId ? { ...a, cor } : a));
+      }
+      return next;
+    });
   };
 
   // --- RENDERIZAÇÃO ---
@@ -117,20 +179,24 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     const total = questoesSorteio.length;
     
     let correta = null;
-    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra;
+    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra?.toUpperCase() || null;
     else correta = q.gabarito_ce ? 'C' : 'E';
 
-    // Adapta as alternativas para o QuestaoCard
     let alternativasView = [];
     if (q.tipo_questao === 'certo_errado') {
       alternativasView = [ { letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' } ];
     } else {
-      alternativasView = (q.alternativas || []).map(a => ({ letra: a.letra, texto: a.texto }));
+      alternativasView = (q.alternativas || []).map(a => ({ 
+        letra: a.letra.toUpperCase(), 
+        texto: a.texto,
+        sublinhados: (a as any).sublinhados,
+        negritos: (a as any).negritos,
+        italicos: (a as any).italicos
+      }));
     }
 
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-background overflow-y-auto">
-        {/* Header do Player */}
         <div className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-medium text-foreground/60 hover:text-foreground flex items-center gap-1">
             <ChevronLeft className="h-4 w-4" /> Sair
@@ -141,27 +207,32 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           </div>
         </div>
 
-        {/* Corpo do Player */}
         <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 pb-24">
           <QuestaoCard
             numero={idx + 1}
             total={total}
             ano={q.ano}
-            area={q.disciplina} // Mostra a disciplina na faixa superior
+            area={q.disciplina}
             instituicao={q.banca}
             enunciado={q.enunciado}
             imagens={q.imagem_url ? [q.imagem_url] : []}
             tipo={q.tipo_questao}
             alternativas={alternativasView}
             selecionada={selecionada}
+            eliminadas={eliminadas[idx] || []}
             correta={correta}
             revelar={revelar}
             onSelecionar={(letra) => !revelar && setSelecionada(letra)}
-            permitirEliminar={false}
+            permitirEliminar={!revelar}
+            onEliminar={toggleEliminada}
+            anotacoes={anotacoes.get(q.id) ?? []}
+            onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+            onRemoverGrifo={handleRemoverGrifo}
+            onTrocarCorGrifo={handleTrocarCorGrifo}
+            grifarAtivo={true}
           />
         </div>
 
-        {/* Footer fixo */}
         <div className="fixed bottom-0 left-0 right-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
             {!revelar ? (

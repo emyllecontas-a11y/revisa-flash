@@ -39,29 +39,13 @@ export interface ParseResultado {
   erro?: string;
 }
 
-// ============================================================
-// FUNÇÃO PRINCIPAL
-// ============================================================
-export async function extrairQuestoesDePdf(
-  file: File,
-  arquivoNome?: string
-): Promise<ParseResultado> {
+export async function extrairQuestoesDePdf(file: File, arquivoNome?: string): Promise<ParseResultado> {
   try {
     const texto = await extrairTextoBruto(file);
-    if (!texto.trim()) {
-      return {
-        success: false,
-        erro: 'PDF sem texto extraível (pode ser digitalizado / imagem).',
-      };
-    }
+    if (!texto.trim()) return { success: false, erro: 'PDF sem texto extraível.' };
     const nome = arquivoNome || file.name || 'importado.pdf';
     const questoes = parseTexto(texto, nome);
-    if (questoes.length === 0) {
-      return {
-        success: false,
-        erro: 'Nenhuma questão identificada. Verifique se o PDF tem a estrutura esperada.',
-      };
-    }
+    if (questoes.length === 0) return { success: false, erro: 'Nenhuma questão identificada.' };
     return { success: true, questoes };
   } catch (e: any) {
     console.error('[pdfBancoParser] Erro:', e);
@@ -69,29 +53,20 @@ export async function extrairQuestoesDePdf(
   }
 }
 
-// ============================================================
-// DEBUG — retorna o texto cru extraído do PDF
-// ============================================================
 export async function extrairTextoBruto(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
-
   const paginas: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    paginas.push(`===== Page ${i} =====\n${reconstruirTexto(content)}`);
+    paginas.push(reconstruirTexto(content));
   }
   return paginas.join('\n\n');
 }
 
-// ============================================================
-// RECONSTRUÇÃO DO TEXTO
-// ============================================================
 function reconstruirTexto(content: any): string {
-  const items: any[] = (content.items || []).filter(
-    (it: any) => typeof it.str === 'string' && it.str.length > 0
-  );
+  const items: any[] = (content.items || []).filter((it: any) => typeof it.str === 'string' && it.str.length > 0);
   if (items.length === 0) return '';
 
   const Y_TOL = 3;
@@ -112,42 +87,31 @@ function reconstruirTexto(content: any): string {
   linhas.sort((a, b) => b.y - a.y);
   for (const l of linhas) l.items.sort((a, b) => a.x - b.x);
 
-  return linhas
-    .map((l) => {
+  return linhas.map((l) => {
       let out = '';
       let prevX = -Infinity;
       let prevW = 0;
       for (const item of l.items) {
         const gap = item.x - (prevX + prevW);
-        const precisaEspaco =
-          out.length > 0 &&
-          gap > 1.5 &&
-          !/\s$/.test(out) &&
-          !/^\s/.test(item.str);
+        const precisaEspaco = out.length > 0 && gap > 1.5 && !/\s$/.test(out) && !/^\s/.test(item.str);
         if (precisaEspaco) out += ' ';
         out += item.str;
         prevX = item.x;
         prevW = item.w;
       }
       return out;
-    })
-    .join('\n');
+    }).join('\n');
 }
 
-// ============================================================
-// PARSING
-// ============================================================
 function parseTexto(textoOriginal: string, arquivoNome: string): QuestaoParsed[] {
   let limpo = limparTexto(textoOriginal);
-
-  // Conserta URLs quebradas por espaços/quebras que o pdfjs introduz
-  limpo = limpo
-    .replace(/(www\.tecconcursos\.com\.br)\s*\/\s*questoes\s*\/\s*(\d+)/g, '$1/questoes/$2')
-    .replace(/(www\.tecconcursos\.com\.br)\s*\n\s*(\/questoes)/g, '$1$2');
+  // Limpa resíduos de página em qualquer lugar do texto
+  limpo = limpo.replace(/===== Page \d+ =====/gi, '');
+  
+  limpo = limpo.replace(/(www\.tecconcursos\.com\.br)\s*\/\s*questoes\s*\/\s*(\d+)/g, '$1/questoes/$2')
+               .replace(/(www\.tecconcursos\.com\.br)\s*\n\s*(\/questoes)/g, '$1$2');
 
   const questoes: QuestaoParsed[] = [];
-
-  // Tenta por URL primeiro
   const urlRegex = /www\.tecconcursos\.com\.br\/questoes\/(\d+)/g;
   const matches = [...limpo.matchAll(urlRegex)];
 
@@ -164,7 +128,6 @@ function parseTexto(textoOriginal: string, arquivoNome: string): QuestaoParsed[]
     if (questoes.length > 0) return questoes;
   }
 
-  // Fallback: divide por "N)" no início de linha
   const partes = limpo.split(/\n(?=\d+\)\s)/);
   for (const p of partes) {
     const q = parseQuestao(p.trim(), null, arquivoNome);
@@ -173,7 +136,6 @@ function parseTexto(textoOriginal: string, arquivoNome: string): QuestaoParsed[]
   return questoes;
 }
 
-// Utilitário para quebrar a hierarquia (Disciplina - Matéria - Assunto)
 function parseHierarquia(str: string) {
   const partes = str.split(/\s+-\s+/);
   return {
@@ -183,22 +145,14 @@ function parseHierarquia(str: string) {
   };
 }
 
-function parseQuestao(
-  corpo: string,
-  urlOrigem: string | null,
-  arquivoNome: string
-): QuestaoParsed | null {
+function parseQuestao(corpo: string, urlOrigem: string | null, arquivoNome: string): QuestaoParsed | null {
   const linhas = corpo.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
   if (linhas.length === 0) return null;
-
   const warnings: string[] = [];
-
-  // Pula linhas de "ruído" (cabeçalho/rodapé)
   let primeira = 0;
   while (primeira < linhas.length && isNoise(linhas[primeira])) primeira++;
   if (primeira >= linhas.length) return null;
 
-  // Metadados na primeira linha "válida"
   const meta = parseMetadata(linhas[primeira]);
   if (!meta) return null;
 
@@ -207,7 +161,6 @@ function parseQuestao(
   let assunto = meta.assunto;
   let subassunto = meta.subassunto;
 
-  // FGV: disciplina/matéria/assunto em linha separada (ex: "Odontologia - Endodontia - Anatomia...")
   if (!disciplina && prox < linhas.length) {
     if (linhas[prox].includes(' - ')) {
       const hier = parseHierarquia(linhas[prox]);
@@ -216,7 +169,6 @@ function parseQuestao(
       subassunto = hier.subassunto;
       prox++;
     } else {
-      // Apenas o nome da disciplina numa linha solta
       disciplina = linhas[prox].trim();
       prox++;
     }
@@ -228,38 +180,19 @@ function parseQuestao(
   }
 
   const corpoQuestao = linhas.slice(prox).join('\n');
-  return parseCorpo(corpoQuestao, {
-    banca: meta.banca,
-    ano: meta.ano,
-    concurso: meta.concurso,
-    cargo: meta.cargo,
-    disciplina,
-    assunto,
-    subassunto,
-    urlOrigem,
-    arquivoNome,
-    warnings,
-  });
+  return parseCorpo(corpoQuestao, { banca: meta.banca, ano: meta.ano, concurso: meta.concurso, cargo: meta.cargo, disciplina, assunto, subassunto, urlOrigem, arquivoNome, warnings });
 }
 
 function isNoise(linha: string): boolean {
   if (!linha.trim()) return true;
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(linha)) return true; // data no topo
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(linha)) return true;
   if (/Caderno\s+\w+/i.test(linha) && linha.length < 60) return true;
   if (/^teconcursos$/i.test(linha.trim())) return true;
   if (/^Ordenação\s*:/i.test(linha)) return true;
   return false;
 }
 
-function parseMetadata(linha: string): {
-  banca: string;
-  ano: number | null;
-  concurso: string | null;
-  cargo: string | null;
-  disciplina: string;
-  assunto: string | null;
-  subassunto: string | null;
-} | null {
+function parseMetadata(linha: string): any | null {
   const m = linha.match(/^([A-ZÀ-Ú][A-Z0-9À-Ú\s\(\)\.\-]{1,50}?)\s+-\s+(.+)$/);
   if (!m) return null;
   const banca = m[1].trim();
@@ -270,74 +203,39 @@ function parseMetadata(linha: string): {
   const ultimo = segs[segs.length - 1] || '';
 
   const anoOnly = ultimo.match(/^(\d{4})$/);
-  if (anoOnly) {
-    return { banca, ano: parseInt(anoOnly[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
-  }
+  if (anoOnly) return { banca, ano: parseInt(anoOnly[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
 
   const anoDisc = ultimo.match(/^(\d{4})\s+(.+)$/);
   if (anoDisc) {
     const hier = parseHierarquia(anoDisc[2]);
-    return {
-      banca,
-      ano: parseInt(anoDisc[1], 10),
-      concurso,
-      cargo,
-      disciplina: hier.disciplina,
-      assunto: hier.assunto,
-      subassunto: hier.subassunto,
-    };
+    return { banca, ano: parseInt(anoDisc[1], 10), concurso, cargo, disciplina: hier.disciplina, assunto: hier.assunto, subassunto: hier.subassunto };
   }
 
   for (const s of segs) {
     const mm = s.match(/\b(\d{4})\b/);
-    if (mm) {
-      return { banca, ano: parseInt(mm[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
-    }
+    if (mm) return { banca, ano: parseInt(mm[1], 10), concurso, cargo, disciplina: '', assunto: null, subassunto: null };
   }
   return { banca, ano: null, concurso, cargo, disciplina: '', assunto: null, subassunto: null };
 }
 
-function parseCorpo(
-  corpo: string,
-  base: {
-    banca: string;
-    ano: number | null;
-    concurso: string | null;
-    cargo: string | null;
-    disciplina: string;
-    assunto: string | null;
-    subassunto: string | null;
-    urlOrigem: string | null;
-    arquivoNome: string;
-    warnings: string[];
-  }
-): QuestaoParsed | null {
+function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
   const linhas = corpo.split('\n');
-
   let gabIdx = -1;
   let gabRaw: string | null = null;
   for (let i = linhas.length - 1; i >= 0; i--) {
     const m = linhas[i].match(/^Gabarito\s*:\s*(.+)$/i);
-    if (m) {
-      gabIdx = i;
-      gabRaw = m[1].trim();
-      break;
-    }
+    if (m) { gabIdx = i; gabRaw = m[1].trim(); break; }
   }
 
   const antesG = (gabIdx >= 0 ? linhas.slice(0, gabIdx) : linhas).join('\n').trim();
   const depoisG = gabIdx >= 0 ? linhas.slice(gabIdx + 1).join('\n').trim() : '';
-
   const numM = antesG.match(/^\s*(\d+)\s*\)\s+/);
   const numero = numM ? parseInt(numM[1], 10) : null;
   const textoQ = numM ? antesG.substring(numM[0].length) : antesG;
   if (!textoQ.trim()) return null;
 
   const tipo = detectarTipo(textoQ);
-  if (!tipo) {
-    base.warnings.push('Tipo não identificado');
-    return null;
-  }
+  if (!tipo) { base.warnings.push('Tipo não identificado'); return null; }
 
   let enunciado: string;
   let alternativas: AlternativaParsed[] | null = null;
@@ -346,78 +244,40 @@ function parseCorpo(
 
   if (tipo === 'multipla_escolha') {
     const alts = extrairAlternativasMC(textoQ);
-    if (!alts || alts.length < 2) {
-      base.warnings.push('Alternativas não identificadas');
-      return null;
-    }
+    if (!alts || alts.length < 2) { base.warnings.push('Alternativas não identificadas'); return null; }
     enunciado = textoQ.substring(0, alts[0].posicao).trim();
 
     if (gabRaw) {
-      if (gabRaw.startsWith('[')) {
-        // Marcadores do Claude quando não conseguiu ler o gabarito
-        base.warnings.push(`Gabarito ${gabRaw}`);
-      } else {
+      if (gabRaw.startsWith('[')) base.warnings.push(`Gabarito ${gabRaw}`);
+      else {
         const g = gabRaw.toUpperCase().charAt(0);
         if (/^[A-E]$/.test(g)) gabaritoLetra = g;
         else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
       }
-    } else {
-      base.warnings.push('Sem gabarito');
-    }
-    alternativas = alts.map((a) => ({
-      letra: a.letra,
-      texto: a.texto,
-      correta: gabaritoLetra === a.letra.toUpperCase(),
-    }));
+    } else { base.warnings.push('Sem gabarito'); }
+    alternativas = alts.map((a) => ({ letra: a.letra, texto: a.texto, correta: gabaritoLetra === a.letra.toUpperCase() }));
   } else {
     const cePattern = /(?:^|\n)\s*Certo\s+Errado\s*[\.\?!]?\s*(?:\n|$)/gi;
     enunciado = textoQ.replace(cePattern, '\n').replace(/\n{3,}/g, '\n\n').trim();
     if (gabRaw) {
-      if (gabRaw.startsWith('[')) {
-        base.warnings.push(`Gabarito ${gabRaw}`);
-      } else {
+      if (gabRaw.startsWith('[')) base.warnings.push(`Gabarito ${gabRaw}`);
+      else {
         const g = gabRaw.toLowerCase().trim();
         if (g === 'certo' || g === 'c') gabaritoCe = true;
         else if (g === 'errado' || g === 'e') gabaritoCe = false;
         else base.warnings.push(`Gabarito "${gabRaw}" não reconhecido`);
       }
-    } else {
-      base.warnings.push('Sem gabarito');
-    }
+    } else { base.warnings.push('Sem gabarito'); }
   }
 
-  if (enunciado.length < 20) base.warnings.push('Enunciado muito curto');
-
-  const comentario = depoisG || null;
-  const hash = hashQuestao({
-    banca: base.banca,
-    ano: base.ano,
-    enunciado,
-    alternativas,
-    gabarito_letra: gabaritoLetra,
-    gabarito_ce: gabaritoCe,
-  });
+  const hash = hashQuestao({ banca: base.banca, ano: base.ano, enunciado, alternativas, gabarito_letra: gabaritoLetra, gabarito_ce: gabaritoCe });
 
   return {
-    banca: base.banca,
-    ano: base.ano,
-    concurso: base.concurso,
-    cargo: base.cargo,
-    disciplina: base.disciplina,
-    assunto: base.assunto,
-    subassunto: base.subassunto,
-    tipo_questao: tipo,
-    enunciado,
-    alternativas,
-    gabarito_letra: gabaritoLetra,
-    gabarito_ce: gabaritoCe,
-    comentario,
-    imagem_url: null,
-    hash_dedup: hash,
-    url_origem: base.urlOrigem,
-    arquivo_origem: base.arquivoNome,
-    __numero: numero,
-    __warnings: base.warnings,
+    banca: base.banca, ano: base.ano, concurso: base.concurso, cargo: base.cargo,
+    disciplina: base.disciplina, assunto: base.assunto, subassunto: base.subassunto,
+    tipo_questao: tipo, enunciado, alternativas, gabarito_letra: gabaritoLetra, gabarito_ce: gabaritoCe,
+    comentario: depoisG || null, imagem_url: null, hash_dedup: hash, url_origem: base.urlOrigem, arquivo_origem: base.arquivoNome,
+    __numero: numero, __warnings: base.warnings,
   };
 }
 
@@ -432,19 +292,12 @@ function detectarTipo(texto: string): 'multipla_escolha' | 'certo_errado' | null
   return null;
 }
 
-function extrairAlternativasMC(
-  texto: string
-): { letra: string; texto: string; posicao: number }[] | null {
-  // Aceita "a) texto" e "a)texto" (com ou sem espaço depois do parêntese).
+function extrairAlternativasMC(texto: string): { letra: string; texto: string; posicao: number }[] | null {
   const regex = /(?:^|\s|\n)([a-eA-E])\)\s*/g;
   const matches: { letra: string; inicioTexto: number; posicao: number }[] = [];
   let m;
   while ((m = regex.exec(texto)) !== null) {
-    matches.push({
-      letra: m[1].toLowerCase(),
-      inicioTexto: m.index + m[0].length,
-      posicao: m.index,
-    });
+    matches.push({ letra: m[1].toLowerCase(), inicioTexto: m.index + m[0].length, posicao: m.index });
   }
   if (matches.length < 2) return null;
 
@@ -453,34 +306,15 @@ function extrairAlternativasMC(
     const atual = matches[i];
     const prox = i < matches.length - 1 ? matches[i + 1] : null;
     const fim = prox ? prox.posicao : texto.length;
-    let t = texto.substring(atual.inicioTexto, fim).trim();
-    t = t.replace(/\s+$/, '').replace(/\n+/g, ' ');
+    let t = texto.substring(atual.inicioTexto, fim).trim().replace(/\s+$/, '').replace(/\n+/g, ' ');
     if (t.length > 0) alts.push({ letra: atual.letra, texto: t, posicao: atual.posicao });
   }
   return alts.length >= 2 ? alts : null;
 }
 
-function hashQuestao(q: {
-  banca: string;
-  ano: number | null;
-  enunciado: string;
-  alternativas: AlternativaParsed[] | null;
-  gabarito_letra: string | null;
-  gabarito_ce: boolean | null;
-}): string {
+function hashQuestao(q: any): string {
   const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
-  const partes = [
-    norm(q.banca),
-    q.ano?.toString() || '',
-    norm(q.enunciado),
-    (q.alternativas || [])
-      .slice()
-      .sort((a, b) => a.letra.localeCompare(b.letra))
-      .map((a) => `${a.letra}:${norm(a.texto)}`)
-      .join('|'),
-    q.gabarito_letra?.toUpperCase() || '',
-    q.gabarito_ce === null ? '' : q.gabarito_ce ? 'C' : 'E',
-  ];
+  const partes = [norm(q.banca), q.ano?.toString() || '', norm(q.enunciado), (q.alternativas || []).slice().sort((a: any, b: any) => a.letra.localeCompare(b.letra)).map((a: any) => `${a.letra}:${norm(a.texto)}`).join('|'), q.gabarito_letra?.toUpperCase() || '', q.gabarito_ce === null ? '' : q.gabarito_ce ? 'C' : 'E'];
   return fnv1a64(partes.join('§'));
 }
 
@@ -495,9 +329,6 @@ function fnv1a64(s: string): string {
   return hash.toString(16).padStart(16, '0');
 }
 
-// ============================================================
-// LIMPEZA E FILTROS
-// ============================================================
 function limparTexto(s: string): string {
   return s
     .replace(/\r\n/g, '\n')
@@ -506,7 +337,7 @@ function limparTexto(s: string): string {
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .split('\n')
-    .filter((line) => !isFontTestLine(line))
+    .filter((line) => !isFontTestLine(line) && !/^===== Page \d+ =====$/i.test(line.trim()))
     .join('\n')
     .trim();
 }
