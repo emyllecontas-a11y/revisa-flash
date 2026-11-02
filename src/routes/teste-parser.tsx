@@ -7,10 +7,6 @@ import {
   extrairTextoBruto,
   type QuestaoParsed,
 } from '@/services/pdfBancoParser';
-import {
-  extrairTextoViaOCR,
-  type OcrProgresso,
-} from '@/services/ocrPdfService';
 import { importarQuestoesNoBanco } from '@/services/bancoQuestoesService';
 
 export default function TesteParserPage() {
@@ -18,16 +14,11 @@ export default function TesteParserPage() {
 
   const [resultado, setResultado] = useState<QuestaoParsed[] | null>(null);
   const [textoBruto, setTextoBruto] = useState<string | null>(null);
-  const [textoOcr, setTextoOcr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingOcr, setLoadingOcr] = useState(false);
   const [loadingSalvar, setLoadingSalvar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [erroOcr, setErroOcr] = useState<string | null>(null);
   const [nome, setNome] = useState('');
   const [fileRef, setFileRef] = useState<File | null>(null);
-  const [progressoOcr, setProgressoOcr] = useState<OcrProgresso | null>(null);
-  const [ocrApenasPagina1, setOcrApenasPagina1] = useState(true);
 
   const [resultadoSalvar, setResultadoSalvar] = useState<{
     novas: number;
@@ -41,10 +32,7 @@ export default function TesteParserPage() {
     setNome(file.name);
     setResultado(null);
     setTextoBruto(null);
-    setTextoOcr(null);
     setErro(null);
-    setErroOcr(null);
-    setProgressoOcr(null);
     setResultadoSalvar(null);
     setErroSalvar(null);
   };
@@ -77,27 +65,6 @@ export default function TesteParserPage() {
       setErro(e?.message || 'Erro');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleOcr = async () => {
-    if (!fileRef) return;
-    setLoadingOcr(true);
-    setErroOcr(null);
-    setTextoOcr(null);
-    try {
-      const res = await extrairTextoViaOCR(
-        fileRef,
-        (p) => setProgressoOcr(p),
-        ocrApenasPagina1 ? 1 : undefined
-      );
-      if (res.success && res.texto) setTextoOcr(res.texto);
-      else setErroOcr(res.erro || 'Erro desconhecido');
-    } catch (e: any) {
-      setErroOcr(e?.message || 'Erro');
-    } finally {
-      setLoadingOcr(false);
-      setProgressoOcr(null);
     }
   };
 
@@ -142,47 +109,22 @@ export default function TesteParserPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleExtrair}
-                disabled={loading || loadingOcr || loadingSalvar}
+                disabled={loading || loadingSalvar}
                 className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
               >
                 Extrair questões (texto)
               </button>
               <button
                 onClick={handleVerTexto}
-                disabled={loading || loadingOcr || loadingSalvar}
+                disabled={loading || loadingSalvar}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground/70 hover:bg-surface-2 disabled:opacity-50"
               >
                 Ver texto bruto
               </button>
-              <button
-                onClick={handleOcr}
-                disabled={loading || loadingOcr || loadingSalvar}
-                className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-50"
-              >
-                {loadingOcr ? 'Processando OCR...' : 'Extrair via OCR'}
-              </button>
-              <label className="inline-flex items-center gap-1 text-xs text-foreground/60">
-                <input
-                  type="checkbox"
-                  checked={ocrApenasPagina1}
-                  onChange={(e) => setOcrApenasPagina1(e.target.checked)}
-                />
-                Só página 1
-              </label>
             </div>
           )}
           {loading && <p className="text-sm text-foreground/60">Processando texto...</p>}
           {erro && <p className="text-sm text-destructive">{erro}</p>}
-          {progressoOcr && (
-            <div className="rounded-lg border border-primary/30 bg-primary/10 p-2 text-xs text-primary">
-              {progressoOcr.textoParcial ||
-                `Página ${progressoOcr.pagina} de ${progressoOcr.total} — ${progressoOcr.etapa}`}
-            </div>
-          )}
-          {loadingOcr && !progressoOcr && (
-            <p className="text-sm text-foreground/60">Iniciando OCR...</p>
-          )}
-          {erroOcr && <p className="text-sm text-destructive">{erroOcr}</p>}
         </div>
 
         {textoBruto && (
@@ -202,28 +144,6 @@ export default function TesteParserPage() {
               readOnly
               value={textoBruto}
               rows={12}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-[11px] text-foreground/80"
-            />
-          </div>
-        )}
-
-        {textoOcr && (
-          <div className="rf-card p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">
-                Texto extraído via OCR de <span className="text-primary">{nome}</span>
-              </h2>
-              <button
-                onClick={() => navigator.clipboard.writeText(textoOcr).catch(() => {})}
-                className="rounded-full border border-border bg-surface px-3 py-1.5 text-[11px] font-medium text-foreground/70 hover:bg-surface-2"
-              >
-                Copiar
-              </button>
-            </div>
-            <textarea
-              readOnly
-              value={textoOcr}
-              rows={20}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-[11px] text-foreground/80"
             />
           </div>

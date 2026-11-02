@@ -15,6 +15,7 @@ import {
 } from "@/services/simuladoService";
 import { useStudy } from "@/contexts/StudyContext";
 import { ListasTab } from "@/components/ListasTab";
+import { BancoQuestoesTab } from "@/components/BancoQuestoesTab";
 import { RevisarImportacaoPdfModal } from "@/components/RevisarImportacaoPdfModal";
 import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
@@ -46,11 +47,13 @@ export default function SimuladosPage() {
     // A aba ativa é lida/escrita na URL (?tab=listas). Sem parâmetro → "simulados".
   // Isso permite que "voltar" para uma lista reabra a aba correta.
   const [searchParams, setSearchParams] = useSearchParams();
-  const mainTab: 'simulados' | 'listas' =
-    searchParams.get('tab') === 'listas' ? 'listas' : 'simulados';
-  const trocarTab = (nova: 'simulados' | 'listas') => {
+  const mainTab: 'simulados' | 'listas' | 'banco' =
+    searchParams.get('tab') === 'listas' ? 'listas'
+    : searchParams.get('tab') === 'banco' ? 'banco'
+    : 'simulados';
+  const trocarTab = (nova: 'simulados' | 'listas' | 'banco') => {
     if (nova === 'simulados') setSearchParams({}, { replace: true });
-    else setSearchParams({ tab: 'listas' }, { replace: true });
+    else setSearchParams({ tab: nova }, { replace: true });
   };
 
   const [simulados, setSimulados] = useState<Simulado[]>([]);
@@ -495,6 +498,16 @@ export default function SimuladosPage() {
         >
           Listas
         </button>
+        <button
+          onClick={() => trocarTab('banco')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+            mainTab === 'banco'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-foreground/50 hover:text-foreground'
+          }`}
+        >
+          Banco de Questões
+        </button>
       </div>
 
       {mainTab === 'simulados' ? (
@@ -735,8 +748,10 @@ export default function SimuladosPage() {
             )}
           </>
         )
-      ) : (
+      ) : mainTab === 'listas' ? (
         <ListasTab />
+      ) : (
+        <BancoQuestoesTab />
       )}
 
       {isImportModalOpen && (
