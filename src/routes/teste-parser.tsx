@@ -1,25 +1,40 @@
 // src/routes/teste-parser.tsx
 import { useState } from 'react';
 import { AppShell } from '@/components/app-shell';
+import { useAppUser } from '@/contexts/UserContext';
 import {
   extrairQuestoesDePdf,
   extrairTextoBruto,
   type QuestaoParsed,
 } from '@/services/pdfBancoParser';
-import { extrairTextoViaOCR, type OcrProgresso } from '@/services/ocrPdfService';
+import {
+  extrairTextoViaOCR,
+  type OcrProgresso,
+} from '@/services/ocrPdfService';
+import { importarQuestoesNoBanco } from '@/services/bancoQuestoesService';
 
 export default function TesteParserPage() {
+  const { user } = useAppUser();
+
   const [resultado, setResultado] = useState<QuestaoParsed[] | null>(null);
   const [textoBruto, setTextoBruto] = useState<string | null>(null);
   const [textoOcr, setTextoOcr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingOcr, setLoadingOcr] = useState(false);
+  const [loadingSalvar, setLoadingSalvar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [erroOcr, setErroOcr] = useState<string | null>(null);
   const [nome, setNome] = useState('');
   const [fileRef, setFileRef] = useState<File | null>(null);
   const [progressoOcr, setProgressoOcr] = useState<OcrProgresso | null>(null);
   const [ocrApenasPagina1, setOcrApenasPagina1] = useState(true);
+
+  const [resultadoSalvar, setResultadoSalvar] = useState<{
+    novas: number;
+    jaExistentes: number;
+    erros: number;
+  } | null>(null);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
 
   const onSelect = (file: File) => {
     setFileRef(file);
@@ -30,12 +45,16 @@ export default function TesteParserPage() {
     setErro(null);
     setErroOcr(null);
     setProgressoOcr(null);
+    setResultadoSalvar(null);
+    setErroSalvar(null);
   };
 
   const handleExtrair = async () => {
     if (!fileRef) return;
     setLoading(true);
     setErro(null);
+    setResultadoSalvar(null);
+    setErroSalvar(null);
     try {
       const res = await extrairQuestoesDePdf(fileRef);
       if (res.success && res.questoes) setResultado(res.questoes);
@@ -82,6 +101,29 @@ export default function TesteParserPage() {
     }
   };
 
+  const handleSalvar = async () => {
+    if (!resultado || !user?.id) return;
+    setLoadingSalvar(true);
+    setErroSalvar(null);
+    setResultadoSalvar(null);
+    try {
+      const res = await importarQuestoesNoBanco(resultado, user.id);
+      if (res.success) {
+        setResultadoSalvar({
+          novas: res.novas,
+          jaExistentes: res.jaExistentes,
+          erros: res.erros,
+        });
+      } else {
+        setErroSalvar(res.error || 'Erro ao salvar.');
+      }
+    } catch (e: any) {
+      setErroSalvar(e?.message || 'Erro');
+    } finally {
+      setLoadingSalvar(false);
+    }
+  };
+
   return (
     <AppShell breadcrumb="Teste" title="Teste do Parser de PDF">
       <div className="mx-auto max-w-4xl space-y-4">
@@ -100,21 +142,21 @@ export default function TesteParserPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleExtrair}
-                disabled={loading || loadingOcr}
+                disabled={loading || loadingOcr || loadingSalvar}
                 className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
               >
                 Extrair questões (texto)
               </button>
               <button
                 onClick={handleVerTexto}
-                disabled={loading || loadingOcr}
+                disabled={loading || loadingOcr || loadingSalvar}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground/70 hover:bg-surface-2 disabled:opacity-50"
               >
                 Ver texto bruto
               </button>
               <button
                 onClick={handleOcr}
-                disabled={loading || loadingOcr}
+                disabled={loading || loadingOcr || loadingSalvar}
                 className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-50"
               >
                 {loadingOcr ? 'Processando OCR...' : 'Extrair via OCR'}
@@ -125,7 +167,7 @@ export default function TesteParserPage() {
                   checked={ocrApenasPagina1}
                   onChange={(e) => setOcrApenasPagina1(e.target.checked)}
                 />
-                Só página 1 (mais rápido)
+                Só página 1
               </label>
             </div>
           )}
@@ -178,9 +220,6 @@ export default function TesteParserPage() {
                 Copiar
               </button>
             </div>
-            <p className="text-xs text-foreground/50">
-              Copie este texto e cole na conversa para eu avaliar a qualidade do OCR.
-            </p>
             <textarea
               readOnly
               value={textoOcr}
@@ -191,10 +230,38 @@ export default function TesteParserPage() {
         )}
 
         {resultado && (
-          <div className="rf-card p-4">
-            <h2 className="text-sm font-semibold mb-3">
-              {resultado.length} questão(ões) em <span className="text-primary">{nome}</span>
-            </h2>
+          <div className="rf-card p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-sm font-semibold">
+                {resultado.length} questão(ões) em <span className="text-primary">{nome}</span>
+              </h2>
+              <button
+                onClick={handleSalvar}
+                disabled={loadingSalvar || !user?.id}
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {loadingSalvar ? 'Salvando...' : 'Salvar no banco'}
+              </button>
+            </div>
+
+            {resultadoSalvar && (
+              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-primary">
+                <b>Salvo com sucesso.</b> {resultadoSalvar.novas} nova(s),{' '}
+                {resultadoSalvar.jaExistentes} já existente(s),{' '}
+                {resultadoSalvar.erros} erro(s).
+                {resultadoSalvar.novas === 0 && resultadoSalvar.jaExistentes > 0 && (
+                  <p className="mt-1 text-foreground/60">
+                    Todas já estavam no banco (dedup por hash funcionou).
+                  </p>
+                )}
+              </div>
+            )}
+            {erroSalvar && (
+              <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {erroSalvar}
+              </p>
+            )}
+
             <div className="space-y-2">
               {resultado.map((q, i) => (
                 <details key={i} className="rounded-lg border border-border bg-surface/40 p-3">
