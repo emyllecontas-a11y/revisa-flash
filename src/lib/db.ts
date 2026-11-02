@@ -1183,6 +1183,14 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           .gte('updated_at', pullFrom);
         if (queryError) { console.error(`❌ Pull ${name}:`, queryError); houveErro = true; continue; }
         supabaseData = data || [];
+      } else if (name === 'banco_questoes') {
+        // Puxa TODAS as questões do banco global
+        const { data, error: queryError } = await supabaseClient
+          .from('banco_questoes')
+          .select('*')
+          .gte('updated_at', pullFrom);
+        if (queryError) { console.error(`❌ Pull ${name}:`, queryError); houveErro = true; continue; }
+        supabaseData = data || [];
       } else {
         const { data, error: queryError } = await supabaseClient
           .from(name)

@@ -60,8 +60,9 @@ export async function importarQuestoesNoBanco(
 
     for (const q of questoes) {
       try {
+        // AGORA VERIFICA O HASH GLOBAL (SEM FILTRO DE user_id) PARA NÃO DUPLICAR NO BANCO TODO
         const existente = await db.banco_questoes.findOne({
-          selector: { user_id: userId, hash_dedup: q.hash_dedup, isdeleted: false },
+          selector: { hash_dedup: q.hash_dedup, isdeleted: false },
         }).exec();
 
         if (existente) {
@@ -71,7 +72,7 @@ export async function importarQuestoesNoBanco(
 
         const nova: QuestaoBanco = {
           id: crypto.randomUUID(),
-          user_id: userId,
+          user_id: userId, // Continua salvando quem criou a questão
           banca: q.banca,
           ano: q.ano,
           concurso: q.concurso,
@@ -122,11 +123,11 @@ export async function getQuestoesDoBanco(
     busca?: string;
   }
 ): Promise<{ success: boolean; data?: QuestaoBanco[]; error?: string }> {
-  if (!userId) return { success: false, error: 'Usuário não autenticado.' };
-
+  // Não precisa de userId aqui para ler, mas mantemos na assinatura para não quebrar a UI
   try {
     const db = await getDb();
-    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
+    // REMOVIDO O FILTRO user_id PARA LER TUDO
+    const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     let data: QuestaoBanco[] = docs.map((d: any) => d.toJSON() as QuestaoBanco);
 
     if (filtros?.banca) data = data.filter((q) => q.banca === filtros.banca);
@@ -153,10 +154,10 @@ export async function getEstatisticasBanco(
   data?: { total: number; porBanca: Record<string, number>; porDisciplina: Record<string, number>; porAno: Record<number, number>; porTipo: Record<string, number> };
   error?: string;
 }> {
-  if (!userId) return { success: false, error: 'Usuário não autenticado.' };
   try {
     const db = await getDb();
-    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
+    // REMOVIDO O FILTRO user_id PARA LER TUDO
+    const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     const porBanca: Record<string, number> = {};
     const porDisciplina: Record<string, number> = {};
     const porAno: Record<number, number> = {};
@@ -181,7 +182,8 @@ export async function excluirQuestaoDoBanco(questaoId: string, userId: string): 
   try {
     const db = await getDb();
     const doc = await db.banco_questoes.findOne({ selector: { id: questaoId } }).exec();
-    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Questão não encontrada.' };
+    // Só pode excluir se for o dono
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Você só pode excluir questões que você mesmo criou.' };
 
     const agora = nowIso();
     await doc.patch({ isdeleted: true, updated_at: agora });
@@ -205,7 +207,7 @@ export async function salvarTentativaAvulsa(
     const agora = nowIso();
     const tentativa = {
       id: crypto.randomUUID(),
-      user_id: userId,
+      user_id: userId, // As tentativas continuam privadas
       questao_banco_id: questaoId,
       resposta,
       acertou,
@@ -224,19 +226,23 @@ export async function salvarTentativaAvulsa(
   }
 }
 
-// NOVA FUNÇÃO: Limpa duplicatas locais baseadas no hash_dedup
 export async function limparDuplicatasLocais(userId: string): Promise<void> {
   try {
     const db = await getDb();
-    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
+    // Busca todas para checar duplicatas globais
+    const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     
     const vistos = new Set<string>();
     for (const doc of docs) {
       const hash = doc.get('hash_dedup');
       if (vistos.has(hash)) {
-        const agora = nowIso();
-        await doc.patch({ isdeleted: true, updated_at: agora });
-        await enqueueOperation('update', 'banco_questoes', { id: doc.get('id'), isdeleted: true, updated_at: agora });
+        // Se for duplicada e for MINHA, posso deletar para limpar o banco
+        if (doc.get('user_id') === userId) {
+          const agora = nowIso();
+          await doc.patch({ isdeleted: true, updated_at: agora });
+          await enqueueOperation('update', 'banco_questoes', { id: doc.get('id'), isdeleted: true, updated_at: agora });
+        }
+        // Se for de outra pessoa, eu não faço nada (o RLS do Supabase impediria a edição)
       } else {
         vistos.add(hash);
       }
