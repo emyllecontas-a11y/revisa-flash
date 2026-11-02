@@ -1,5 +1,4 @@
 // src/services/pdfBancoParser.ts
-// Parser de PDFs exportados do TEC Concursos.
 import { pdfjs } from 'react-pdf';
 import { setupPdfWorker } from '@/lib/pdfWorker';
 
@@ -31,6 +30,7 @@ export interface QuestaoParsed {
   arquivo_origem: string | null;
   __numero: number | null;
   __warnings: string[];
+  __nome_imagem: string | null;
 }
 
 export interface ParseResultado {
@@ -105,7 +105,6 @@ function reconstruirTexto(content: any): string {
 
 function parseTexto(textoOriginal: string, arquivoNome: string): QuestaoParsed[] {
   let limpo = limparTexto(textoOriginal);
-  // Limpa resíduos de página em qualquer lugar do texto
   limpo = limpo.replace(/===== Page \d+ =====/gi, '');
   
   limpo = limpo.replace(/(www\.tecconcursos\.com\.br)\s*\/\s*questoes\s*\/\s*(\d+)/g, '$1/questoes/$2')
@@ -193,7 +192,8 @@ function isNoise(linha: string): boolean {
 }
 
 function parseMetadata(linha: string): any | null {
-  const m = linha.match(/^([A-ZÀ-Ú][A-Z0-9À-Ú\s\(\)\.\-]{1,50}?)\s+-\s+(.+)$/);
+  // REGEX MAIS PERMISSIVO PARA ACEITAR BANCAS COM CARACTERES ESPECIAIS (&, etc)
+  const m = linha.match(/^(.+?)\s+-\s+(.+)$/);
   if (!m) return null;
   const banca = m[1].trim();
   const resto = m[2].trim();
@@ -223,7 +223,8 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
   let gabIdx = -1;
   let gabRaw: string | null = null;
   for (let i = linhas.length - 1; i >= 0; i--) {
-    const m = linhas[i].match(/^Gabarito\s*:\s*(.+)$/i);
+    // REGEX PERMITE O GABARITO NO FINAL DA LINHA
+    const m = linhas[i].match(/Gabarito\s*:\s*([A-E]|Certo|Errado)\b/i);
     if (m) { gabIdx = i; gabRaw = m[1].trim(); break; }
   }
 
@@ -231,8 +232,15 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
   const depoisG = gabIdx >= 0 ? linhas.slice(gabIdx + 1).join('\n').trim() : '';
   const numM = antesG.match(/^\s*(\d+)\s*\)\s+/);
   const numero = numM ? parseInt(numM[1], 10) : null;
-  const textoQ = numM ? antesG.substring(numM[0].length) : antesG;
+  let textoQ = numM ? antesG.substring(numM[0].length) : antesG;
   if (!textoQ.trim()) return null;
+
+  let nome_imagem: string | null = null;
+  const matchImg = textoQ.match(/\[IMAGEM:\s*(.+?)\]/i);
+  if (matchImg) {
+    nome_imagem = matchImg[1].trim();
+    textoQ = textoQ.replace(/\[IMAGEM:\s*(.+?)\]/i, '').trim();
+  }
 
   const tipo = detectarTipo(textoQ);
   if (!tipo) { base.warnings.push('Tipo não identificado'); return null; }
@@ -278,17 +286,19 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
     tipo_questao: tipo, enunciado, alternativas, gabarito_letra: gabaritoLetra, gabarito_ce: gabaritoCe,
     comentario: depoisG || null, imagem_url: null, hash_dedup: hash, url_origem: base.urlOrigem, arquivo_origem: base.arquivoNome,
     __numero: numero, __warnings: base.warnings,
+    __nome_imagem: nome_imagem
   };
 }
 
 function detectarTipo(texto: string): 'multipla_escolha' | 'certo_errado' | null {
-  const ceMatch = /(?:^|\n)\s*Certo\s+Errado\s*[\.\?!]?\s*(?:\n|$)/i.exec(texto);
-  if (ceMatch) {
-    const depois = texto.substring(ceMatch.index + ceMatch[0].length);
-    if (!/[a-e]\)\s+/i.test(depois)) return 'certo_errado';
-  }
+  // PRIMEIRO TENTA ACHAR ALTERNATIVAS (MUITO MAIS SEGURO)
   const alts = extrairAlternativasMC(texto);
   if (alts && alts.length >= 2) return 'multipla_escolha';
+
+  // SE NÃO ACHAR, TENTA CERTO/ERRADO
+  const ceMatch = /(?:^|\n)\s*Certo\s+Errado\s*[\.\?!]?\s*(?:\n|$)/i.exec(texto);
+  if (ceMatch) return 'certo_errado';
+  
   return null;
 }
 
@@ -343,5 +353,5 @@ function limparTexto(s: string): string {
 }
 
 function isFontTestLine(line: string): boolean {
-  return /[¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿]{5,}/.test(line);
+  return /[¡¢£¤¥¦§¨ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿]{5,}/.test(line);
 }
