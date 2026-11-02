@@ -8,7 +8,7 @@ import {
   type QuestaoBanco,
 } from "@/services/bancoQuestoesService";
 import {
-  BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2, Filter
+  BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2
 } from "lucide-react";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
@@ -22,7 +22,7 @@ export function BancoQuestoesTab() {
   const [todasQuestoes, setTodasQuestoes] = useState<QuestaoBanco[]>([]);
   const [stats, setStats] = useState<any>(null);
 
-  // Filtros em cascata (Matéria -> Assunto -> Subassunto)
+  // Filtros em cascata (Disciplina -> Assunto -> Subassunto)
   const [fDisciplina, setFDisciplina] = useState("");
   const [fAssunto, setFAssunto] = useState("");
   const [fSubassunto, setFSubassunto] = useState("");
@@ -68,13 +68,13 @@ export function BancoQuestoesTab() {
   const hierarquia = useMemo(() => {
     const tree: Record<string, Record<string, Set<string>>> = {};
     todasQuestoes.forEach((q) => {
-      const d = q.disciplina || "Sem matéria";
-      const a = q.assunto || "Geral"; // Se a questão não tiver assunto, cai em Geral
-      const s = q.subassunto || "Geral";
+      const disc = q.disciplina || "Sem disciplina";
+      const assunto = q.assunto || "Geral"; 
+      const sub = q.subassunto || "Geral";
       
-      if (!tree[d]) tree[d] = {};
-      if (!tree[d][a]) tree[d][a] = new Set();
-      tree[d][a].add(s);
+      if (!tree[disc]) tree[disc] = {};
+      if (!tree[disc][assunto]) tree[disc][assunto] = new Set();
+      tree[disc][assunto].add(sub);
     });
     return tree;
   }, [todasQuestoes]);
@@ -110,7 +110,7 @@ export function BancoQuestoesTab() {
     const termo = busca.trim().toLowerCase();
     return todasQuestoes.filter((q) => {
       // Filtros em cascata
-      if (fDisciplina && (q.disciplina || "Sem matéria") !== fDisciplina) return false;
+      if (fDisciplina && (q.disciplina || "Sem disciplina") !== fDisciplina) return false;
       if (fAssunto && (q.assunto || "Geral") !== fAssunto) return false;
       if (fSubassunto && (q.subassunto || "Geral") !== fSubassunto) return false;
 
@@ -222,11 +222,11 @@ export function BancoQuestoesTab() {
 
         <hr className="border-border/60" />
 
-        {/* Filtros em Cascata (Matéria -> Assunto -> Subassunto) */}
+        {/* Filtros em Cascata */}
         <div className="space-y-3">
-          {/* Nível 1: Matéria */}
+          {/* Nível 1: Disciplina */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-16">Matéria:</span>
+            <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Disciplina:</span>
             <Chip active={fDisciplina === ""} onClick={() => { setFDisciplina(""); setFAssunto(""); setFSubassunto(""); }}>
               Todas
             </Chip>
@@ -241,12 +241,12 @@ export function BancoQuestoesTab() {
             ))}
           </div>
 
-          {/* Nível 2: Assunto (só aparece se escolheu a matéria) */}
+          {/* Nível 2: Assunto */}
           {fDisciplina && assuntosDisponiveis.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 pl-4 border-l-2 border-primary/20">
-              <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-16">Assunto:</span>
+              <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Assunto:</span>
               <Chip active={fAssunto === ""} onClick={() => { setFAssunto(""); setFSubassunto(""); }}>
-                Todos (Matéria inteira)
+                Todos (Disciplina inteira)
               </Chip>
               {assuntosDisponiveis.map(a => (
                 <Chip 
@@ -260,10 +260,10 @@ export function BancoQuestoesTab() {
             </div>
           )}
 
-          {/* Nível 3: Subassunto (só aparece se escolheu o assunto) */}
+          {/* Nível 3: Subassunto */}
           {fDisciplina && fAssunto && subassuntosDisponiveis.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5 pl-8 border-l-2 border-primary/20">
-              <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-16">Subassunto:</span>
+              <span className="mr-1 text-[11px] uppercase tracking-wider text-foreground/45 w-20">Subassunto:</span>
               <Chip active={fSubassunto === ""} onClick={() => setFSubassunto("")}>
                 Todos (Assunto inteiro)
               </Chip>
@@ -357,7 +357,9 @@ export function BancoQuestoesTab() {
                         {q.ano && <Badge>{q.ano}</Badge>}
                         <Badge className="bg-primary/10 text-primary font-semibold">{q.disciplina}</Badge>
                         {q.assunto && <BadgeSoft>{q.assunto}</BadgeSoft>}
-                        {q.subassunto && <span className="text-[10px] text-foreground/40">› {q.subassunto}</span>}
+                        {q.subassunto && q.subassunto !== "Geral" && (
+                          <span className="text-[10px] text-foreground/40">› {q.subassunto}</span>
+                        )}
                         <Badge
                           className={
                             q.tipo_questao === "certo_errado"
