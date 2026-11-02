@@ -1,7 +1,4 @@
 // src/services/bancoQuestoesService.ts
-// CRUD e importação em lote para o banco de questões.
-// Deduplicação por hash_dedup (único por usuário).
-
 import { getDb } from '@/lib/db';
 import { enqueueOperation } from '@/services/queueService';
 import type { QuestaoParsed } from '@/services/pdfBancoParser';
@@ -45,11 +42,6 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/**
- * Importa um lote de questões no banco.
- * Deduplica por hash_dedup: se já existe (mesmo usuário + mesmo hash + não deletada),
- * pula e conta como "já existente".
- */
 export async function importarQuestoesNoBanco(
   questoes: QuestaoParsed[],
   userId: string
@@ -72,13 +64,8 @@ export async function importarQuestoesNoBanco(
 
     for (const q of questoes) {
       try {
-        // Dedup: busca por hash_dedup + user_id + não deletada
         const existente = await db.banco_questoes.findOne({
-          selector: {
-            user_id: userId,
-            hash_dedup: q.hash_dedup,
-            isdeleted: false,
-          },
+          selector: { user_id: userId, hash_dedup: q.hash_dedup, isdeleted: false },
         }).exec();
 
         if (existente) {
@@ -125,21 +112,10 @@ export async function importarQuestoesNoBanco(
     return { success: true, novas, jaExistentes, erros, idsInseridos };
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao importar lote:', e);
-    return {
-      success: false,
-      novas,
-      jaExistentes,
-      erros,
-      idsInseridos,
-      error: e?.message || 'Erro ao importar.',
-    };
+    return { success: false, novas, jaExistentes, erros, idsInseridos, error: e?.message || 'Erro ao importar.' };
   }
 }
 
-/**
- * Lista questões do banco com filtros opcionais.
- * Ordena por data de importação (mais recente primeiro).
- */
 export async function getQuestoesDoBanco(
   userId: string,
   filtros?: {
@@ -154,31 +130,17 @@ export async function getQuestoesDoBanco(
 
   try {
     const db = await getDb();
-    const docs = await db.banco_questoes.find({
-      selector: { user_id: userId, isdeleted: false },
-    }).exec();
-
+    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
     let data: QuestaoBanco[] = docs.map((d: any) => d.toJSON() as QuestaoBanco);
 
-    if (filtros?.banca) {
-      data = data.filter((q) => q.banca === filtros.banca);
-    }
-    if (filtros?.disciplina) {
-      data = data.filter((q) => q.disciplina === filtros.disciplina);
-    }
-    if (filtros?.ano) {
-      data = data.filter((q) => q.ano === filtros.ano);
-    }
-    if (filtros?.tipo_questao) {
-      data = data.filter((q) => q.tipo_questao === filtros.tipo_questao);
-    }
+    if (filtros?.banca) data = data.filter((q) => q.banca === filtros.banca);
+    if (filtros?.disciplina) data = data.filter((q) => q.disciplina === filtros.disciplina);
+    if (filtros?.ano) data = data.filter((q) => q.ano === filtros.ano);
+    if (filtros?.tipo_questao) data = data.filter((q) => q.tipo_questao === filtros.tipo_questao);
     if (filtros?.busca && filtros.busca.trim()) {
       const termo = filtros.busca.toLowerCase().trim();
       data = data.filter(
-        (q) =>
-          q.enunciado.toLowerCase().includes(termo) ||
-          (q.assunto || '').toLowerCase().includes(termo) ||
-          (q.cargo || '').toLowerCase().includes(termo)
+        (q) => q.enunciado.toLowerCase().includes(termo) || (q.assunto || '').toLowerCase().includes(termo) || (q.cargo || '').toLowerCase().includes(termo)
       );
     }
 
@@ -190,30 +152,18 @@ export async function getQuestoesDoBanco(
   }
 }
 
-/**
- * Contadores para KPIs e chips de filtro.
- */
 export async function getEstatisticasBanco(
   userId: string
 ): Promise<{
   success: boolean;
-  data?: {
-    total: number;
-    porBanca: Record<string, number>;
-    porDisciplina: Record<string, number>;
-    porAno: Record<number, number>;
-    porTipo: Record<string, number>;
-  };
+  data?: { total: number; porBanca: Record<string, number>; porDisciplina: Record<string, number>; porAno: Record<number, number>; porTipo: Record<string, number> };
   error?: string;
 }> {
   if (!userId) return { success: false, error: 'Usuário não autenticado.' };
 
   try {
     const db = await getDb();
-    const docs = await db.banco_questoes.find({
-      selector: { user_id: userId, isdeleted: false },
-    }).exec();
-
+    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
     const porBanca: Record<string, number> = {};
     const porDisciplina: Record<string, number> = {};
     const porAno: Record<number, number> = {};
@@ -227,49 +177,59 @@ export async function getEstatisticasBanco(
       porTipo[q.tipo_questao] = (porTipo[q.tipo_questao] || 0) + 1;
     }
 
-    return {
-      success: true,
-      data: {
-        total: docs.length,
-        porBanca,
-        porDisciplina,
-        porAno,
-        porTipo,
-      },
-    };
+    return { success: true, data: { total: docs.length, porBanca, porDisciplina, porAno, porTipo } };
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao calcular estatísticas:', e);
     return { success: false, error: e?.message || 'Erro ao calcular estatísticas.' };
   }
 }
 
-/**
- * Soft delete (marca isdeleted = true).
- */
-export async function excluirQuestaoDoBanco(
-  questaoId: string,
-  userId: string
-): Promise<{ success: boolean; error?: string }> {
+export async function excluirQuestaoDoBanco(questaoId: string, userId: string): Promise<{ success: boolean; error?: string }> {
   if (!userId) return { success: false, error: 'Usuário não autenticado.' };
 
   try {
     const db = await getDb();
     const doc = await db.banco_questoes.findOne({ selector: { id: questaoId } }).exec();
-    if (!doc) return { success: false, error: 'Questão não encontrada.' };
-    if (doc.get('user_id') !== userId) {
-      return { success: false, error: 'Questão não encontrada.' };
-    }
+    if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Questão não encontrada.' };
 
     const agora = nowIso();
     await doc.patch({ isdeleted: true, updated_at: agora });
-    await enqueueOperation('update', 'banco_questoes', {
-      id: questaoId,
-      isdeleted: true,
-      updated_at: agora,
-    });
+    await enqueueOperation('update', 'banco_questoes', { id: questaoId, isdeleted: true, updated_at: agora });
     return { success: true };
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao excluir:', e);
     return { success: false, error: e?.message || 'Erro ao excluir.' };
+  }
+}
+
+// NOVA FUNÇÃO: Salvar tentativa avulsa (Modo Livre)
+export async function salvarTentativaAvulsa(
+  userId: string,
+  questaoId: string,
+  resposta: string | null,
+  acertou: boolean,
+  tempoSegundos: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getDb();
+    const agora = nowIso();
+    const tentativa = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      questao_banco_id: questaoId,
+      resposta,
+      acertou,
+      tempo_segundos: tempoSegundos,
+      contexto: 'avulso',
+      caderno_resultado_id: null,
+      created_at: agora,
+      updated_at: agora,
+    };
+    await db.banco_tentativas.insert(tentativa);
+    await enqueueOperation('create', 'banco_tentativas', tentativa);
+    return { success: true };
+  } catch (e: any) {
+    console.error('[bancoQuestoes] Erro ao salvar tentativa avulsa:', e);
+    return { success: false, error: e?.message || 'Erro ao salvar tentativa.' };
   }
 }

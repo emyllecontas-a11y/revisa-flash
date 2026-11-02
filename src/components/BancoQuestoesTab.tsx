@@ -19,6 +19,7 @@ import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
   ArrowLeft, FolderOpen, ChevronRight, FileText
 } from "lucide-react";
+import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -41,6 +42,7 @@ export function BancoQuestoesTab() {
   // Estados dos Modais
   const [modalNovaPasta, setModalNovaPasta] = useState(false);
   const [modalNovoCaderno, setModalNovoCaderno] = useState(false);
+  const [modalPraticar, setModalPraticar] = useState(false);
 
   // Filtros
   const [fDisciplina, setFDisciplina] = useState("");
@@ -189,7 +191,7 @@ export function BancoQuestoesTab() {
               {cadernosFiltrados.map(c => {
                 const pasta = pastas.find(p => p.id === c.pasta_id);
                 return (
-                  <div key={c.id} className="rf-card p-4 flex flex-col hover:border-primary/50 transition-colors cursor-pointer" onClick={() => toast.info("Em breve", { description: "O player do caderno chega no passo 3.4." })}>
+                  <div key={c.id} className="rf-card p-4 flex flex-col hover:border-primary/50 transition-colors cursor-pointer" onClick={() => toast.info("Em breve", { description: "O player do caderno chega no próximo passo." })}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
@@ -223,7 +225,7 @@ export function BancoQuestoesTab() {
                 <Folder className="h-4 w-4" /> Meus Cadernos
               </button>
               {filtradas.length > 0 && (
-                <button onClick={() => toast.info("Em breve", { description: "O player livre chega no passo 3.4." })} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+                <button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
                   <Play className="h-4 w-4" /> Praticar
                 </button>
               )}
@@ -353,12 +355,20 @@ export function BancoQuestoesTab() {
           onSuccess={() => { setModalNovoCaderno(false); setSelecionadas(new Set()); load(); toast.success("Caderno criado com sucesso!"); }}
         />
       )}
+
+      {modalPraticar && user?.id && (
+        <PlayerLivreModal
+          userId={user.id}
+          questoes={filtradas}
+          onClose={() => { setModalPraticar(false); load(); }}
+        />
+      )}
     </>
   );
 }
 
 // ============================================================
-// MODAIS
+// MODAIS E COMPONENTES AUXILIARES
 // ============================================================
 
 function NovaPastaModal({ userId, onClose, onSuccess }: { userId: string; onClose: () => void; onSuccess: () => void }) {
@@ -466,16 +476,18 @@ function NovoCadernoModal({ userId, pastas, questoesIds, onClose, onSuccess }: {
   );
 }
 
-// Componentes Auxiliares
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" onClick={onClick} className={["inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors", active ? "bg-primary text-primary-foreground" : "border border-border bg-surface text-foreground/65 hover:bg-surface-2"].join(" ")}>{children}</button>;
 }
+
 function Select({ value, onChange, label, options, emptyLabel }: { value: string; onChange: (v: string) => void; label: string; options: string[]; emptyLabel: string; }) {
   return <label className="block"><span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-foreground/45">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-border bg-surface px-2.5 py-2 text-xs text-foreground outline-none focus:border-primary"><option value="">{emptyLabel}</option>{options.map((o) => (<option key={o} value={o}>{o}</option>))}</select></label>;
 }
+
 function Badge({ children, className }: { children: React.ReactNode; className?: string }) {
   return <span className={["inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium", className || "bg-muted text-foreground/65"].join(" ")}>{children}</span>;
 }
+
 function BadgeSoft({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex shrink-0 items-center rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium text-foreground/55">{children}</span>;
 }
