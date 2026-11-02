@@ -46,12 +46,8 @@ export async function importarQuestoesNoBanco(
   questoes: QuestaoParsed[],
   userId: string
 ): Promise<ResultadoImportacao> {
-  if (!userId) {
-    return { success: false, novas: 0, jaExistentes: 0, erros: 0, idsInseridos: [], error: 'Usuário não autenticado.' };
-  }
-  if (questoes.length === 0) {
-    return { success: true, novas: 0, jaExistentes: 0, erros: 0, idsInseridos: [] };
-  }
+  if (!userId) return { success: false, novas: 0, jaExistentes: 0, erros: 0, idsInseridos: [], error: 'Usuário não autenticado.' };
+  if (questoes.length === 0) return { success: true, novas: 0, jaExistentes: 0, erros: 0, idsInseridos: [] };
 
   let novas = 0;
   let jaExistentes = 0;
@@ -139,9 +135,7 @@ export async function getQuestoesDoBanco(
     if (filtros?.tipo_questao) data = data.filter((q) => q.tipo_questao === filtros.tipo_questao);
     if (filtros?.busca && filtros.busca.trim()) {
       const termo = filtros.busca.toLowerCase().trim();
-      data = data.filter(
-        (q) => q.enunciado.toLowerCase().includes(termo) || (q.assunto || '').toLowerCase().includes(termo) || (q.cargo || '').toLowerCase().includes(termo)
-      );
+      data = data.filter((q) => q.enunciado.toLowerCase().includes(termo) || (q.assunto || '').toLowerCase().includes(termo) || (q.cargo || '').toLowerCase().includes(termo));
     }
 
     data.sort((a, b) => (b.importado_em || '').localeCompare(a.importado_em || ''));
@@ -160,7 +154,6 @@ export async function getEstatisticasBanco(
   error?: string;
 }> {
   if (!userId) return { success: false, error: 'Usuário não autenticado.' };
-
   try {
     const db = await getDb();
     const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
@@ -176,7 +169,6 @@ export async function getEstatisticasBanco(
       if (q.ano) porAno[q.ano] = (porAno[q.ano] || 0) + 1;
       porTipo[q.tipo_questao] = (porTipo[q.tipo_questao] || 0) + 1;
     }
-
     return { success: true, data: { total: docs.length, porBanca, porDisciplina, porAno, porTipo } };
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao calcular estatísticas:', e);
@@ -186,7 +178,6 @@ export async function getEstatisticasBanco(
 
 export async function excluirQuestaoDoBanco(questaoId: string, userId: string): Promise<{ success: boolean; error?: string }> {
   if (!userId) return { success: false, error: 'Usuário não autenticado.' };
-
   try {
     const db = await getDb();
     const doc = await db.banco_questoes.findOne({ selector: { id: questaoId } }).exec();
@@ -202,7 +193,6 @@ export async function excluirQuestaoDoBanco(questaoId: string, userId: string): 
   }
 }
 
-// NOVA FUNÇÃO: Salvar tentativa avulsa (Modo Livre)
 export async function salvarTentativaAvulsa(
   userId: string,
   questaoId: string,
@@ -231,5 +221,27 @@ export async function salvarTentativaAvulsa(
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao salvar tentativa avulsa:', e);
     return { success: false, error: e?.message || 'Erro ao salvar tentativa.' };
+  }
+}
+
+// NOVA FUNÇÃO: Limpa duplicatas locais baseadas no hash_dedup
+export async function limparDuplicatasLocais(userId: string): Promise<void> {
+  try {
+    const db = await getDb();
+    const docs = await db.banco_questoes.find({ selector: { user_id: userId, isdeleted: false } }).exec();
+    
+    const vistos = new Set<string>();
+    for (const doc of docs) {
+      const hash = doc.get('hash_dedup');
+      if (vistos.has(hash)) {
+        const agora = nowIso();
+        await doc.patch({ isdeleted: true, updated_at: agora });
+        await enqueueOperation('update', 'banco_questoes', { id: doc.get('id'), isdeleted: true, updated_at: agora });
+      } else {
+        vistos.add(hash);
+      }
+    }
+  } catch (e) {
+    console.error('[bancoQuestoes] Erro ao limpar duplicatas:', e);
   }
 }

@@ -20,6 +20,7 @@ import {
   ArrowLeft, FolderOpen, ChevronRight, FileText
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
+import { limparDuplicatasLocais } from "@/services/bancoQuestoesService";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -55,11 +56,13 @@ export function BancoQuestoesTab() {
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
 
+
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setError(null);
     try {
+      await limparDuplicatasLocais(user.id); // <--- Adicione esta linha
       const [r1, r2, r3, r4] = await Promise.all([
         getEstatisticasBanco(user.id),
         getQuestoesDoBanco(user.id),
