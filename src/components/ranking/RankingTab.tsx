@@ -1,29 +1,41 @@
 // src/components/ranking/RankingTab.tsx
 import { useState, useEffect } from "react";
-import type { PeriodoTipo, RankingViewState } from "./types";
+import type { PeriodoTipo, RankingViewState, UserIndicators, Medal } from "./types";
 import { RankingHeader } from "./components/RankingHeader";
 import { UserHighlightCard } from "./components/UserHighlightCard";
 import { Podium } from "./components/Podium";
 import { RankingList } from "./components/RankingList";
 import { PerformanceIndicators } from "./components/PerformanceIndicators";
 import { MedalsSection } from "./components/MedalsSection";
-import { RankingEmpty, RankingError, RankingNoFriends, RankingSkeleton } from "./components/RankingStates";
-import { calcularRanking, type RankingUser } from "@/services/rankingService";
+import { RankingEmpty, RankingError, RankingSkeleton } from "./components/RankingStates";
+import { calcularRanking, getIndicadoresReais, getMedalhas, type RankingUser } from "@/services/rankingService";
 import { useAppUser } from "@/contexts/UserContext";
 
 export function RankingTab() {
   const { user } = useAppUser();
   const [tipo, setTipo] = useState<PeriodoTipo>("semanal");
   const [state, setState] = useState<RankingViewState>("carregando");
+  
+  // Estados de Dados
   const [rankingData, setRankingData] = useState<RankingUser[]>([]);
+  const [indicadores, setIndicadores] = useState<UserIndicators | null>(null);
+  const [medalhas, setMedalhas] = useState<{ semanais: Medal[], mensais: Medal[] }>({ semanais: [], mensais: [] });
 
   useEffect(() => {
     async function load() {
       if (!user?.id) return;
       setState("carregando");
       try {
-        const data = await calcularRanking(user.id, tipo);
+        const [data, ind, meds] = await Promise.all([
+          calcularRanking(user.id, tipo),
+          getIndicadoresReais(user.id),
+          getMedalhas(user.id)
+        ]);
+        
         setRankingData(data);
+        setIndicadores(ind);
+        setMedalhas(meds);
+        
         setState(data.length === 0 ? "vazio" : "preenchido");
       } catch (e) {
         console.error(e);
@@ -33,23 +45,18 @@ export function RankingTab() {
     load();
   }, [tipo, user?.id]);
 
-  // Encontra a posição do usuário logado
   const currentUserIndex = rankingData.findIndex(u => u.id === user?.id);
   const currentUser = currentUserIndex >= 0 ? rankingData[currentUserIndex] : null;
   
-  // Card do usuário (se ele não estiver no ranking, mostra zerado)
   const userHighlight = currentUser ? {
     ...currentUser,
     posicao: currentUserIndex + 1,
     pontosParaProximo: currentUserIndex > 0 ? rankingData[currentUserIndex - 1].pontos - currentUser.pontos : 0,
     progressoProximo: currentUserIndex > 0 ? (currentUser.pontos / rankingData[currentUserIndex - 1].pontos) : 1
   } : {
-    id: user?.id || "me",
-    name: "Você",
-    avatar_url: null,
+    id: user?.id || "me", name: user?.fullName || "Você", avatar_url: null,
     pontos: 0, variacao: 0, horasEstudadas: 0, questoesResolvidas: 0, simuladosRealizados: 0,
-    posicao: 0,
-    pontosParaProximo: 0, progressoProximo: 0
+    posicao: 0, pontosParaProximo: 0, progressoProximo: 0
   };
 
   return (
@@ -68,7 +75,7 @@ export function RankingTab() {
       {state === "erro" && <RankingError onRetry={() => setTipo(tipo)} />}
       {state === "vazio" && <RankingEmpty />}
 
-      {state === "preenchido" && (
+      {state === "preenchido" && indicadores && (
         <div key={tipo} className="space-y-5 sm:space-y-6">
           <UserHighlightCard user={userHighlight as any} />
           
@@ -79,15 +86,11 @@ export function RankingTab() {
             )}
           </div>
 
-          {/* Indicadores Básicos */}
-          <PerformanceIndicators data={{
-            tempo: { dia: 0, semana: Math.round(userHighlight.horasEstudadas * 60), mes: 0 },
-            questoes: { dia: 0, semana: userHighlight.questoesResolvidas, mes: 0 },
-            simulados: { semana: userHighlight.simuladosRealizados, mes: 0 }
-          }} />
+          {/* Indicadores Reais */}
+          <PerformanceIndicators data={indicadores} />
 
-          {/* Em breve: Lógica real de Medalhas */}
-          <MedalsSection semanais={[]} mensais={[]} />
+          {/* Medalhas Reais */}
+          <MedalsSection semanais={medalhas.semanais} mensais={medalhas.mensais} defaultCategoria={tipo} />
         </div>
       )}
     </div>
