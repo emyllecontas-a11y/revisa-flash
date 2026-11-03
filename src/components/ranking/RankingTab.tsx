@@ -10,13 +10,14 @@ import { MedalsSection } from "./components/MedalsSection";
 import { RankingEmpty, RankingError, RankingSkeleton } from "./components/RankingStates";
 import { calcularRanking, getIndicadoresReais, getMedalhas, type RankingUser } from "@/services/rankingService";
 import { useAppUser } from "@/contexts/UserContext";
+import { useToast } from "@/hooks/useToast"; // Importando seu sistema de notificação
 
 export function RankingTab() {
   const { user } = useAppUser();
+  const toast = useToast();
   const [tipo, setTipo] = useState<PeriodoTipo>("semanal");
   const [state, setState] = useState<RankingViewState>("carregando");
   
-  // Estados de Dados
   const [rankingData, setRankingData] = useState<RankingUser[]>([]);
   const [indicadores, setIndicadores] = useState<UserIndicators | null>(null);
   const [medalhas, setMedalhas] = useState<{ semanais: Medal[], mensais: Medal[] }>({ semanais: [], mensais: [] });
@@ -26,17 +27,30 @@ export function RankingTab() {
       if (!user?.id) return;
       setState("carregando");
       try {
-        const [data, ind, meds] = await Promise.all([
+        const [resRanking, ind, meds] = await Promise.all([
           calcularRanking(user.id, tipo),
           getIndicadoresReais(user.id),
           getMedalhas(user.id)
         ]);
         
-        setRankingData(data);
+        setRankingData(resRanking.lista);
         setIndicadores(ind);
         setMedalhas(meds);
         
-        setState(data.length === 0 ? "vazio" : "preenchido");
+        setState(resRanking.lista.length === 0 ? "vazio" : "preenchido");
+
+        // Lógica de Notificação de Subida
+        if (resRanking.subiuDePosicao && resRanking.posicaoAtual > 0) {
+          // Verifica se já não mostrou a notificação recentemente (opcional, mas bom)
+          const chaveAviso = `aviso_subida_${tipo}_${resRanking.posicaoAtual}`;
+          if (!sessionStorage.getItem(chaveAviso)) {
+            toast.success("Você subiu no Ranking! 🚀", {
+              description: `Parabéns! Agora você está em ${resRanking.posicaoAtual}º lugar.`
+            });
+            sessionStorage.setItem(chaveAviso, 'true');
+          }
+        }
+
       } catch (e) {
         console.error(e);
         setState("erro");
@@ -86,10 +100,7 @@ export function RankingTab() {
             )}
           </div>
 
-          {/* Indicadores Reais */}
           <PerformanceIndicators data={indicadores} />
-
-          {/* Medalhas Reais */}
           <MedalsSection semanais={medalhas.semanais} mensais={medalhas.mensais} defaultCategoria={tipo} />
         </div>
       )}

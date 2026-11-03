@@ -10,9 +10,9 @@ import { getDb } from "@/lib/db";
 import { Trophy } from "lucide-react";
 import { RankingTab } from "@/components/ranking/RankingTab";
 
-type Tab = "compartilhado" | "amizades" | "ranking";
+type Tab = "ranking" | "amizades" | "compartilhado";
 
-const TAB_PADRAO: Tab = "compartilhado";
+const TAB_PADRAO: Tab = "ranking";
 
 function isTab(v: string | null): v is Tab {
   return v === "compartilhado" || v === "amizades" || v === "ranking";
@@ -89,12 +89,16 @@ export default function ComunidadePage() {
     <AppShell breadcrumb="Comunidade" title="Comunidade">
       <div className="mx-auto max-w-2xl">
         <div className="mb-6 flex gap-1 border-b border-border overflow-x-auto">
+          
+          {/* ABA 1: RANKING */}
           <BotaoTab
-            ativo={tab === "compartilhado"}
-            onClick={() => trocarTab("compartilhado")}
-            label="Compartilhado comigo"
-            badge={sharedCount}
+            ativo={tab === "ranking"}
+            onClick={() => trocarTab("ranking")}
+            label="Ranking"
+            icon={<Trophy className="h-4 w-4" />}
           />
+
+          {/* ABA 2: AMIZADES */}
           <BotaoTab
             ativo={tab === "amizades"}
             onClick={() => trocarTab("amizades")}
@@ -102,17 +106,20 @@ export default function ComunidadePage() {
             badge={invitesCount}
             badgeTone="primary"
           />
+
+          {/* ABA 3: COMPARTILHADO */}
           <BotaoTab
-            ativo={tab === "ranking"}
-            onClick={() => trocarTab("ranking")}
-            label="Ranking"
-            icon={<Trophy className="h-4 w-4" />}
+            ativo={tab === "compartilhado"}
+            onClick={() => trocarTab("compartilhado")}
+            label="Compartilhado comigo"
+            badge={sharedCount}
           />
+          
         </div>
 
-        {tab === "compartilhado" && <CompartilhadosConteudo />}
-        {tab === "amizades" && <AmizadesConteudo />}
         {tab === "ranking" && <RankingTab />}
+        {tab === "amizades" && <AmizadesConteudo />}
+        {tab === "compartilhado" && <CompartilhadosConteudo />}
       </div>
     </AppShell>
   );
