@@ -47,7 +47,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   const { semanaIso, mesIso, dataRefIso } = getPeriodos();
   const isoInicio = periodo === 'semanal' ? semanaIso : mesIso;
 
-  // 1. Pega usuários que têm atividades
   const todosRecords = await db.study_records.find().exec();
   const userIds = new Set<string>();
   todosRecords.forEach(r => { if (r.get('user_id')) userIds.add(r.get('user_id')); });
@@ -61,7 +60,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
     });
   });
 
-  // 2. Soma os pontos (Tempo, Questões, Simulados)
   const sessoes = await db.study_records.find({ selector: { date: { $gte: isoInicio } } }).exec();
   sessoes.forEach(s => {
     const uid = s.get('user_id');
@@ -85,12 +83,9 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
     if (rankingMap.has(uid)) { rankingMap.get(uid)!.simuladosRealizados += 1; rankingMap.get(uid)!.pontos += 20; }
   });
 
-  // 3. Busca nomes e CONTAGEM DE MEDALHAS para definir a Coroa
   const medalhasCountMap = new Map<string, number>();
   try {
     const ids = Array.from(rankingMap.keys());
-    
-    // Nomes
     const { data: profiles } = await supabase.from('user_settings').select('user_id, name').in('user_id', ids);
     profiles?.forEach((p: any) => {
       if (rankingMap.has(p.user_id)) {
@@ -98,14 +93,12 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
       }
     });
 
-    // Contagem de medalhas (histórico total, não só do mês)
     const { data: medalhas } = await supabase.from('ranking_conquistas').select('user_id').eq('tipo', 'medalha').in('user_id', ids);
     medalhas?.forEach((m: any) => {
       medalhasCountMap.set(m.user_id, (medalhasCountMap.get(m.user_id) || 0) + 1);
     });
   } catch (e) { console.warn("Erro ao buscar perfis/medalhas"); }
 
-  // 4. Ordena e define as Coroas por Conquistas
   const listaFinal = Array.from(rankingMap.values())
     .filter(u => u.pontos > 0 || u.id === userIdLogado)
     .sort((a, b) => b.pontos - a.pontos);
@@ -118,7 +111,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
     else if (count >= 1) u.coroa = 'bronze';
   });
 
-  // 5. Cálculo de Variação de Posição
   let subiuDePosicao = false;
   let posicaoAtual = 0;
 
@@ -126,7 +118,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   if (indexLogado !== -1) {
     posicaoAtual = indexLogado + 1;
     
-    // Pega o snapshot de ontem (ou do último dia salvo)
     const { data: snapshotAnterior } = await supabase
       .from('ranking_snapshots')
       .select('posicao')
@@ -142,7 +133,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
       if (diferenca > 0) subiuDePosicao = true;
     }
 
-    // Salva o snapshot de hoje (se já não existir, para não sobrescrever toda hora)
     const { data: snapHoje } = await supabase
       .from('ranking_snapshots')
       .select('id')
@@ -161,9 +151,6 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   return { lista: listaFinal, subiuDePosicao, posicaoAtual };
 }
 
-// ==========================================
-// INDICADORES REAIS (Mantidos)
-// ==========================================
 export async function getIndicadoresReais(userId: string): Promise<UserIndicators> {
   const db = await getDb();
   const { hojeIso, semanaIso, mesIso } = getPeriodos();
@@ -201,9 +188,6 @@ export async function getIndicadoresReais(userId: string): Promise<UserIndicator
   };
 }
 
-// ==========================================
-// MEDALHAS (Mantidas com persistência)
-// ==========================================
 export async function getMedalhas(userId: string): Promise<{ semanais: Medal[], mensais: Medal[] }> {
   const db = await getDb();
   const { semanaIso, mesIso, refSemana, refMes } = getPeriodos();
@@ -232,24 +216,32 @@ export async function getMedalhas(userId: string): Promise<{ semanais: Medal[], 
     return { conquistada: jaConquistada, progresso: jaConquistada ? 1 : progresso };
   };
 
-  const s1 = await checarMedalha('chama_acesa', refSemana, diasEstudadosSemana >= 5, diasEstudadosSemana / 5);
-  const s2 = await checarMedalha('relogio_firme', refSemana, minEstudadosSemana >= 120, minEstudadosSemana / 120);
-  const s3 = await checarMedalha('mira_certeira', refSemana, questoesSemana.length >= 20, questoesSemana.length / 20);
-  const s4 = await checarMedalha('simulado_semana', refSemana, simuladosSemana.length >= 1, simuladosSemana.length / 1);
+  // --- METAS SEMANAIS ---
+  // Meta Relógio firme: 12 horas = 720 minutos
+  const s2 = await checarMedalha('relogio_firme', refSemana, minEstudadosSemana >= 720, minEstudadosSemana / 720);
+  
+  // Meta Mira certeira: 100 questões
+  const s3 = await checarMedalha('mira_certeira', refSemana, questoesSemana.length >= 100, questoesSemana.length / 100);
 
+  // --- METAS MENSAIS ---
+  // Meta Maratonista: 48 horas = 2880 minutos
+  const m2 = await checarMedalha('maratonista', refMes, minEstudadosMes >= 2880, minEstudadosMes / 2880);
+
+  // Checagens que não mudaram (Chama acesa, Simulado e Diamante)
+  const s1 = await checarMedalha('chama_acesa', refSemana, diasEstudadosSemana >= 5, diasEstudadosSemana / 5);
+  const s4 = await checarMedalha('simulado_semana', refSemana, simuladosSemana.length >= 1, simuladosSemana.length / 1);
   const m1 = await checarMedalha('constancia_diamante', refMes, new Set(recordsMes.map(r => r.get('date').split('T')[0])).size >= 15, new Set(recordsMes.map(r => r.get('date').split('T')[0])).size / 15);
-  const m2 = await checarMedalha('maratonista', refMes, minEstudadosMes >= 1200, minEstudadosMes / 1200);
 
   const semanais: Medal[] = [
     { id: "s1", categoria: "semanal", titulo: "Chama acesa", descricao: "Estudou 5 dias ou mais na semana", tier: "rubi", icon: "flame", ...s1, ganhadores: [] },
-    { id: "s2", categoria: "semanal", titulo: "Relógio firme", descricao: "Estudou por pelo menos 2 horas na semana", tier: "ouro", icon: "clock", ...s2, ganhadores: [] },
-    { id: "s3", categoria: "semanal", titulo: "Mira certeira", descricao: "Resolveu 20 questões na semana", tier: "safira", icon: "target", ...s3, ganhadores: [] },
+    { id: "s2", categoria: "semanal", titulo: "Relógio firme", descricao: "Estudou por pelo menos 12 horas na semana", tier: "ouro", icon: "clock", ...s2, ganhadores: [] },
+    { id: "s3", categoria: "semanal", titulo: "Mira certeira", descricao: "Resolveu 100 questões na semana", tier: "safira", icon: "target", ...s3, ganhadores: [] },
     { id: "s4", categoria: "semanal", titulo: "Simulado da semana", descricao: "Concluiu pelo menos 1 simulado", tier: "prata", icon: "book", ...s4, ganhadores: [] }
   ];
 
   const mensais: Medal[] = [
     { id: "m1", categoria: "mensal", titulo: "Constância de diamante", descricao: "Estudou 15 dias ou mais no mês", tier: "diamante", icon: "calendar", ...m1, ganhadores: [] },
-    { id: "m2", categoria: "mensal", titulo: "Maratonista", descricao: "Acumulou 20 horas no mês", tier: "ouro", icon: "trophy", ...m2, ganhadores: [] }
+    { id: "m2", categoria: "mensal", titulo: "Maratonista", descricao: "Acumulou 48 horas no mês", tier: "ouro", icon: "trophy", ...m2, ganhadores: [] }
   ];
 
   return { semanais, mensais };
