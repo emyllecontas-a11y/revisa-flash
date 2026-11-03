@@ -496,7 +496,7 @@ export default function SimuladosPage() {
               : 'border-transparent text-foreground/50 hover:text-foreground'
           }`}
         >
-          Listas
+          Fixação
         </button>
         <button
           onClick={() => trocarTab('banco')}

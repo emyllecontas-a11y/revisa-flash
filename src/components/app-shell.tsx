@@ -50,7 +50,7 @@ const MAIN_ROTAS = [
 const MAIS_ROTAS = [
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
-  { to: "/simulados", label: "Simulados", icon: "file-text" },
+  { to: "/simulados", label: "Questões", icon: "file-text" }, // MUDANÇA AQUI: de Simulados para Questões
   // 🔥 Unificada: substitui "Amigas" + "Compartilhado"
   { to: "/comunidade", label: "Comunidade", icon: "users" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
