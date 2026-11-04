@@ -22,11 +22,12 @@ import {
 } from "@/services/cadernoService";
 import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
-  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter
+  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter, BarChart3
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
 import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
+import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal"; // NOVO IMPORT
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
 
@@ -57,6 +58,7 @@ export function BancoQuestoesTab() {
   const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
   
   const [modalFiltro, setModalFiltro] = useState(false);
+  const [modalRelatorio, setModalRelatorio] = useState(false); // NOVO ESTADO
 
   const [fDisciplina, setFDisciplina] = useState("");
   const [fMateria, setFMateria] = useState("");
@@ -130,7 +132,6 @@ export function BancoQuestoesTab() {
     return tree;
   }, [todasQuestoes]);
 
-  // REMOVIDO O .sort() DESTAS 3 VARIÁVEIS
   const disciplinasDisponiveis = useMemo(() => Object.keys(hierarquia), [hierarquia]);
   const materiasDisponiveis = useMemo(() => fDisciplina ? Object.keys(hierarquia[fDisciplina] || {}) : [], [hierarquia, fDisciplina]);
   const assuntosDisponiveis = useMemo(() => (fDisciplina && fMateria) ? Array.from(hierarquia[fDisciplina]?.[fMateria] || []) : [], [hierarquia, fDisciplina, fMateria]);
@@ -229,6 +230,10 @@ export function BancoQuestoesTab() {
               <span className="text-xs text-foreground/45">{stats ? `${stats.total} questões` : ""}</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {/* NOVO BOTÃO DE RELATÓRIO */}
+              <button onClick={() => setModalRelatorio(true)} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
+                <BarChart3 className="h-4 w-4" /> Relatório
+              </button>
               <button onClick={() => setViewMode("cadernos")} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"><Folder className="h-4 w-4" /> Meus Cadernos</button>
               {filtradas.length > 0 && (<button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"><Play className="h-4 w-4" /> Responder</button>)}
             </div>
@@ -339,6 +344,14 @@ export function BancoQuestoesTab() {
           fAno={fAno}
           setFAno={setFAno}
           onClose={() => setModalFiltro(false)}
+        />
+      )}
+
+      {/* NOVO MODAL DE RELATÓRIO */}
+      {modalRelatorio && user?.id && (
+        <RelatorioDesempenhoModal
+          userId={user.id}
+          onClose={() => setModalRelatorio(false)}
         />
       )}
     </>

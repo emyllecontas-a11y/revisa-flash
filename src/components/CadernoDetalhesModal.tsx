@@ -3,7 +3,8 @@ import { useState, useEffect } from "react";
 import { getQuestoesDoCaderno, removerQuestaoDoCaderno, adicionarQuestoesAoCaderno, type Caderno } from "@/services/cadernoService";
 import { getQuestoesDoBanco, type QuestaoBanco } from "@/services/bancoQuestoesService";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
-import { Loader2, Play, Trash2, X, BookOpen, Plus, Search, CheckCircle2 } from "lucide-react";
+import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
+import { Loader2, Play, Trash2, X, BookOpen, Plus, Search, CheckCircle2, BarChart3 } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
 
@@ -22,12 +23,15 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
   const [loading, setLoading] = useState(true);
   const [praticando, setPraticando] = useState(false);
 
-  // Estado para o Modal de Adicionar Questões
+  // Estados para o Modal de Adicionar Questões
   const [modalAdicionar, setModalAdicionar] = useState(false);
   const [todasQuestoesBanco, setTodasQuestoesBanco] = useState<QuestaoBanco[]>([]);
   const [selecionadasParaAdicionar, setSelecionadasParaAdicionar] = useState<Set<string>>(new Set());
   const [buscaAdicionar, setBuscaAdicionar] = useState("");
   const [salvandoAdicionar, setSalvandoAdicionar] = useState(false);
+
+  // Estado para o Modal de Relatório
+  const [modalRelatorio, setModalRelatorio] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -150,9 +154,14 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
           </div>
 
           <div className="border-t border-border p-4 px-6 flex flex-wrap justify-between items-center gap-2">
-            <button onClick={abrirModalAdicionar} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
-              <Plus className="h-4 w-4" /> Adicionar Questões
-            </button>
+            <div className="flex gap-2">
+              <button onClick={abrirModalAdicionar} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
+                <Plus className="h-4 w-4" /> Adicionar
+              </button>
+              <button onClick={() => setModalRelatorio(true)} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
+                <BarChart3 className="h-4 w-4" /> Estatísticas
+              </button>
+            </div>
             <div className="flex gap-2 ml-auto">
               <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-border bg-surface text-sm font-medium hover:bg-surface-2">
                 Fechar
@@ -223,6 +232,16 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL DE RELATÓRIO */}
+      {modalRelatorio && (
+        <RelatorioDesempenhoModal
+          userId={userId}
+          cadernoId={caderno.id}
+          titulo={caderno.nome}
+          onClose={() => setModalRelatorio(false)}
+        />
       )}
     </>
   );
