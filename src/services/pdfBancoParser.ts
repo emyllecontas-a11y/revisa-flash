@@ -30,7 +30,7 @@ export interface QuestaoParsed {
   arquivo_origem: string | null;
   __numero: number | null;
   __warnings: string[];
-  __nome_imagem: string | null;
+  __nome_imagem: string | null; // NOVO CAMPO AQUI
 }
 
 export interface ParseResultado {
@@ -192,7 +192,7 @@ function isNoise(linha: string): boolean {
 }
 
 function parseMetadata(linha: string): any | null {
-  // REGEX MAIS PERMISSIVO PARA ACEITAR BANCAS COM CARACTERES ESPECIAIS (&, etc)
+  // Aceita '&' em bancas como ADM&TEC
   const m = linha.match(/^(.+?)\s+-\s+(.+)$/);
   if (!m) return null;
   const banca = m[1].trim();
@@ -223,7 +223,7 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
   let gabIdx = -1;
   let gabRaw: string | null = null;
   for (let i = linhas.length - 1; i >= 0; i--) {
-    // REGEX PERMITE O GABARITO NO FINAL DA LINHA
+    // Permite Gabarito no final da linha (corrigido anteriormente)
     const m = linhas[i].match(/Gabarito\s*:\s*([A-E]|Certo|Errado)\b/i);
     if (m) { gabIdx = i; gabRaw = m[1].trim(); break; }
   }
@@ -235,6 +235,7 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
   let textoQ = numM ? antesG.substring(numM[0].length) : antesG;
   if (!textoQ.trim()) return null;
 
+  // NOVO: Extrai a tag de imagem
   let nome_imagem: string | null = null;
   const matchImg = textoQ.match(/\[IMAGEM:\s*(.+?)\]/i);
   if (matchImg) {
@@ -286,16 +287,16 @@ function parseCorpo(corpo: string, base: any): QuestaoParsed | null {
     tipo_questao: tipo, enunciado, alternativas, gabarito_letra: gabaritoLetra, gabarito_ce: gabaritoCe,
     comentario: depoisG || null, imagem_url: null, hash_dedup: hash, url_origem: base.urlOrigem, arquivo_origem: base.arquivoNome,
     __numero: numero, __warnings: base.warnings,
-    __nome_imagem: nome_imagem
+    __nome_imagem: nome_imagem // NOVO CAMPO AQUI
   };
 }
 
 function detectarTipo(texto: string): 'multipla_escolha' | 'certo_errado' | null {
-  // PRIMEIRO TENTA ACHAR ALTERNATIVAS (MUITO MAIS SEGURO)
+  // Verifica múltipla escolha primeiro (mais seguro)
   const alts = extrairAlternativasMC(texto);
   if (alts && alts.length >= 2) return 'multipla_escolha';
 
-  // SE NÃO ACHAR, TENTA CERTO/ERRADO
+  // Se não achou alternativas, tenta Certo/Errado
   const ceMatch = /(?:^|\n)\s*Certo\s+Errado\s*[\.\?!]?\s*(?:\n|$)/i.exec(texto);
   if (ceMatch) return 'certo_errado';
   

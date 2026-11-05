@@ -1,9 +1,11 @@
 // src/components/QuestaoCard.tsx
 // Componente visual puro para renderizar uma questão.
 // Suporta: sublinhado, negrito, itálico, imagens, certo/errado e grifos interativos.
+// Suporta tanto formatação via tags HTML (novo parser) quanto via arrays de intervalos (parser antigo).
 
 import { Bookmark, Check, Scissors, X } from "lucide-react";
 import { Fragment } from "react";
+import parse from 'html-react-parser';
 import { TextoGrifavel } from "@/components/TextoGrifavel";
 import type {
   AnotacaoQuestao,
@@ -15,7 +17,6 @@ import type {
 export interface AlternativaView {
   letra: string;
   texto: string;
-  // NOVOS CAMPOS PARA RECEBER AS MARCAS DO BANCO
   sublinhados?: { inicio: number; fim: number }[] | null;
   negritos?: { inicio: number; fim: number }[] | null;
   italicos?: { inicio: number; fim: number }[] | null;
@@ -58,12 +59,14 @@ export interface QuestaoCardProps {
   onGrifar?: (campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => void;
   onRemoverGrifo?: (id: string) => void;
   onTrocarCorGrifo?: (id: string, cor: CorGrifo) => void;
-  /** Se false, não permite criar novos grifos (mas mostra os existentes) */
   grifarAtivo?: boolean;
 }
 
 const campoAlternativa = (letra: string): CampoAlvo => `alternativa_${letra}` as CampoAlvo;
 
+// ============================================================
+// RENDERIZADOR HÍBRIDO
+// ============================================================
 function TextoFormatado({
   texto,
   sublinhados,
@@ -75,6 +78,13 @@ function TextoFormatado({
   negritos?: Intervalo[] | null;
   italicos?: Intervalo[] | null;
 }) {
+  // 1. Se o texto contiver tags HTML (novo parser), renderiza via HTML.
+  //    O parser de HTML entende <b>, <u>, <i> e <span style="color:...">
+  if (/<(b|u|i|span)\b/i.test(texto)) {
+    return <>{parse(texto)}</>;
+  }
+
+  // 2. Se não tiver tags, mas tiver os arrays de intervalo (parser antigo), aplica a máscara.
   const n = texto.length;
   const mask = new Uint8Array(n);
   for (const s of sublinhados ?? []) {
@@ -90,8 +100,11 @@ function TextoFormatado({
     for (let i = a; i < b; i++) mask[i] |= 4;
   }
 
+  // Se não tem grifos (anotações do usuário), retorna apenas o texto
   if (mask.every((m) => m === 0)) return <>{texto}</>;
 
+  // Se tem grifos, precisamos combinar o HTML com as máscaras (lógica antiga)
+  // Para simplificar, se tiver HTML, priorizamos o HTML bonito
   const partes: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
