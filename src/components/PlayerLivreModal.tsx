@@ -1,8 +1,9 @@
 // src/components/PlayerLivreModal.tsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { QuestaoCard } from "@/components/QuestaoCard";
 import { salvarTentativaAvulsa, type QuestaoBanco } from "@/services/bancoQuestoesService";
-import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, X, Send } from "lucide-react";
+import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, ArrowLeft, ArrowRight, X, Send, Clock } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
 import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotacao } from "@/services/anotacaoQuestaoService";
 import type { AnotacaoQuestao, CampoAlvo, CorGrifo, RectGrifo } from "@/lib/anotacoes-types";
@@ -14,6 +15,12 @@ interface Props {
   onClose: () => void;
 }
 
+function formatarTempo(segundos: number): string {
+  const mins = Math.floor(segundos / 60);
+  const secs = segundos % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const toast = useToast();
   const [fase, setFase] = useState<"config" | "jogando" | "resultado">("config");
@@ -22,7 +29,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   
   const [idx, setIdx] = useState(0);
   const [selecionada, setSelecionada] = useState<string | null>(null);
-  const [revelar, setRevelar] = useState(false);
+  const [respondida, setRespondida] = useState(false);
   const [salvando, setSalvando] = useState(false);
   
   const [acertos, setAcertos] = useState(0);
@@ -34,18 +41,19 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
 
   const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
   const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
-  
   const [modalEnviar, setModalEnviar] = useState(false);
 
+  // Efeito do cronômetro
   useEffect(() => {
-    if (fase === "jogando" && !revelar) {
+    if (fase === "jogando" && !respondida) {
       timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [fase, revelar, idx]);
+  }, [fase, respondida, idx]);
 
+  // Carregar anotações
   useEffect(() => {
     if (!userId || questoesSorteio.length === 0) return;
     const ids = questoesSorteio.map(q => q.id);
@@ -53,7 +61,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   }, [userId, questoesSorteio]);
 
   const iniciar = () => {
-    // Garante que a quantidade não seja maior que o total disponível
     const qtd = Math.min(quantidade, questoes.length);
     const embaralhadas = [...questoes].sort(() => Math.random() - 0.5).slice(0, qtd);
     setQuestoesSorteio(embaralhadas);
@@ -63,25 +70,25 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     setQuestoesErradas([]);
     setTempoQuestao(0);
     setSelecionada(null);
-    setRevelar(false);
+    setRespondida(false);
     setEliminadas({});
     setFase("jogando");
   };
 
-  const handleResponder = async () => {
-    if (!selecionada) return;
-    setRevelar(true);
-    const q = questoesSorteio[idx];
-    
-    let correta = null;
-    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra?.toUpperCase() || null;
-    else correta = q.gabarito_ce ? 'C' : 'E';
+  const getCorreta = (q: QuestaoBanco): string | null => {
+    if (q.tipo_questao === 'multipla_escolha') return q.gabarito_letra?.toUpperCase() || null;
+    return q.gabarito_ce ? 'C' : 'E';
+  };
 
+  const handleResponder = async () => {
+    if (!selecionada || respondida) return;
+    setRespondida(true);
+    const q = questoesSorteio[idx];
+    const correta = getCorreta(q);
     const acertou = selecionada.toUpperCase() === correta;
     
-    if (acertou) {
-      setAcertos(prev => prev + 1);
-    } else {
+    if (acertou) setAcertos(prev => prev + 1);
+    else {
       setErros(prev => prev + 1);
       setQuestoesErradas(prev => [...prev, { q, suaResposta: selecionada.toUpperCase(), respostaCorreta: correta || '' }]);
     }
@@ -92,18 +99,26 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   };
 
   const avancar = () => {
-    if (idx === questoesSorteio.length - 1) {
-      setFase("resultado");
-    } else {
+    if (idx === questoesSorteio.length - 1) setFase("resultado");
+    else {
       setIdx(prev => prev + 1);
       setSelecionada(null);
-      setRevelar(false);
+      setRespondida(false);
+      setTempoQuestao(0);
+    }
+  };
+
+  const voltar = () => {
+    if (idx > 0) {
+      setIdx(prev => prev - 1);
+      setSelecionada(null);
+      setRespondida(false);
       setTempoQuestao(0);
     }
   };
 
   const toggleEliminada = (letra: string) => {
-    if (revelar) return;
+    if (respondida) return;
     setEliminadas(prev => {
       const atual = prev[idx] || [];
       const nova = atual.includes(letra) ? atual.filter(l => l !== letra) : [...atual, letra];
@@ -111,6 +126,60 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     });
     if (selecionada === letra) setSelecionada(null);
   };
+
+  // Atalhos de teclado
+  useEffect(() => {
+    if (fase !== "jogando") return;
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      
+      const q = questoesSorteio[idx];
+      if (!q) return;
+
+      const tecla = e.key.toUpperCase();
+      const numeros = ["1", "2", "3", "4", "5"];
+      const letras = ["A", "B", "C", "D", "E"];
+
+      // Selecionar alternativa
+      if (!respondida && q.tipo_questao === 'multipla_escolha' && q.alternativas) {
+        let letraAlvo = null;
+        const idxNum = numeros.indexOf(tecla);
+        if (idxNum >= 0) letraAlvo = letras[idxNum];
+        else if (letras.includes(tecla)) letraAlvo = tecla;
+
+        if (letraAlvo) {
+          const existe = q.alternativas.some(a => a.letra === letraAlvo);
+          const elims = eliminadas[idx] || [];
+          if (existe && !elims.includes(letraAlvo)) {
+            e.preventDefault();
+            setSelecionada(letraAlvo);
+            return;
+          }
+        }
+      } else if (!respondida && q.tipo_questao === 'certo_errado') {
+        if (tecla === "1" || tecla === "C") { e.preventDefault(); setSelecionada("C"); return; }
+        if (tecla === "2" || tecla === "E") { e.preventDefault(); setSelecionada("E"); return; }
+      }
+
+      // Responder
+      if (e.key === "Enter" && selecionada && !respondida) {
+        e.preventDefault();
+        handleResponder();
+        return;
+      }
+
+      // Navegar
+      if (e.key === "ArrowLeft") { e.preventDefault(); voltar(); return; }
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        if (respondida) avancar();
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [fase, idx, respondida, selecionada, questoesSorteio, eliminadas]);
 
   const handleGrifar = async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
     const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
@@ -173,9 +242,10 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     };
   });
 
+  // Tela de Configuração
   if (fase === "config") {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    return createPortal(
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-elevated">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Responder Questões</h3>
@@ -234,17 +304,17 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
+  // Tela de Jogo
   if (fase === "jogando") {
     const q = questoesSorteio[idx];
     const total = questoesSorteio.length;
-    
-    let correta = null;
-    if (q.tipo_questao === 'multipla_escolha') correta = q.gabarito_letra?.toUpperCase() || null;
-    else correta = q.gabarito_ce ? 'C' : 'E';
+    const correta = getCorreta(q);
+    const eliminadasAtuais = eliminadas[idx] || [];
 
     let alternativasView = [];
     if (q.tipo_questao === 'certo_errado') {
@@ -259,19 +329,22 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
       }));
     }
 
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-background overflow-y-auto">
+    return createPortal(
+      <div className="fixed inset-0 z-[100] flex flex-col bg-background overflow-y-auto">
+        {/* Cabeçalho fixo */}
         <div className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-medium text-foreground/60 hover:text-foreground flex items-center gap-1">
             <ChevronLeft className="h-4 w-4" /> Sair
           </button>
           <div className="text-sm font-semibold">{idx + 1} de {total}</div>
-          <div className="text-xs font-medium text-foreground/50 tabular-nums">
-            {Math.floor(tempoQuestao / 60)}:{(tempoQuestao % 60).toString().padStart(2, '0')}
+          <div className="flex items-center gap-1 text-xs font-medium text-foreground/50 tabular-nums">
+            <Clock className="h-3.5 w-3.5" />
+            {formatarTempo(tempoQuestao)}
           </div>
         </div>
 
-        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 pb-24">
+        {/* Corpo da questão */}
+        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 pb-32">
           <QuestaoCard
             numero={idx + 1}
             total={total}
@@ -283,11 +356,12 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
             tipo={q.tipo_questao}
             alternativas={alternativasView}
             selecionada={selecionada}
-            eliminadas={eliminadas[idx] || []}
-            correta={correta}
-            revelar={revelar}
-            onSelecionar={(letra) => !revelar && setSelecionada(letra)}
-            permitirEliminar={!revelar}
+            eliminadas={eliminadasAtuais}
+            correta={respondida ? correta : null}
+            comentario={respondida ? q.comentario : null}
+            revelar={respondida}
+            permitirEliminar={!respondida}
+            onSelecionar={(letra) => !respondida && setSelecionada(letra)}
             onEliminar={toggleEliminada}
             anotacoes={anotacoes.get(q.id) ?? []}
             onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
@@ -297,13 +371,22 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           />
         </div>
 
+        {/* Rodapé fixo com botões */}
         <div className="fixed bottom-0 left-0 right-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
-            {!revelar ? (
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+            <button
+              onClick={voltar}
+              disabled={idx === 0}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ArrowLeft className="h-4 w-4" /> Anterior
+            </button>
+
+            {!respondida ? (
               <button
                 onClick={handleResponder}
                 disabled={!selecionada || salvando}
-                className="w-full max-w-xs mx-auto inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground disabled:opacity-50"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground disabled:opacity-50"
               >
                 {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 Responder
@@ -311,21 +394,31 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
             ) : (
               <button
                 onClick={avancar}
-                className="w-full max-w-xs mx-auto inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground"
               >
                 {idx === total - 1 ? "Ver Resultado" : "Próxima Questão"}
               </button>
             )}
+
+            <button
+              onClick={avancar}
+              disabled={!respondida || idx === total - 1}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Próxima <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
+  // Tela de Resultado
   if (fase === "resultado") {
-    return (
+    return createPortal(
       <>
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated text-center">
             <h3 className="font-display text-xl font-bold mb-2">Sessão Concluída!</h3>
             <p className="text-xs text-foreground/60 mb-6">Você respondeu {questoesSorteio.length} questões.</p>
@@ -366,7 +459,8 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
             onClose={(enviou) => { setModalEnviar(false); onClose(); }}
           />
         )}
-      </>
+      </>,
+      document.body
     );
   }
 

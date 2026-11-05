@@ -79,7 +79,6 @@ function TextoFormatado({
   italicos?: Intervalo[] | null;
 }) {
   // 1. Se o texto contiver QUALQUER tag HTML (novo parser), renderiza via HTML.
-  // A regex abaixo pega qualquer coisa que pareça uma tag HTML: <p>, <br>, <div>, <b>, etc.
   if (/<[a-z][\s\S]*>/i.test(texto)) {
     return <>{parse(texto)}</>;
   }
@@ -104,7 +103,6 @@ function TextoFormatado({
   if (mask.every((m) => m === 0)) return <>{texto}</>;
 
   // Se tem grifos, precisamos combinar o HTML com as máscaras (lógica antiga)
-  // Para simplificar, se tiver HTML, priorizamos o HTML bonito
   const partes: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
@@ -168,7 +166,6 @@ export function QuestaoCard({
     (anotacoes ?? []).filter((a) => a.campo_alvo === campo && !a.isdeleted);
 
   const handleCliqueAlternativa = (letra: string) => {
-    // Se o usuário acabou de selecionar texto (para grifar), não conta como clique.
     const sel = typeof window !== "undefined" ? window.getSelection() : null;
     if (sel && sel.toString().trim().length > 0) return;
     onSelecionar(letra);
@@ -220,7 +217,7 @@ export function QuestaoCard({
       </div>
 
       <div className="p-5 lg:p-7">
-        {/* Enunciado */}
+        {/* Enunciado - Trocado de <p> para <div> */}
         {grifoHabilitado ? (
           <TextoGrifavel
             grifos={grifosDoCampo("enunciado")}
@@ -229,24 +226,24 @@ export function QuestaoCard({
             onRemover={onRemoverGrifo}
             onTrocarCor={onTrocarCorGrifo}
           >
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+            <div className="text-sm leading-relaxed whitespace-pre-wrap">
               <TextoFormatado
                 texto={enunciado}
                 sublinhados={sublinhadosEnunciado}
                 negritos={negritosEnunciado}
                 italicos={italicosEnunciado}
               />
-            </p>
+            </div>
           </TextoGrifavel>
         ) : (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="text-sm leading-relaxed whitespace-pre-wrap">
             <TextoFormatado
               texto={enunciado}
               sublinhados={sublinhadosEnunciado}
               negritos={negritosEnunciado}
               italicos={italicosEnunciado}
             />
-          </p>
+          </div>
         )}
 
         {/* Imagens da questão */}
@@ -352,7 +349,7 @@ export function QuestaoCard({
                         onRemover={onRemoverGrifo}
                         onTrocarCor={onTrocarCorGrifo}
                       >
-                        <span
+                        <div
                           className={
                             cut ? "text-muted-foreground line-through opacity-60" : ""
                           }
@@ -363,10 +360,10 @@ export function QuestaoCard({
                             negritos={a.negritos} 
                             italicos={a.italicos} 
                           />
-                        </span>
+                        </div>
                       </TextoGrifavel>
                     ) : (
-                      <span
+                      <div
                         className={
                           cut ? "text-muted-foreground line-through opacity-60" : ""
                         }
@@ -377,7 +374,7 @@ export function QuestaoCard({
                           negritos={a.negritos} 
                           italicos={a.italicos} 
                         />
-                      </span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -474,7 +471,7 @@ export function QuestaoCard({
           </div>
         )}
 
-        {/* Comentário */}
+        {/* Comentário - Trocado de <p> para <div> */}
         {revelar && comentario && (
           <div className="mt-6 rounded-2xl bg-muted p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-primary">
@@ -488,24 +485,24 @@ export function QuestaoCard({
                 onRemover={onRemoverGrifo}
                 onTrocarCor={onTrocarCorGrifo}
               >
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
                   <TextoFormatado
                     texto={comentario}
                     sublinhados={sublinhadosComentario}
                     negritos={negritosComentario}
                     italicos={italicosComentario}
                   />
-                </p>
+                </div>
               </TextoGrifavel>
             ) : (
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+              <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
                 <TextoFormatado
                   texto={comentario}
                   sublinhados={sublinhadosComentario}
                   negritos={negritosComentario}
                   italicos={italicosComentario}
                 />
-              </p>
+              </div>
             )}
             {selecionada && correta && (
               <div className="mt-3 flex gap-4 text-xs">

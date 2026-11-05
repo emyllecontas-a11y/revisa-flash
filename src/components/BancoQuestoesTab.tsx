@@ -34,6 +34,13 @@ import { getTaxonomia } from "@/services/taxonomiaService";
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
 
+// Função auxiliar para limpar o HTML e decodificar os acentos
+function stripHtml(html: string) {
+  if (!html) return '';
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent || "";
+}
+
 export function BancoQuestoesTab() {
   const { user } = useAppUser();
   const toast = useToast();
@@ -310,7 +317,8 @@ export function BancoQuestoesTab() {
                           {q.subassunto && q.subassunto !== "Geral" && (<span className="text-[10px] text-foreground/40">› {q.subassunto}</span>)}
                           <Badge className={q.tipo_questao === "certo_errado" ? "bg-warning/15 text-warning" : "bg-primary/15 text-primary"}>{q.tipo_questao === "certo_errado" ? "C/E" : "Múltipla"}</Badge>
                         </div>
-                        <p className="line-clamp-2 text-sm text-foreground/85">{q.enunciado}</p>
+                        {/* AQUI FOI APLICADA A LIMPEZA DO HTML */}
+                        <p className="line-clamp-2 text-sm text-foreground/85">{stripHtml(q.enunciado)}</p>
                       </div>
                     </div>
                   </li>
