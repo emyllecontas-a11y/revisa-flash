@@ -1,8 +1,4 @@
 // src/components/QuestaoCard.tsx
-// Componente visual puro para renderizar uma questão.
-// Suporta: sublinhado, negrito, itálico, imagens, certo/errado e grifos interativos.
-// Suporta tanto formatação via tags HTML (novo parser) quanto via arrays de intervalos (parser antigo).
-
 import { Bookmark, Check, Scissors, X } from "lucide-react";
 import { Fragment } from "react";
 import parse from 'html-react-parser';
@@ -54,7 +50,6 @@ export interface QuestaoCardProps {
   onEliminar?: (letra: string) => void;
   onMarcar?: () => void;
 
-  // ---- Grifos (opcional) ----
   anotacoes?: AnotacaoQuestao[];
   onGrifar?: (campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => void;
   onRemoverGrifo?: (id: string) => void;
@@ -78,12 +73,23 @@ function TextoFormatado({
   negritos?: Intervalo[] | null;
   italicos?: Intervalo[] | null;
 }) {
-  // 1. Se o texto contiver QUALQUER tag HTML (novo parser), renderiza via HTML.
-  if (/<[a-z][\s\S]*>/i.test(texto)) {
-    return <>{parse(texto)}</>;
+  // 1. Converte a tag [IMAGEM: url] para uma tag <img> real
+  let textoProcessado = texto.replace(
+    /\[IMAGEM:\s*(.+?)\]/g,
+    '<img src="$1" alt="Imagem da questão" class="my-3 max-h-80 rounded-lg border border-border object-contain" />'
+  );
+
+  // 2. Se o texto tiver QUALQUER tag HTML (abertura ou fechamento) OU qualquer código de acento (&...;),
+  // renderiza usando o parser de HTML.
+  if (/<[a-z\/][\s\S]*>|&[a-z0-9]+;/i.test(textoProcessado)) {
+    return (
+      <div className="[&_p]:mb-2 [&_p]:mt-0 [&_p:empty]:hidden [&_br]:hidden [&_img]:block">
+        {parse(textoProcessado)}
+      </div>
+    );
   }
 
-  // 2. Se não tiver tags, mas tiver os arrays de intervalo (parser antigo), aplica a máscara.
+  // 3. Fallback antigo (arrays de intervalo)
   const n = texto.length;
   const mask = new Uint8Array(n);
   for (const s of sublinhados ?? []) {
@@ -99,10 +105,8 @@ function TextoFormatado({
     for (let i = a; i < b; i++) mask[i] |= 4;
   }
 
-  // Se não tem grifos (anotações do usuário), retorna apenas o texto
   if (mask.every((m) => m === 0)) return <>{texto}</>;
 
-  // Se tem grifos, precisamos combinar o HTML com as máscaras (lógica antiga)
   const partes: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
@@ -173,31 +177,19 @@ export function QuestaoCard({
 
   return (
     <article className="overflow-hidden rounded-3xl border border-border bg-surface">
-      {/* Faixa superior (magenta) com metadados */}
       <div className="grid gap-3 bg-sidebar px-5 py-4 text-sidebar-foreground sm:grid-cols-2 lg:px-7">
         <div className="space-y-0.5 text-sm">
           <p className="font-display text-lg font-bold">
-            Questão {numero}{" "}
-            <span className="text-sm font-medium opacity-70">de {total}</span>
+            Questão {numero} <span className="text-sm font-medium opacity-70">de {total}</span>
           </p>
           {ano !== undefined && ano !== null && ano !== "" && (
-            <p className="opacity-80">
-              Ano: <b>{ano}</b>
-            </p>
+            <p className="opacity-80">Ano: <b>{ano}</b></p>
           )}
         </div>
 
         <div className="space-y-0.5 text-sm sm:text-right">
-          {area && (
-            <p className="opacity-80">
-              Área: <b>{area}</b>
-            </p>
-          )}
-          {instituicao && (
-            <p className="opacity-80">
-              Instituição: <b>{instituicao}</b>
-            </p>
-          )}
+          {area && <p className="opacity-80">Área: <b>{area}</b></p>}
+          {instituicao && <p className="opacity-80">Instituição: <b>{instituicao}</b></p>}
           {onMarcar && (
             <button
               type="button"
@@ -207,9 +199,7 @@ export function QuestaoCard({
                 marcada ? "bg-primary text-primary-foreground" : "bg-background/30",
               ].join(" ")}
             >
-              <Bookmark
-                className={["h-3.5 w-3.5", marcada ? "fill-current" : ""].join(" ")}
-              />
+              <Bookmark className={["h-3.5 w-3.5", marcada ? "fill-current" : ""].join(" ")} />
               {marcada ? "Marcada" : "Marcar"}
             </button>
           )}
@@ -217,7 +207,6 @@ export function QuestaoCard({
       </div>
 
       <div className="p-5 lg:p-7">
-        {/* Enunciado - Trocado de <p> para <div> */}
         {grifoHabilitado ? (
           <TextoGrifavel
             grifos={grifosDoCampo("enunciado")}
@@ -246,7 +235,6 @@ export function QuestaoCard({
           </div>
         )}
 
-        {/* Imagens da questão */}
         {imagens && imagens.length > 0 && (
           <div className="mt-4 space-y-3">
             {imagens.map((url, i) => (
@@ -254,25 +242,17 @@ export function QuestaoCard({
                 key={i}
                 src={url}
                 alt={`Imagem da questão ${numero}`}
-                className="max-h-80 rounded-lg border border-border"
+                className="max-h-80 rounded-lg border border-border object-contain"
               />
             ))}
           </div>
         )}
 
-        {/* Dica de interação */}
         <p className="mt-6 text-xs text-muted-foreground">
-          {isCertoErrado
-            ? "Escolha Certo ou Errado"
-            : permitirEliminar
-            ? "Toque na alternativa para responder · use a tesoura para eliminar"
-            : "Toque na alternativa para responder"}
-          {grifoHabilitado && podeGrifar && (
-            <> · selecione um trecho para grifar</>
-          )}
+          {isCertoErrado ? "Escolha Certo ou Errado" : permitirEliminar ? "Toque na alternativa para responder · use a tesoura para eliminar" : "Toque na alternativa para responder"}
+          {grifoHabilitado && podeGrifar && <> · selecione um trecho para grifar</>}
         </p>
 
-        {/* Alternativas — múltipla escolha */}
         {!isCertoErrado && (
           <div className="mt-2 space-y-2.5">
             {alternativas.map((a) => {
@@ -302,9 +282,7 @@ export function QuestaoCard({
                       onClick={() => onEliminar(a.letra)}
                       aria-label={`Eliminar ${a.letra}`}
                       className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-                        cut
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:text-foreground"
+                        cut ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       <Scissors className="h-4 w-4" />
@@ -322,24 +300,14 @@ export function QuestaoCard({
                         handleCliqueAlternativa(a.letra);
                       }
                     }}
-                    className={`flex flex-1 items-center gap-3 text-left ${
-                      cut ? "cursor-not-allowed" : "cursor-pointer"
-                    }`}
+                    className={`flex flex-1 items-center gap-3 text-left ${cut ? "cursor-not-allowed" : "cursor-pointer"}`}
                   >
                     <span
                       className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-bold ${
-                        isSel && !revelar
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border"
+                        isSel && !revelar ? "border-primary bg-primary text-primary-foreground" : "border-border"
                       }`}
                     >
-                      {isCorreta ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : isErrada ? (
-                        <X className="h-4 w-4 text-destructive" />
-                      ) : (
-                        a.letra
-                      )}
+                      {isCorreta ? <Check className="h-4 w-4 text-green-500" /> : isErrada ? <X className="h-4 w-4 text-destructive" /> : a.letra}
                     </span>
                     {grifoHabilitado ? (
                       <TextoGrifavel
@@ -349,31 +317,13 @@ export function QuestaoCard({
                         onRemover={onRemoverGrifo}
                         onTrocarCor={onTrocarCorGrifo}
                       >
-                        <div
-                          className={
-                            cut ? "text-muted-foreground line-through opacity-60" : ""
-                          }
-                        >
-                          <TextoFormatado 
-                            texto={a.texto} 
-                            sublinhados={a.sublinhados} 
-                            negritos={a.negritos} 
-                            italicos={a.italicos} 
-                          />
+                        <div className={cut ? "text-muted-foreground line-through opacity-60" : ""}>
+                          <TextoFormatado texto={a.texto} sublinhados={a.sublinhados} negritos={a.negritos} italicos={a.italicos} />
                         </div>
                       </TextoGrifavel>
                     ) : (
-                      <div
-                        className={
-                          cut ? "text-muted-foreground line-through opacity-60" : ""
-                        }
-                      >
-                        <TextoFormatado 
-                          texto={a.texto} 
-                          sublinhados={a.sublinhados} 
-                          negritos={a.negritos} 
-                          italicos={a.italicos} 
-                        />
+                      <div className={cut ? "text-muted-foreground line-through opacity-60" : ""}>
+                        <TextoFormatado texto={a.texto} sublinhados={a.sublinhados} negritos={a.negritos} italicos={a.italicos} />
                       </div>
                     )}
                   </div>
@@ -383,7 +333,6 @@ export function QuestaoCard({
           </div>
         )}
 
-        {/* Alternativas — certo/errado */}
         {isCertoErrado && (
           <div className="mt-2 grid grid-cols-2 gap-3">
             {alternativas.map((a) => {
@@ -423,55 +372,22 @@ export function QuestaoCard({
                       onRemover={onRemoverGrifo}
                       onTrocarCor={onTrocarCorGrifo}
                     >
-                      <div
-                        className={`font-display text-sm font-semibold ${
-                          isCorreta
-                            ? "text-green-500"
-                            : isErrada
-                            ? "text-destructive"
-                            : isSel
-                            ? "text-primary"
-                            : "text-foreground/70"
-                        }`}
-                      >
-                        <TextoFormatado 
-                          texto={a.texto} 
-                          sublinhados={a.sublinhados} 
-                          negritos={a.negritos} 
-                          italicos={a.italicos} 
-                        />
+                      <div className={`font-display text-sm font-semibold ${isCorreta ? "text-green-500" : isErrada ? "text-destructive" : isSel ? "text-primary" : "text-foreground/70"}`}>
+                        <TextoFormatado texto={a.texto} sublinhados={a.sublinhados} negritos={a.negritos} italicos={a.italicos} />
                       </div>
                     </TextoGrifavel>
                   ) : (
-                    <div
-                      className={`font-display text-sm font-semibold ${
-                        isCorreta
-                          ? "text-green-500"
-                          : isErrada
-                          ? "text-destructive"
-                          : isSel
-                          ? "text-primary"
-                          : "text-foreground/70"
-                      }`}
-                    >
-                      <TextoFormatado 
-                        texto={a.texto} 
-                        sublinhados={a.sublinhados} 
-                        negritos={a.negritos} 
-                        italicos={a.italicos} 
-                      />
+                    <div className={`font-display text-sm font-semibold ${isCorreta ? "text-green-500" : isErrada ? "text-destructive" : isSel ? "text-primary" : "text-foreground/70"}`}>
+                      <TextoFormatado texto={a.texto} sublinhados={a.sublinhados} negritos={a.negritos} italicos={a.italicos} />
                     </div>
                   )}
-                  {isSel && !revelar && (
-                    <div className="mt-1 text-[10px] text-foreground/40">Selecionado</div>
-                  )}
+                  {isSel && !revelar && <div className="mt-1 text-[10px] text-foreground/40">Selecionado</div>}
                 </div>
               );
             })}
           </div>
         )}
 
-        {/* Comentário - Trocado de <p> para <div> */}
         {revelar && comentario && (
           <div className="mt-6 rounded-2xl bg-muted p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-primary">
@@ -486,32 +402,18 @@ export function QuestaoCard({
                 onTrocarCor={onTrocarCorGrifo}
               >
                 <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-                  <TextoFormatado
-                    texto={comentario}
-                    sublinhados={sublinhadosComentario}
-                    negritos={negritosComentario}
-                    italicos={italicosComentario}
-                  />
+                  <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
                 </div>
               </TextoGrifavel>
             ) : (
               <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-                <TextoFormatado
-                  texto={comentario}
-                  sublinhados={sublinhadosComentario}
-                  negritos={negritosComentario}
-                  italicos={italicosComentario}
-                />
+                <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
               </div>
             )}
             {selecionada && correta && (
               <div className="mt-3 flex gap-4 text-xs">
-                <span>
-                  Sua resposta: <b>{selecionada}</b>
-                </span>
-                <span>
-                  Resposta correta: <b className="text-green-500">{correta}</b>
-                </span>
+                <span>Sua resposta: <b>{selecionada}</b></span>
+                <span>Resposta correta: <b className="text-green-500">{correta}</b></span>
               </div>
             )}
           </div>

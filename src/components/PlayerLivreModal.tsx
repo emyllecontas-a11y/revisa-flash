@@ -1,5 +1,5 @@
 // src/components/PlayerLivreModal.tsx
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { QuestaoCard } from "@/components/QuestaoCard";
 import { salvarTentativaAvulsa, type QuestaoBanco } from "@/services/bancoQuestoesService";
@@ -29,7 +29,9 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   
   const [idx, setIdx] = useState(0);
   const [selecionada, setSelecionada] = useState<string | null>(null);
-  const [respondida, setRespondida] = useState(false);
+  
+  // DICIONÁRIO DE RESPOSTAS CONFIRMADAS (O ID da questão mapeia para a letra)
+  const [respostasConfirmadas, setRespostasConfirmadas] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
   
   const [acertos, setAcertos] = useState(0);
@@ -42,6 +44,9 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
   const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
   const [modalEnviar, setModalEnviar] = useState(false);
+
+  const questaoAtual = questoesSorteio[idx];
+  const respondida = questaoAtual ? !!respostasConfirmadas[questaoAtual.id] : false;
 
   // Efeito do cronômetro
   useEffect(() => {
@@ -70,7 +75,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     setQuestoesErradas([]);
     setTempoQuestao(0);
     setSelecionada(null);
-    setRespondida(false);
+    setRespostasConfirmadas({});
     setEliminadas({});
     setFase("jogando");
   };
@@ -81,20 +86,22 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   };
 
   const handleResponder = async () => {
-    if (!selecionada || respondida) return;
-    setRespondida(true);
-    const q = questoesSorteio[idx];
-    const correta = getCorreta(q);
+    if (!selecionada || respondida || !questaoAtual) return;
+    
+    // Salva a resposta no dicionário
+    setRespostasConfirmadas(prev => ({ ...prev, [questaoAtual.id]: selecionada }));
+    
+    const correta = getCorreta(questaoAtual);
     const acertou = selecionada.toUpperCase() === correta;
     
     if (acertou) setAcertos(prev => prev + 1);
     else {
       setErros(prev => prev + 1);
-      setQuestoesErradas(prev => [...prev, { q, suaResposta: selecionada.toUpperCase(), respostaCorreta: correta || '' }]);
+      setQuestoesErradas(prev => [...prev, { q: questaoAtual, suaResposta: selecionada.toUpperCase(), respostaCorreta: correta || '' }]);
     }
 
     setSalvando(true);
-    await salvarTentativaAvulsa(userId, q.id, selecionada, acertou, tempoQuestao);
+    await salvarTentativaAvulsa(userId, questaoAtual.id, selecionada, acertou, tempoQuestao);
     setSalvando(false);
   };
 
@@ -103,7 +110,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     else {
       setIdx(prev => prev + 1);
       setSelecionada(null);
-      setRespondida(false);
       setTempoQuestao(0);
     }
   };
@@ -112,7 +118,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     if (idx > 0) {
       setIdx(prev => prev - 1);
       setSelecionada(null);
-      setRespondida(false);
       setTempoQuestao(0);
     }
   };
@@ -129,27 +134,23 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
 
   // Atalhos de teclado
   useEffect(() => {
-    if (fase !== "jogando") return;
+    if (fase !== "jogando" || !questaoAtual) return;
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       
-      const q = questoesSorteio[idx];
-      if (!q) return;
-
       const tecla = e.key.toUpperCase();
       const numeros = ["1", "2", "3", "4", "5"];
       const letras = ["A", "B", "C", "D", "E"];
 
-      // Selecionar alternativa
-      if (!respondida && q.tipo_questao === 'multipla_escolha' && q.alternativas) {
+      if (!respondida && questaoAtual.tipo_questao === 'multipla_escolha' && questaoAtual.alternativas) {
         let letraAlvo = null;
         const idxNum = numeros.indexOf(tecla);
         if (idxNum >= 0) letraAlvo = letras[idxNum];
         else if (letras.includes(tecla)) letraAlvo = tecla;
 
         if (letraAlvo) {
-          const existe = q.alternativas.some(a => a.letra === letraAlvo);
+          const existe = questaoAtual.alternativas.some(a => a.letra === letraAlvo);
           const elims = eliminadas[idx] || [];
           if (existe && !elims.includes(letraAlvo)) {
             e.preventDefault();
@@ -157,19 +158,17 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
             return;
           }
         }
-      } else if (!respondida && q.tipo_questao === 'certo_errado') {
+      } else if (!respondida && questaoAtual.tipo_questao === 'certo_errado') {
         if (tecla === "1" || tecla === "C") { e.preventDefault(); setSelecionada("C"); return; }
         if (tecla === "2" || tecla === "E") { e.preventDefault(); setSelecionada("E"); return; }
       }
 
-      // Responder
       if (e.key === "Enter" && selecionada && !respondida) {
         e.preventDefault();
         handleResponder();
         return;
       }
 
-      // Navegar
       if (e.key === "ArrowLeft") { e.preventDefault(); voltar(); return; }
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
@@ -179,7 +178,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fase, idx, respondida, selecionada, questoesSorteio, eliminadas]);
+  }, [fase, idx, respondida, selecionada, questoesSorteio, eliminadas, questaoAtual]);
 
   const handleGrifar = async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
     const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
@@ -242,7 +241,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     };
   });
 
-  // Tela de Configuração
   if (fase === "config") {
     return createPortal(
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -309,18 +307,18 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     );
   }
 
-  // Tela de Jogo
-  if (fase === "jogando") {
-    const q = questoesSorteio[idx];
+  if (fase === "jogando" && questaoAtual) {
     const total = questoesSorteio.length;
-    const correta = getCorreta(q);
+    const correta = getCorreta(questaoAtual);
     const eliminadasAtuais = eliminadas[idx] || [];
+    const respostaConfirmada = respostasConfirmadas[questaoAtual.id];
+    const selecionadaAtual = respostaConfirmada || selecionada;
 
     let alternativasView = [];
-    if (q.tipo_questao === 'certo_errado') {
+    if (questaoAtual.tipo_questao === 'certo_errado') {
       alternativasView = [ { letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' } ];
     } else {
-      alternativasView = (q.alternativas || []).map(a => ({ 
+      alternativasView = (questaoAtual.alternativas || []).map(a => ({ 
         letra: a.letra.toUpperCase(), 
         texto: a.texto,
         sublinhados: (a as any).sublinhados,
@@ -331,7 +329,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
 
     return createPortal(
       <div className="fixed inset-0 z-[100] flex flex-col bg-background overflow-y-auto">
-        {/* Cabeçalho fixo */}
         <div className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-medium text-foreground/60 hover:text-foreground flex items-center gap-1">
             <ChevronLeft className="h-4 w-4" /> Sair
@@ -343,35 +340,33 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           </div>
         </div>
 
-        {/* Corpo da questão */}
         <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 pb-32">
           <QuestaoCard
             numero={idx + 1}
             total={total}
-            ano={q.ano}
-            area={q.disciplina}
-            instituicao={q.banca}
-            enunciado={q.enunciado}
-            imagens={q.imagem_url ? [q.imagem_url] : []}
-            tipo={q.tipo_questao}
+            ano={questaoAtual.ano}
+            area={questaoAtual.disciplina}
+            instituicao={questaoAtual.banca}
+            enunciado={questaoAtual.enunciado}
+            imagens={questaoAtual.imagem_url ? [questaoAtual.imagem_url] : []}
+            tipo={questaoAtual.tipo_questao}
             alternativas={alternativasView}
-            selecionada={selecionada}
+            selecionada={selecionadaAtual}
             eliminadas={eliminadasAtuais}
             correta={respondida ? correta : null}
-            comentario={respondida ? q.comentario : null}
+            comentario={respondida ? questaoAtual.comentario : null}
             revelar={respondida}
             permitirEliminar={!respondida}
             onSelecionar={(letra) => !respondida && setSelecionada(letra)}
             onEliminar={toggleEliminada}
-            anotacoes={anotacoes.get(q.id) ?? []}
-            onGrifar={(campo, cor, texto, rects) => handleGrifar(q.id, campo, cor, texto, rects)}
+            anotacoes={anotacoes.get(questaoAtual.id) ?? []}
+            onGrifar={(campo, cor, texto, rects) => handleGrifar(questaoAtual.id, campo, cor, texto, rects)}
             onRemoverGrifo={handleRemoverGrifo}
             onTrocarCorGrifo={handleTrocarCorGrifo}
             grifarAtivo={true}
           />
         </div>
 
-        {/* Rodapé fixo com botões */}
         <div className="fixed bottom-0 left-0 right-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
             <button
@@ -414,7 +409,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     );
   }
 
-  // Tela de Resultado
   if (fase === "resultado") {
     return createPortal(
       <>
