@@ -7,6 +7,8 @@ export interface RankingUser {
   id: string;
   name: string;
   avatar_url: string | null;
+  avatar_tipo?: string | null; // 🔥 NOVO
+  avatar_id?: string | null;   // 🔥 NOVO
   pontos: number;
   variacao: number;
   horasEstudadas: number;
@@ -29,7 +31,7 @@ function getPeriodos() {
   semanaInicio.setDate(agora.getDate() - dia + 1); semanaInicio.setHours(0, 0, 0, 0);
   const mesInicio = new Date(agora.getFullYear(), agora.getMonth(), 1);
 
-  const dataRefIso = hojeInicio.toISOString().split('T')[0]; // YYYY-MM-DD
+  const dataRefIso = hojeInicio.toISOString().split('T')[0];
 
   return {
     hojeIso: hojeInicio.toISOString(),
@@ -55,7 +57,7 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   const rankingMap = new Map<string, RankingUser>();
   userIds.forEach(uid => {
     rankingMap.set(uid, {
-      id: uid, name: `Estudante`, avatar_url: null, pontos: 0, variacao: 0,
+      id: uid, name: `Estudante`, avatar_url: null, avatar_tipo: null, avatar_id: null, pontos: 0, variacao: 0,
       horasEstudadas: 0, questoesResolvidas: 0, simuladosRealizados: 0, coroa: null
     });
   });
@@ -87,10 +89,10 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   try {
     const ids = Array.from(rankingMap.keys());
     
-    // 🔥 CORREÇÃO AQUI: Busca apenas as colunas reais da tabela profiles
+    // 🔥 CORREÇÃO: Buscando também o avatar_tipo e avatar_id
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, name, avatar_url')
+      .select('id, name, avatar_url, avatar_tipo, avatar_id')
       .in('id', ids);
 
     if (profiles) {
@@ -98,6 +100,8 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
         if (rankingMap.has(p.id)) {
           rankingMap.get(p.id)!.name = p.name || "Estudante";
           rankingMap.get(p.id)!.avatar_url = p.avatar_url || null;
+          rankingMap.get(p.id)!.avatar_tipo = p.avatar_tipo || 'foto';
+          rankingMap.get(p.id)!.avatar_id = p.avatar_id || null;
         }
       });
     }

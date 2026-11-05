@@ -1,5 +1,7 @@
+// src/components/ranking/components/RankingAvatar.tsx
 import type { CrownType } from "../types";
 import { Crown, CROWN_RING } from "./Crown";
+import { AVATARES_MAP } from "@/components/ui/UserAvatar"; // 🔥 Importando o mapa da Lumi
 
 const AV_COLORS = ["var(--rk-av-1)", "var(--rk-av-2)", "var(--rk-av-3)", "var(--rk-av-4)", "var(--rk-av-5)"];
 
@@ -18,48 +20,52 @@ interface RankingAvatarProps {
   id: string;
   name: string;
   avatarUrl: string | null;
+  avatarTipo?: string | null; // 🔥 NOVO
+  avatarId?: string | null;   // 🔥 NOVO
   size?: number;
   crown?: CrownType | null | undefined;
-  /** Cor do anel quando não há coroa (ex.: posição do pódio). */
   ringColor?: string;
   className?: string;
 }
 
-/**
- * Avatar com coroa opcional. A coroa fica inclinada no canto superior direito,
- * acima da borda da foto, sem cobrir o rosto.
- */
-export function RankingAvatar({ id, name, avatarUrl, size = 44, crown, ringColor, className }: RankingAvatarProps) {
+export function RankingAvatar({ id, name, avatarUrl, avatarTipo, avatarId, size = 44, crown, ringColor, className }: RankingAvatarProps) {
   const ring = crown ? CROWN_RING[crown] : ringColor;
   const ringW = Math.max(2, Math.round(size / 18));
+
+  // 🔥 Lógica para escolher a imagem correta
+  let finalAvatarUrl = avatarUrl;
+  if (avatarTipo === 'avatar' && avatarId && AVATARES_MAP[avatarId]) {
+    finalAvatarUrl = AVATARES_MAP[avatarId];
+  }
+
   return (
-    <div className={`relative shrink-0 ${className ?? ""}`} style={{ width: size, height: size }}>
-      <div
-        className="h-full w-full overflow-hidden rounded-full"
-        style={{
-          boxShadow: ring
-            ? `0 0 0 ${ringW}px ${ring}, 0 0 0 ${ringW + 2}px var(--background)`
-            : "0 0 0 2px var(--border)",
-        }}
-      >
-        {avatarUrl ? (
-          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center font-display font-bold text-primary-foreground"
-            style={{ background: colorFor(id), fontSize: size * 0.36 }}
-          >
-            {initials(name)}
-          </div>
-        )}
-      </div>
-      {crown && (
-        <span
-          className="pointer-events-none absolute drop-shadow-md"
-          style={{ top: -size * 0.36, right: -size * 0.18, transform: "rotate(18deg)" }}
+    <div
+      className={`relative inline-flex items-center justify-center rounded-full ${className ?? ""}`}
+      style={{
+        width: size,
+        height: size,
+        boxShadow: ring ? `0 0 0 ${ringW}px ${ring}` : undefined,
+      }}
+    >
+      {finalAvatarUrl ? (
+        <img
+          src={finalAvatarUrl}
+          alt={name}
+          className="h-full w-full rounded-full object-cover"
+        />
+      ) : (
+        <div
+          className="grid h-full w-full place-items-center rounded-full text-xs font-bold text-white"
+          style={{ backgroundColor: colorFor(id) }}
         >
-          <Crown type={crown} size={Math.round(size * 0.58)} />
-        </span>
+          {initials(name)}
+        </div>
+      )}
+
+      {crown && (
+        <div className="absolute -right-1 -top-2">
+          <Crown type={crown} />
+        </div>
       )}
     </div>
   );

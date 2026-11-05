@@ -28,7 +28,16 @@ export function RankingList({ participants, startAt = 4, currentUserId }: Rankin
               <span className={`w-6 text-center font-display text-base font-bold ${isMe ? "text-primary" : "text-muted-foreground"}`}>
                 {startAt + i}
               </span>
-              <RankingAvatar id={p.id} name={p.name} avatarUrl={p.avatar_url} crown={p.coroa} size={42} />
+              {/* 🔥 CORREÇÃO AQUI: Passando avatarTipo e avatarId */}
+              <RankingAvatar 
+                id={p.id} 
+                name={p.name} 
+                avatarUrl={p.avatar_url} 
+                avatarTipo={p.avatar_tipo}
+                avatarId={p.avatar_id}
+                crown={p.coroa} 
+                size={42} 
+              />
               <div className="min-w-0 flex-1">
                 <p className={`truncate font-semibold ${isMe ? "text-primary" : ""}`}>
                   {p.name}

@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { useComunidadeBadge } from "@/hooks/useComunidadeBadge";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { UserAvatar } from "@/components/ui/UserAvatar"; // 🔥 NOVA IMPORTAÇÃO AQUI
 
 function LoadingScreen() {
   return (
@@ -50,8 +51,7 @@ const MAIN_ROTAS = [
 const MAIS_ROTAS = [
   { to: "/erros", label: "Erros", icon: "alert" },
   { to: "/flashcards", label: "Flashcards", icon: "layers" },
-  { to: "/simulados", label: "Questões", icon: "file-text" }, // MUDANÇA AQUI: de Simulados para Questões
-  // 🔥 Unificada: substitui "Amigas" + "Compartilhado"
+  { to: "/simulados", label: "Questões", icon: "file-text" },
   { to: "/comunidade", label: "Comunidade", icon: "users" },
   { to: "/configuracoes", label: "Ajustes", icon: "settings" },
 ] as const;
@@ -109,6 +109,11 @@ function AppShellInner({
 
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
+  
+  // 🔥 NOVOS ESTADOS AQUI
+  const [avatarTipo, setAvatarTipo] = useState<string | null>(null);
+  const [avatarId, setAvatarId] = useState<string | null>(null);
+
   const [streak, setStreak] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -120,13 +125,21 @@ function AppShellInner({
       if (!user?.id) return;
       try {
         const supabaseClient = await getSupabaseWithToken();
+        
+        // 🔥 BUSCANDO AS NOVAS COLUNAS AQUI
         const { data } = await supabaseClient
           .from('profiles')
-          .select('name, avatar_url')
+          .select('name, avatar_url, avatar_tipo, avatar_id')
           .eq('id', user.id)
           .maybeSingle();
+          
         if (data?.name) setProfileName(data.name);
         if (data?.avatar_url) setAvatarFromSupabase(data.avatar_url);
+        
+        // 🔥 SALVANDO NO ESTADO
+        if (data?.avatar_tipo) setAvatarTipo(data.avatar_tipo);
+        if (data?.avatar_id) setAvatarId(data.avatar_id);
+        
       } catch (error) {
         console.warn('Erro ao carregar perfil no AppShell:', error);
         const fallbackName = user?.fullName || user?.username || "Usuário";
@@ -307,13 +320,16 @@ function AppShellInner({
             {lastSyncTime ? `Sincronizado às ${lastSyncTime}` : "Nunca sincronizado"}
           </div>
           <div className="flex items-center gap-3 rounded-full bg-white/5 p-2">
-            {avatarFromSupabase ? (
-              <img src={avatarFromSupabase} alt={profileName} className="h-9 w-9 rounded-full object-cover border border-white/20" />
-            ) : (
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-primary font-display text-sm font-bold text-primary-foreground">
-                {profileName.slice(0, 1).toUpperCase()}
-              </div>
-            )}
+            
+            {/* 🔥 COMPONENTE NOVO AQUI NO MENU LATERAL */}
+            <UserAvatar
+              fotoUrl={avatarFromSupabase}
+              avatarTipo={avatarTipo}
+              avatarId={avatarId}
+              nome={profileName}
+              className="h-9 w-9"
+            />
+            
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold text-white">{profileName}</div>
               <div className="truncate text-[10px] text-white/50">Estudante</div>

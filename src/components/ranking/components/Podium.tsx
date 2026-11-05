@@ -20,10 +20,13 @@ export function Podium({ top, currentUserId }: { top: RankingParticipant[]; curr
           return (
             <div key={p.pos} className="rf-fade-in flex flex-col items-center" style={{ animationDelay: `${(3 - p.pos) * 90}ms` }}>
               <div className={p.pos === 1 ? "rk-float" : ""}>
+                {/* 🔥 CORREÇÃO AQUI: Passando avatarTipo e avatarId */}
                 <RankingAvatar
                   id={person.id}
                   name={person.name}
                   avatarUrl={person.avatar_url}
+                  avatarTipo={person.avatar_tipo}
+                  avatarId={person.avatar_id}
                   size={p.av}
                   crown={person.coroa}
                   ringColor={p.color}

@@ -9,7 +9,16 @@ export function UserHighlightCard({ user }: { user: CurrentUser }) {
   return (
     <section className="card-lip rk-hero relative overflow-hidden p-5 sm:p-6" style={{ ["--lip" as string]: "var(--primary)" }}>
       <div className="flex items-center gap-4">
-        <RankingAvatar id={user.id} name={user.name} avatarUrl={user.avatar_url} crown={user.coroa} size={64} />
+        {/* 🔥 CORREÇÃO AQUI: Passando avatarTipo e avatarId */}
+        <RankingAvatar 
+          id={user.id} 
+          name={user.name} 
+          avatarUrl={user.avatar_url} 
+          avatarTipo={user.avatar_tipo}
+          avatarId={user.avatar_id}
+          crown={user.coroa} 
+          size={64} 
+        />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{user.name}</p>
           <h3 className="font-display text-xl font-bold sm:text-2xl">
