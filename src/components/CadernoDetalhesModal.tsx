@@ -4,9 +4,49 @@ import { getQuestoesDoCaderno, removerQuestaoDoCaderno, adicionarQuestoesAoCader
 import { getQuestoesDoBanco, type QuestaoBanco } from "@/services/bancoQuestoesService";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
-import { Loader2, Play, Trash2, X, BookOpen, Plus, Search, CheckCircle2, BarChart3 } from "lucide-react";
+import { CompartilharCadernoModal } from "@/components/CompartilharCadernoModal";
+import { Loader2, Play, Trash2, X, BookOpen, Plus, Search, CheckCircle2, BarChart3, Share2 } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { getDb, pullBancoQuestoesOtimizado } from "@/lib/db";
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
+
+// ============================================================
+// HELPER: Garante que as questões do caderno estejam no cache local.
+// 1) Faz um pull genérico (rápido, pega o que já é recente).
+// 2) Busca especificamente as questões que o caderno usa e ainda faltam.
+// ============================================================
+async function puxarQuestoesFaltantes(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const db = await getDb();
+    const locais = await db.banco_questoes.find({ selector: { id: { $in: ids } } }).exec();
+    const idsLocais = new Set(locais.map((d: any) => String(d.get('id'))));
+    const faltando = ids.filter((id) => !idsLocais.has(String(id)));
+    if (faltando.length === 0) return;
+
+    const supabase = await getSupabaseWithToken();
+    const { data, error } = await supabase
+      .from('banco_questoes')
+      .select('*')
+      .in('id', faltando);
+
+    if (error || !data) {
+      console.warn('[CadernoDetalhes] Falha ao puxar questões faltantes:', error);
+      return;
+    }
+
+    for (const row of data) {
+      try {
+        await db.banco_questoes.insert(row);
+      } catch {
+        // já existe localmente com outro estado — ignora
+      }
+    }
+  } catch (e) {
+    console.warn('[CadernoDetalhes] Erro ao puxar questões faltantes:', e);
+  }
+}
 
 interface Props {
   caderno: Caderno;
@@ -33,12 +73,46 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
   // Estado para o Modal de Relatório
   const [modalRelatorio, setModalRelatorio] = useState(false);
 
+  // Estado para o Modal de Compartilhar
+  const [modalCompartilhar, setModalCompartilhar] = useState(false);
+
   const load = async () => {
     setLoading(true);
-    const res = await getQuestoesDoCaderno(caderno.id);
-    if (res.success && res.data) setQuestoes(res.data);
-    else toast.error("Erro ao carregar questões do caderno");
-    setLoading(false);
+    try {
+      // 1) Pull genérico: traz novas questões do servidor para o cache local
+      try {
+        await pullBancoQuestoesOtimizado(userId, 0, 200);
+      } catch (e) {
+        console.warn('[CadernoDetalhes] Pull falhou, seguindo com cache local:', e);
+      }
+
+      // 2) Lê as questões do caderno (local)
+      const res = await getQuestoesDoCaderno(caderno.id);
+      if (!res.success || !res.data) {
+        toast.error("Erro ao carregar questões do caderno");
+        setQuestoes([]);
+        return;
+      }
+
+      // 3) Verifica se alguma questão do caderno ainda não está no cache local
+      const db = await getDb();
+      const links = await db.caderno_questoes.find({ selector: { caderno_id: caderno.id } }).exec();
+      const idsNoCaderno = links.map((l: any) => String(l.get('questao_banco_id')));
+      const idsCarregados = new Set(res.data.map((q) => String(q.id)));
+      const faltando = idsNoCaderno.filter((id) => !idsCarregados.has(id));
+
+      if (faltando.length > 0) {
+        // 4) Busca direto no Supabase as questões que faltam
+        await puxarQuestoesFaltantes(faltando);
+        const res2 = await getQuestoesDoCaderno(caderno.id);
+        if (res2.success && res2.data) setQuestoes(res2.data);
+        else setQuestoes(res.data);
+      } else {
+        setQuestoes(res.data);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, [caderno.id]);
@@ -161,6 +235,9 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
               <button onClick={() => setModalRelatorio(true)} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
                 <BarChart3 className="h-4 w-4" /> Estatísticas
               </button>
+              <button onClick={() => setModalCompartilhar(true)} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
+                <Share2 className="h-4 w-4" /> Compartilhar
+              </button>
             </div>
             <div className="flex gap-2 ml-auto">
               <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-border bg-surface text-sm font-medium hover:bg-surface-2">
@@ -241,6 +318,18 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
           cadernoId={caderno.id}
           titulo={caderno.nome}
           onClose={() => setModalRelatorio(false)}
+        />
+      )}
+
+      {/* MODAL DE COMPARTILHAR */}
+      {modalCompartilhar && (
+        <CompartilharCadernoModal
+          open={modalCompartilhar}
+          onClose={() => setModalCompartilhar(false)}
+          userId={userId}
+          cadernoId={caderno.id}
+          cadernoNome={caderno.nome}
+          onChanged={() => toast.success("Compartilhamento atualizado")}
         />
       )}
     </>

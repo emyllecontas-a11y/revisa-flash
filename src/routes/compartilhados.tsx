@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ClipboardList, Copy, FileText, Folder, Loader2, RefreshCw, Share2,
-  CheckSquare, Square,
+  CheckSquare, Square, BookOpen,
 } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -11,6 +11,7 @@ import {
   copiarListaParaMinhaConta,
   copiarSimuladoParaMinhaConta,
   copiarTopicosParaDisciplina,
+  copiarCadernoBancoParaMinhaConta,
   type ProgressoCopia,
 } from "@/services/copiaConteudoService";
 import { AppShell } from "@/components/app-shell";
@@ -65,10 +66,18 @@ interface SimuladoItem {
   total: number;
 }
 
+interface CadernoBancoItem {
+  id: string;
+  nome: string;
+  donoId: string;
+  total: number;
+}
+
 interface Dados {
   grupos: GrupoDisciplina[];
   listas: ListaItem[];
   simulados: SimuladoItem[];
+  cadernosBanco: CadernoBancoItem[];
   nomes: Map<string, string>;
 }
 
@@ -93,12 +102,14 @@ async function lerTudo(colecao: any): Promise<Row[]> {
 async function carregarDados(eu: string): Promise<Dados> {
   const db: any = await getDb();
 
-  const [disciplinas, topicos, arquivos, listas, simulados] = await Promise.all([
+  const [disciplinas, topicos, arquivos, listas, simulados, cadernos, cadernoQuestoes] = await Promise.all([
     lerTudo(db.collections.disciplines),
     lerTudo(db.collections.topics),
     lerTudo(db.collections.files),
     lerTudo(db.collections.listas),
     lerTudo(db.collections.simulados),
+    lerTudo(db.cadernos),
+    lerTudo(db.caderno_questoes),
   ]);
 
   const discsOutras = disciplinas.filter((r) => deOutra(r, "user_id", eu) && !apagado(r));
@@ -106,6 +117,7 @@ async function carregarDados(eu: string): Promise<Dados> {
   const arqsOutras = arquivos.filter((r) => deOutra(r, "user_id", eu) && !apagado(r));
   const listasOutras = listas.filter((r) => deOutra(r, "user_id", eu) && !apagado(r));
   const simsOutras = simulados.filter((r) => deOutra(r, "created_by", eu) && !apagado(r));
+  const cadernosOutros = cadernos.filter((r) => deOutra(r, "user_id", eu) && !apagado(r));
 
   const totalPorLista = new Map<string, number>();
   if (listasOutras.length > 0 && db.collections.listas_questoes) {
@@ -116,6 +128,7 @@ async function carregarDados(eu: string): Promise<Dados> {
       totalPorLista.set(String(v.lista_id), (totalPorLista.get(String(v.lista_id)) || 0) + 1);
     }
   }
+
   const totalPorSimulado = new Map<string, number>();
   if (simsOutras.length > 0 && db.collections.questoes) {
     const ids = new Set(simsOutras.map((s) => String(s.id)));
@@ -123,6 +136,15 @@ async function carregarDados(eu: string): Promise<Dados> {
     for (const q of questoes) {
       if (!ids.has(String(q.simulado_id)) || apagado(q)) continue;
       totalPorSimulado.set(String(q.simulado_id), (totalPorSimulado.get(String(q.simulado_id)) || 0) + 1);
+    }
+  }
+
+  const totalPorCaderno = new Map<string, number>();
+  if (cadernosOutros.length > 0) {
+    const ids = new Set(cadernosOutros.map((c) => String(c.id)));
+    for (const v of cadernoQuestoes) {
+      if (!ids.has(String(v.caderno_id))) continue;
+      totalPorCaderno.set(String(v.caderno_id), (totalPorCaderno.get(String(v.caderno_id)) || 0) + 1);
     }
   }
 
@@ -195,10 +217,20 @@ async function carregarDados(eu: string): Promise<Dados> {
     }))
     .sort((a, b) => a.titulo.localeCompare(b.titulo, "pt-BR"));
 
+  const cadernosBancoItens: CadernoBancoItem[] = cadernosOutros
+    .map((c) => ({
+      id: String(c.id),
+      nome: c.nome || "Caderno",
+      donoId: String(c.user_id),
+      total: totalPorCaderno.get(String(c.id)) || 0,
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
   const donoIds = new Set<string>();
   grupos.forEach((g) => g.donos.forEach((d) => donoIds.add(d)));
   listasItens.forEach((l) => donoIds.add(l.donoId));
   simuladosItens.forEach((s) => donoIds.add(s.donoId));
+  cadernosBancoItens.forEach((c) => donoIds.add(c.donoId));
 
   const nomes = new Map<string, string>();
   if (donoIds.size > 0) {
@@ -213,7 +245,13 @@ async function carregarDados(eu: string): Promise<Dados> {
     }
   }
 
-  return { grupos: listaGrupos, listas: listasItens, simulados: simuladosItens, nomes };
+  return {
+    grupos: listaGrupos,
+    listas: listasItens,
+    simulados: simuladosItens,
+    cadernosBanco: cadernosBancoItens,
+    nomes,
+  };
 }
 
 // ============================================================
@@ -297,7 +335,11 @@ export function CompartilhadosConteudo() {
   const nomesDe = (ids: Set<string>) =>
     [...ids].map(nomeDe).filter((n, i, a) => a.indexOf(n) === i).join(", ");
 
-  const vazio = !!dados && dados.grupos.length === 0 && dados.listas.length === 0 && dados.simulados.length === 0;
+  const vazio = !!dados
+    && dados.grupos.length === 0
+    && dados.listas.length === 0
+    && dados.simulados.length === 0
+    && dados.cadernosBanco.length === 0;
 
   const iniciarCopiaComDestino = (
     tipo: TipoDestino,
@@ -388,7 +430,7 @@ export function CompartilhadosConteudo() {
             nomeOriginal: t.nome,
             arquivoIds: [a.id],
             topicoDestinoId: destino.topicoId ?? null,
-            nomeNovoTopico: destino.nomeNovoTopico,
+            nomeNovoTopico: destino.novoTopicoNome,
           }],
           (info) => setProgressoCopia(info)
         );
@@ -429,6 +471,35 @@ export function CompartilhadosConteudo() {
       }
     });
   };
+
+  // -------- Copiar CADERNO DO BANCO (sem escolha de destino) --------
+  const handleCopiarCadernoBanco = async (c: CadernoBancoItem) => {
+    if (!userId || copiandoKey) return;
+    const ok = await confirmDialog({
+      title: "Copiar caderno para a sua conta?",
+      description: `Você recebe uma cópia só sua de "${c.nome}" com ${c.total} questão(ões).`,
+      confirmText: "Copiar",
+      cancelText: "Cancelar",
+    });
+    if (!ok) return;
+
+    setCopiandoKey(`caderno:${c.id}`);
+    setProgressoCopia({ current: 0, total: 1, label: "Começando..." });
+    try {
+      const res = await copiarCadernoBancoParaMinhaConta(
+        c.id,
+        userId,
+        (info) => setProgressoCopia(info)
+      );
+      if (res.success) toast.success(`Caderno copiado com ${res.questoesCopiadas} questões!`);
+      else toast.error(res.error || "Erro ao copiar caderno.");
+      await recarregar();
+    } finally {
+      setCopiandoKey(null);
+      setTimeout(() => setProgressoCopia(null), 2000);
+    }
+  };
+
   // ============================================================
   // SELEÇÃO MÚLTIPLA / CÓPIA EM BLOCO
   // ============================================================
@@ -760,6 +831,35 @@ export function CompartilhadosConteudo() {
                 </li>
               );
             })}
+          </ul>
+        </section>
+      )}
+
+      {dados && dados.cadernosBanco.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="flex items-center gap-2 font-display text-base font-bold">
+            <BookOpen className="h-4 w-4 text-primary" /> Cadernos do Banco de Questões
+          </h2>
+          <ul className="space-y-2">
+            {dados.cadernosBanco.map((c) => (
+              <li key={c.id} className="relative">
+                <div className="rf-card block p-4 pr-28">
+                  <p className="text-sm font-semibold">{c.nome}</p>
+                  <p className="text-xs text-foreground/50">
+                    de {nomeDe(c.donoId)} {c.total > 0 && ` · ${c.total} questões`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopiarCadernoBanco(c)}
+                  disabled={copiandoKey !== null}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface disabled:opacity-50"
+                >
+                  {copiandoKey === `caderno:${c.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                  Copiar
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       )}

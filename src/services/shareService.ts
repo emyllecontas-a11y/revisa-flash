@@ -15,7 +15,8 @@ export type ShareItemType =
   | 'topic'
   | 'file'
   | 'question_list'
-  | 'simulado';
+  | 'simulado'
+  | 'caderno_banco';
 
 export interface ShareRow {
   id: string;

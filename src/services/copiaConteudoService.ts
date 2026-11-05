@@ -485,3 +485,79 @@ export async function copiarSimuladoParaMinhaConta(
     return { success: false, questoesCopiadas: 0, error: e?.message || 'Erro ao copiar.' };
   }
 }
+// ============================================================
+// COPIAR CADERNO DO BANCO DE QUESTÕES
+// ============================================================
+export interface ResultadoCopiaCaderno {
+  success: boolean;
+  cadernoId?: string;
+  questoesCopiadas: number;
+  error?: string;
+}
+
+export async function copiarCadernoBancoParaMinhaConta(
+  cadernoId: string,
+  userId: string,
+  onProgresso?: OnProgresso
+): Promise<ResultadoCopiaCaderno> {
+  if (!userId) return { success: false, questoesCopiadas: 0, error: 'Usuária não autenticada.' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { success: false, questoesCopiadas: 0, error: 'Você está offline.' };
+  }
+
+  try {
+    const db: any = await getDb();
+    const agora = new Date().toISOString();
+
+    const cadernoDoc = await db.cadernos.findOne({ selector: { id: cadernoId } }).exec();
+    if (!cadernoDoc) return { success: false, questoesCopiadas: 0, error: 'Caderno não encontrado.' };
+    const caderno = cadernoDoc.toJSON();
+
+    onProgresso?.({ current: 0, total: 1, label: 'Preparando...' });
+
+    const novoCadernoId = uid();
+    const novoCaderno = {
+      ...caderno,
+      id: novoCadernoId,
+      user_id: userId,
+      pasta_id: null, // a amiga organiza depois
+      nome: `${caderno.nome} (Cópia)`,
+      created_at: agora,
+      updated_at: agora,
+      isdeleted: false,
+    };
+    await db.cadernos.insert(novoCaderno);
+    await salvarNaNuvem('cadernos', novoCaderno);
+
+    // Copia os vínculos — as questões do banco já são visíveis para todos
+    const vinculos = await db.caderno_questoes.find({ selector: { caderno_id: cadernoId } }).exec();
+    const total = vinculos.length;
+    let copiadas = 0;
+
+    for (let i = 0; i < vinculos.length; i++) {
+      const v = vinculos[i].toJSON();
+      onProgresso?.({
+        current: i,
+        total: Math.max(total, 1),
+        label: `Copiando questão ${i + 1} de ${total}...`,
+      });
+
+      const novoVinculo = {
+        id: uid(),
+        caderno_id: novoCadernoId,
+        questao_banco_id: v.questao_banco_id,
+        ordem: v.ordem,
+        created_at: agora,
+      };
+      await db.caderno_questoes.insert(novoVinculo);
+      await salvarNaNuvem('caderno_questoes', novoVinculo);
+      copiadas++;
+    }
+
+    onProgresso?.({ current: Math.max(total, 1), total: Math.max(total, 1), label: 'Concluído!' });
+    return { success: true, cadernoId: novoCadernoId, questoesCopiadas: copiadas };
+  } catch (e: any) {
+    console.error('❌ [copiaConteudo] Erro ao copiar caderno do banco:', e);
+    return { success: false, questoesCopiadas: 0, error: e?.message || 'Erro ao copiar.' };
+  }
+}

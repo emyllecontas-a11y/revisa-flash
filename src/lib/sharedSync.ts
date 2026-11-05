@@ -186,7 +186,7 @@ async function sincronizarRaiz(
   tabela: string,
   colunaDono: string,
 ): Promise<ResultadoRaiz> {
-  const colecao = db.collections[tabela];
+  const colecao = db.collections[tabela] || db[tabela];
   if (!colecao) return { ok: false, completa: false, vivos: new Set(), antes: new Set() };
 
   const local = await indiceLocal(colecao);
@@ -233,7 +233,7 @@ async function sincronizarFilha(
   client: any,
   op: OpcoesFilha,
 ): Promise<{ ok: boolean; completa: boolean; vivos: Set<string> }> {
-  const colecao = db.collections[op.tabela];
+  const colecao = db.collections[op.tabela] || db[op.tabela];
   if (!colecao) return { ok: false, completa: false, vivos: new Set() };
 
   const local = await indiceLocal(colecao);
@@ -336,6 +336,27 @@ export async function syncSharedContent(userId: string, force = false): Promise<
       ehDeOutra: (j) => typeof j.user_id === 'string' && j.user_id !== '' && j.user_id !== eu,
     });
     marcar(questoesLista.ok);
+
+    // ---- cadernos do banco de questões ----
+    const cadernosBanco = await sincronizarRaiz(db, client, eu, 'cadernos', 'user_id');
+    marcar(cadernosBanco.ok);
+
+    if (cadernosBanco.completa) {
+      const cadernosGerenciados = new Set([...cadernosBanco.antes, ...cadernosBanco.vivos]);
+      const cadernoVinculos = await sincronizarFilha(db, client, {
+        tabela: 'caderno_questoes',
+        linhasCompletas: true,
+        buscarLista: () =>
+          buscarPorIds(
+            client, 'caderno_questoes', 'caderno_id', [...cadernosBanco.vivos], '*', IDS_POR_CONSULTA,
+          ),
+        ehDeOutra: (j) => cadernosGerenciados.has(String(j.caderno_id)),
+        mudou: (remoto, local) => remoto.ordem !== local.ordem,
+      });
+      marcar(cadernoVinculos.ok);
+    } else {
+      marcar(false);
+    }
 
     // ---- simulados → questões → alternativas ----
     const simulados = await sincronizarRaiz(db, client, eu, 'simulados', 'created_by');
