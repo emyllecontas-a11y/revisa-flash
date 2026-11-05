@@ -78,9 +78,9 @@ function TextoFormatado({
   negritos?: Intervalo[] | null;
   italicos?: Intervalo[] | null;
 }) {
-  // 1. Se o texto contiver tags HTML (novo parser), renderiza via HTML.
-  //    O parser de HTML entende <b>, <u>, <i> e <span style="color:...">
-  if (/<(b|u|i|span)\b/i.test(texto)) {
+  // 1. Se o texto contiver QUALQUER tag HTML (novo parser), renderiza via HTML.
+  // A regex abaixo pega qualquer coisa que pareça uma tag HTML: <p>, <br>, <div>, <b>, etc.
+  if (/<[a-z][\s\S]*>/i.test(texto)) {
     return <>{parse(texto)}</>;
   }
 
