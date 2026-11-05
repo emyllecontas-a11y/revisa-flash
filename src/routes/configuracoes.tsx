@@ -1,18 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AppShell } from "@/components/app-shell";
 import { 
-  Bell, Moon, Sun, Download, Trash2, LogOut, Cloud, 
-  Upload, FileText, CheckCircle, AlertCircle, X, ChevronDown, ChevronUp, 
-  User, Mail, Calendar, Clock, Layers, Sparkles, BookOpen, Database,
-  Camera, HelpCircle, Save, Loader2, Settings, Zap, TrendingUp, AlertTriangle
+  Moon, Sun, Download, Trash2, LogOut, 
+  Upload, ChevronDown, Save, Loader2, 
+  Camera, HelpCircle
 } from "lucide-react";
 import { useAppUser } from "@/contexts/UserContext";
 import { useClerk } from "@clerk/clerk-react";
-import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { UserAvatar } from "@/components/ui/UserAvatar";
+import { SeletorAvatar } from "@/components/perfil/SeletorAvatar";
 
 const CARD_COLORS = [
   '#E8A87C',
@@ -33,9 +34,6 @@ export default function ConfigPage() {
   const {
     getUserSettings,
     updateUserSettings,
-    settings: contextSettings,
-    dailyLimit,
-    loading: contextLoading
   } = useFlashcardContext();
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -43,6 +41,9 @@ export default function ConfigPage() {
   const [userEmail, setUserEmail] = useState<string>("");
   const [nomeTemp, setNomeTemp] = useState<string>("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarTipo, setAvatarTipo] = useState<'foto' | 'avatar'>('foto');
+  const [avatarId, setAvatarId] = useState<string | null>(null);
+
   const [mensagem, setMensagem] = useState("");
   const [mensagemTipo, setMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
   const [uploading, setUploading] = useState(false);
@@ -95,7 +96,7 @@ export default function ConfigPage() {
           const supabaseClient = await getSupabaseWithToken();
           const { data: profile, error } = await supabaseClient
             .from('profiles')
-            .select('name, avatar_url, theme, prova_nome, prova_data')
+            .select('name, avatar_url, avatar_tipo, avatar_id, theme, prova_nome, prova_data')
             .eq('id', clerkUserId)
             .maybeSingle();
 
@@ -104,6 +105,9 @@ export default function ConfigPage() {
           if (profile) {
             if (profile.name) { setUserName(profile.name); setNomeTemp(profile.name); }
             if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+            if (profile.avatar_tipo) setAvatarTipo(profile.avatar_tipo as 'foto' | 'avatar');
+            if (profile.avatar_id) setAvatarId(profile.avatar_id);
+            
             if (profile.theme) {
               const t = profile.theme === 'claro' ? 'claro' : 'escuro';
               setTema(t);
@@ -123,7 +127,6 @@ export default function ConfigPage() {
     loadUser();
   }, [user, isLoaded]);
 
-  // MUDANÇA: Remove getUserSettings das dependências para não resetar o que o usuário digita
   useEffect(() => {
     const loadFlashcardSettings = async () => {
       try {
@@ -146,7 +149,7 @@ export default function ConfigPage() {
       }
     };
     if (userId) loadFlashcardSettings();
-  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   useEffect(() => {
     const temaSalvo = localStorage.getItem('tema');
@@ -237,9 +240,18 @@ export default function ConfigPage() {
       if (uploadError) throw uploadError;
       const { data: urlData } = supabaseClient.storage.from('avatars').getPublicUrl(fileName);
       const avatarUrl = urlData.publicUrl;
-      const { error: updateError } = await supabaseClient.from('profiles').upsert({ id: userId, avatar_url: avatarUrl, updated_at: new Date().toISOString() }).select();
+      
+      // 🔥 MUDANÇA: Ao subir foto, força o tipo 'foto'
+      const { error: updateError } = await supabaseClient.from('profiles').upsert({ 
+        id: userId, 
+        avatar_url: avatarUrl, 
+        avatar_tipo: 'foto', 
+        updated_at: new Date().toISOString() 
+      }).select();
+      
       if (updateError) throw updateError;
       setAvatarUrl(avatarUrl);
+      setAvatarTipo('foto'); // Atualiza o estado local
       setMensagem('✅ Foto de perfil atualizada com sucesso!');
       setMensagemTipo('success');
       setTimeout(() => window.location.reload(), 1500);
@@ -278,6 +290,7 @@ export default function ConfigPage() {
   };
 
   const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (código original do anki mantido intacto)
     const file = event.target.files?.[0];
     if (!file) return;
     setImportando(true);
@@ -371,6 +384,7 @@ export default function ConfigPage() {
   }, [userId, confirmDialog]);
 
   const exportarBackup = useCallback(() => {
+    // ... (código original mantido intacto)
     try {
       const backup = {
         version: "1.0.0",
@@ -403,6 +417,7 @@ export default function ConfigPage() {
   }, []);
 
   const importarBackup = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (código original mantido intacto)
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -433,6 +448,7 @@ export default function ConfigPage() {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    // ... (código original mantido intacto)
     const ok = await confirmDialog({
       title: "Sair da conta?",
       description: "Você será redirecionado para a tela de login.",
@@ -453,6 +469,7 @@ export default function ConfigPage() {
   }, [signOut, confirmDialog]);
 
   const reabrirTour = useCallback(async () => {
+    // ... (código original mantido intacto)
     if (!user?.id) { setMensagem("⚠️ Usuário não identificado."); setMensagemTipo('warning'); return; }
     const ok = await confirmDialog({
       title: "Reabrir o tour de boas-vindas?",
@@ -467,6 +484,7 @@ export default function ConfigPage() {
   }, [user, confirmDialog]);
 
   const handleDeleteAccount = useCallback(async () => {
+    // ... (código original mantido intacto)
     if (!userId) { setMensagem("❌ Usuário não autenticado."); setMensagemTipo('error'); return; }
     const ok = await confirmDialog({
       title: "Excluir sua conta?",
@@ -507,6 +525,7 @@ export default function ConfigPage() {
   }, [userId, signOut, confirmDialog]);
 
   const handleSaveFlashcardSettings = useCallback(async () => {
+    // ... (código original mantido intacto)
     if (flashcardSettings.daily_limit < 1) { setMensagem("⚠️ O limite diário deve ser pelo menos 1."); setMensagemTipo('warning'); return; }
     if (flashcardSettings.new_cards_per_day < 0) { setMensagem("⚠️ O número de novos cards não pode ser negativo."); setMensagemTipo('warning'); return; }
     if (flashcardSettings.max_reviews_per_day < 0) { setMensagem("⚠️ O número de revisões não pode ser negativo."); setMensagemTipo('warning'); return; }
@@ -514,7 +533,6 @@ export default function ConfigPage() {
 
     setSalvandoFlashcards(true);
     try {
-      // MUDANÇA: Recebe o objeto informando se sincronizou ou não
       const result = await updateUserSettings({
         daily_limit: flashcardSettings.daily_limit,
         new_cards_per_day: flashcardSettings.new_cards_per_day,
@@ -529,7 +547,6 @@ export default function ConfigPage() {
         show_next_review_time: flashcardSettings.show_next_review_time,
       });
       
-      // MUDANÇA: Mensagem honesta baseada no retorno
       if (result.synced) {
         setMensagem("✅ Configurações salvas e sincronizadas com a nuvem!");
         setMensagemTipo('success');
@@ -568,13 +585,15 @@ export default function ConfigPage() {
         <Section id="perfil" title="Perfil" color={getCardColor(0)}>
           <div className="flex items-center gap-4 mb-5">
             <div className="relative">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt={userName} className="h-16 w-16 rounded-full object-cover border border-border" />
-              ) : (
-                <div className="grid h-16 w-16 place-items-center rounded-full bg-accent/15 font-display text-lg font-bold text-accent">
-                  {userName ? userName.slice(0, 2).toUpperCase() : 'U'}
-                </div>
-              )}
+              {/* 🔥 MUDANÇA AQUI: Usando o componente global */}
+              <UserAvatar 
+                fotoUrl={avatarUrl} 
+                avatarTipo={avatarTipo} 
+                avatarId={avatarId} 
+                nome={userName}
+                className="h-16 w-16 border border-border"
+              />
+              
               <label
                 htmlFor="avatar-upload"
                 className="absolute bottom-0 right-0 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground cursor-pointer hover:opacity-80 transition-opacity"
@@ -609,6 +628,23 @@ export default function ConfigPage() {
               </button>
             </div>
           </div>
+
+          {/* 🔥 MUDANÇA AQUI: Adicionando o seletor de avatares */}
+          {userId && (
+            <div className="mt-6 pt-6 border-t border-border/40">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-4">
+                Identidade Visual
+              </h3>
+              <SeletorAvatar
+                userId={userId}
+                fotoUrl={avatarUrl}
+                onAtualizar={(tipo, id) => {
+                  setAvatarTipo(tipo);
+                  setAvatarId(id);
+                }}
+              />
+            </div>
+          )}
         </Section>
 
         <Section id="aparencia" title="Aparência" color={getCardColor(1)}>
@@ -680,7 +716,6 @@ export default function ConfigPage() {
         </Section>
 
         <Section id="flashcards" title="Configurações de Flashcards" color={getCardColor(3)}>
-
           <ConfigRow label="Novos cards por dia" hint="Quantidade máxima de cards novos apresentados por dia">
             <input
               type="number"
@@ -800,7 +835,6 @@ export default function ConfigPage() {
         </Section>
 
         <Section id="dados" title="Dados e sincronização" color={getCardColor(4)}>
-
           <div className="mb-5">
             <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-3">Importar flashcards do Anki</h3>
             <p className="text-xs text-foreground/45 mb-3">Formatos: .txt, .csv, .apkg (tab separado: pergunta → resposta)</p>

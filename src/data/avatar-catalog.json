@@ -1,0 +1,144 @@
+{
+  "mascote": "Lumi, a loba do RevisaFlash",
+  "versao": "3.0.0",
+  "avatares": [
+    {
+      "id": "lumi-mascote-base",
+      "nome": "Lumi",
+      "arquivo": "avatars/mascote-base.svg",
+      "descricao": "Mascote oficial: loba de pelagem ameixa com óculos laranja.",
+      "caracteristicas": [
+        "óculos"
+      ],
+      "fundo": "#C9B6EE"
+    },
+    {
+      "id": "lumi-avatar-01",
+      "nome": "Lumi Feminista",
+      "arquivo": "avatars/avatar-01.svg",
+      "descricao": "Bandana roxa e punho erguido.",
+      "caracteristicas": [
+        "bandana roxa",
+        "punho erguido"
+      ],
+      "fundo": "#D7336C"
+    },
+    {
+      "id": "lumi-avatar-02",
+      "nome": "Lumi Vênus",
+      "arquivo": "avatars/avatar-02.svg",
+      "descricao": "Broche com símbolo feminino.",
+      "caracteristicas": [
+        "óculos",
+        "broche Vênus"
+      ],
+      "fundo": "#38192B"
+    },
+    {
+      "id": "lumi-avatar-03",
+      "nome": "Lumi Black Power",
+      "arquivo": "avatars/avatar-03.svg",
+      "descricao": "Cabelo crespo volumoso e argola dourada.",
+      "caracteristicas": [
+        "cabelo crespo",
+        "argola"
+      ],
+      "fundo": "#FE7802"
+    },
+    {
+      "id": "lumi-avatar-04",
+      "nome": "Lumi Hijab",
+      "arquivo": "avatars/avatar-04.svg",
+      "descricao": "Hijab verde-azulado e óculos.",
+      "caracteristicas": [
+        "hijab",
+        "óculos"
+      ],
+      "fundo": "#290E1F"
+    },
+    {
+      "id": "lumi-avatar-05",
+      "nome": "Lumi Orgulho",
+      "arquivo": "avatars/avatar-05.svg",
+      "descricao": "Cachecol arco-íris e piscadinha.",
+      "caracteristicas": [
+        "cachecol arco-íris"
+      ],
+      "fundo": "#C2A6F0"
+    },
+    {
+      "id": "lumi-avatar-06",
+      "nome": "Lumi Trans",
+      "arquivo": "avatars/avatar-06.svg",
+      "descricao": "Cachecol com as cores da bandeira trans.",
+      "caracteristicas": [
+        "cachecol trans"
+      ],
+      "fundo": "#6FB8F7"
+    },
+    {
+      "id": "lumi-avatar-07",
+      "nome": "Lumi Auditiva",
+      "arquivo": "avatars/avatar-07.svg",
+      "descricao": "Aparelho auditivo e cordão de girassol.",
+      "caracteristicas": [
+        "aparelho auditivo",
+        "girassol"
+      ],
+      "fundo": "#47B26E"
+    },
+    {
+      "id": "lumi-avatar-08",
+      "nome": "Lumi Tranças",
+      "arquivo": "avatars/avatar-08.svg",
+      "descricao": "Tranças e tiara de miçangas.",
+      "caracteristicas": [
+        "tranças",
+        "tiara de miçangas"
+      ],
+      "fundo": "#F7C843"
+    },
+    {
+      "id": "lumi-avatar-09",
+      "nome": "Lumi Capelo",
+      "arquivo": "avatars/avatar-09.svg",
+      "descricao": "Capelo de formatura.",
+      "caracteristicas": [
+        "capelo"
+      ],
+      "fundo": "#5B8DEF"
+    },
+    {
+      "id": "lumi-avatar-10",
+      "nome": "Lumi Leitora",
+      "arquivo": "avatars/avatar-10.svg",
+      "descricao": "Óculos e livro aberto.",
+      "caracteristicas": [
+        "óculos",
+        "livro"
+      ],
+      "fundo": "#FE7802"
+    },
+    {
+      "id": "lumi-avatar-11",
+      "nome": "Lumi Fones",
+      "arquivo": "avatars/avatar-11.svg",
+      "descricao": "Fones de ouvido para estudar com música.",
+      "caracteristicas": [
+        "fones"
+      ],
+      "fundo": "#2BB3A3"
+    },
+    {
+      "id": "lumi-avatar-12",
+      "nome": "Lumi Noturna",
+      "arquivo": "avatars/avatar-12.svg",
+      "descricao": "Estudando à noite, com lápis.",
+      "caracteristicas": [
+        "óculos",
+        "lápis"
+      ],
+      "fundo": "#38192B"
+    }
+  ]
+}

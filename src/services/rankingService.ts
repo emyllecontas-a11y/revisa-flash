@@ -86,18 +86,42 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   const medalhasCountMap = new Map<string, number>();
   try {
     const ids = Array.from(rankingMap.keys());
-    const { data: profiles } = await supabase.from('user_settings').select('user_id, name').in('user_id', ids);
-    profiles?.forEach((p: any) => {
-      if (rankingMap.has(p.user_id)) {
-        rankingMap.get(p.user_id)!.name = p.name || "Estudante";
-      }
-    });
+    
+    // 🔥 CORREÇÃO AQUI: Buscando na tabela 'profiles' e trazendo o avatar_url
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, user_id, name, avatar_url')
+      .in('id', ids);
+
+    if (profileError) {
+      console.warn("Aviso ao buscar perfis (tentando user_id):", profileError.message);
+      // Fallback caso a coluna de ID na tabela profiles se chame 'user_id'
+      const { data: profilesFallback } = await supabase
+        .from('profiles')
+        .select('user_id, name, avatar_url')
+        .in('user_id', ids);
+      
+      profilesFallback?.forEach((p: any) => {
+        if (rankingMap.has(p.user_id)) {
+          rankingMap.get(p.user_id)!.name = p.name || "Estudante";
+          rankingMap.get(p.user_id)!.avatar_url = p.avatar_url || null;
+        }
+      });
+    } else if (profiles) {
+      profiles.forEach((p: any) => {
+        const userId = p.id || p.user_id;
+        if (rankingMap.has(userId)) {
+          rankingMap.get(userId)!.name = p.name || "Estudante";
+          rankingMap.get(userId)!.avatar_url = p.avatar_url || null;
+        }
+      });
+    }
 
     const { data: medalhas } = await supabase.from('ranking_conquistas').select('user_id').eq('tipo', 'medalha').in('user_id', ids);
     medalhas?.forEach((m: any) => {
       medalhasCountMap.set(m.user_id, (medalhasCountMap.get(m.user_id) || 0) + 1);
     });
-  } catch (e) { console.warn("Erro ao buscar perfis/medalhas"); }
+  } catch (e) { console.warn("Erro ao buscar perfis/medalhas", e); }
 
   const listaFinal = Array.from(rankingMap.values())
     .filter(u => u.pontos > 0 || u.id === userIdLogado)
