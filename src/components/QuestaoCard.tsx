@@ -60,7 +60,7 @@ export interface QuestaoCardProps {
 const campoAlternativa = (letra: string): CampoAlvo => `alternativa_${letra}` as CampoAlvo;
 
 // ============================================================
-// RENDERIZADOR HÍBRIDO
+// RENDERIZADOR HÍBRIDO COM LIMPEZA DE ESPAÇOS
 // ============================================================
 function TextoFormatado({
   texto,
@@ -73,23 +73,42 @@ function TextoFormatado({
   negritos?: Intervalo[] | null;
   italicos?: Intervalo[] | null;
 }) {
+  if (!texto) return null;
+
+  let processed = texto;
+
   // 1. Converte a tag [IMAGEM: url] para uma tag <img> real
-  let textoProcessado = texto.replace(
+  processed = processed.replace(
     /\[IMAGEM:\s*(.+?)\]/g,
-    '<img src="$1" alt="Imagem da questão" class="my-3 max-h-80 rounded-lg border border-border object-contain" />'
+    '<img src="$1" alt="Imagem" class="my-3 max-h-80 rounded-lg border border-border object-contain" />'
   );
 
-  // 2. Se o texto tiver QUALQUER tag HTML (abertura ou fechamento) OU qualquer código de acento (&...;),
-  // renderiza usando o parser de HTML.
-  if (/<[a-z\/][\s\S]*>|&[a-z0-9]+;/i.test(textoProcessado)) {
+  // 2. Limpeza agressiva de espaços vindos do TEC
+  processed = processed
+    // Remove parágrafos completamente vazios (ex: <p>&nbsp;</p> ou <p> </p>)
+    .replace(/<p>\s*(&nbsp;|\s)*<\/p>/gi, '')
+    // Substitui &nbsp; por um espaço normal para não forçar quebra de linha
+    .replace(/&nbsp;/gi, ' ')
+    // Remove quebras de linha excessivas (mais de 2 <br> seguidos)
+    .replace(/(<br\s*\/?>\s*){3,}/gi, '<br><br>')
+    // Limita o excesso de \n (quebras no texto puro) a no máximo 2
+    .replace(/\n{3,}/g, '\n\n');
+
+  // 3. Se não tiver tags HTML, converte \n para <br>
+  if (!/<[a-z\/][\s\S]*>/i.test(processed)) {
+    processed = processed.replace(/\n/g, '<br>');
+  }
+
+  // 4. Renderiza o HTML limpo
+  if (/<[a-z\/][\s\S]*>|&[a-z0-9]+;/i.test(processed)) {
     return (
-      <div className="[&_p]:mb-2 [&_p]:mt-0 [&_p:empty]:hidden [&_br]:hidden [&_img]:block">
-        {parse(textoProcessado)}
+      <div className="[&_p]:mb-2 [&_p]:mt-0 [&_br]:block [&_img]:block">
+        {parse(processed)}
       </div>
     );
   }
 
-  // 3. Fallback antigo (arrays de intervalo)
+  // Fallback antigo (arrays de intervalo)
   const n = texto.length;
   const mask = new Uint8Array(n);
   for (const s of sublinhados ?? []) {
@@ -215,7 +234,8 @@ export function QuestaoCard({
             onRemover={onRemoverGrifo}
             onTrocarCor={onTrocarCorGrifo}
           >
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">
+            {/* Removido o whitespace-pre-wrap daqui */}
+            <div className="text-sm leading-relaxed">
               <TextoFormatado
                 texto={enunciado}
                 sublinhados={sublinhadosEnunciado}
@@ -225,7 +245,7 @@ export function QuestaoCard({
             </div>
           </TextoGrifavel>
         ) : (
-          <div className="text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="text-sm leading-relaxed">
             <TextoFormatado
               texto={enunciado}
               sublinhados={sublinhadosEnunciado}
@@ -401,12 +421,13 @@ export function QuestaoCard({
                 onRemover={onRemoverGrifo}
                 onTrocarCor={onTrocarCorGrifo}
               >
-                <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                {/* Removido o whitespace-pre-wrap daqui também */}
+                <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
                 </div>
               </TextoGrifavel>
             ) : (
-              <div className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+              <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
               </div>
             )}
