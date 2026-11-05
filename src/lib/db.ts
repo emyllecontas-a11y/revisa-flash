@@ -69,7 +69,7 @@ async function pushWithConflictCheck(
     const chunk = ids.slice(i, i + CHUNK_SIZE);
     const { data: remoteRows, error } = await supabaseClient
       .from(collectionName)
-      .select('*')
+      .select('id, updated_at') // OTIMIZAÇÃO: Busca apenas o necessário para checar conflito
       .in('id', chunk);
 
     if (error) {
@@ -1065,7 +1065,6 @@ export async function getDb(): Promise<RxDatabase> {
       plano_feitos: { schema: planoFeitoSchema },
       subtopicos: { schema: subtopicoSchema },
       revisoes_subtopico: { schema: revisaoSubtopicoSchema },
-      // v15: banco de questões e cadernos
       banco_questoes: { schema: bancoQuestaoSchema },
       pastas_caderno: { schema: pastaCadernoSchema },
       cadernos: { schema: cadernoSchema },
@@ -1151,7 +1150,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_text_boxes',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
       'anotacoes_questao',
-      'banco_questoes', 'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
+      'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
     ];
 
     for (const name of collections) {
@@ -1180,14 +1179,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           .from('decks')
           .select('*')
           .or(`user_id.eq.${userIdStr},shared_with.cs.{${userIdStr}}`)
-          .gte('updated_at', pullFrom);
-        if (queryError) { console.error(`❌ Pull ${name}:`, queryError); houveErro = true; continue; }
-        supabaseData = data || [];
-      } else if (name === 'banco_questoes') {
-        // Puxa TODAS as questões do banco global
-        const { data, error: queryError } = await supabaseClient
-          .from('banco_questoes')
-          .select('*')
           .gte('updated_at', pullFrom);
         if (queryError) { console.error(`❌ Pull ${name}:`, queryError); houveErro = true; continue; }
         supabaseData = data || [];
@@ -1494,10 +1485,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         if (qIds.length > 0) {
           const qIdChunks = chunkArray(qIds, 100);
           for (const chunk of qIdChunks) {
-            let freshClient;
-            try { freshClient = await getSupabaseWithToken(); }
-            catch (tokenErr) { console.error('❌ Token alternativas:', tokenErr); houveErro = true; continue; }
-            const { data: aData, error: aErr } = await freshClient
+            const { data: aData, error: aErr } = await supabaseClient
               .from('alternativas')
               .select('*')
               .in('questao_id', chunk)
@@ -1605,5 +1593,52 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     console.error('❌ Erro na sincronização:', err);
   } finally {
     isSyncing = false;
+  }
+}
+
+// ============================================================
+// PULL SOB DEMANDA DO BANCO DE QUESTÕES
+// ============================================================
+// Função para ser chamada APENAS quando o usuário abrir a tela do Banco de Questões
+// ou quando for resolver uma questão que não está no cache local.
+export async function pullBancoQuestoesOtimizado(userId: string, pagina: number = 0, limite: number = 50) {
+  try {
+    const database = await getDb();
+    const supabaseClient = await getSupabaseWithToken();
+    
+    const offset = pagina * limite;
+    
+    console.log(`📥 Baixando lote de questões do banco global (offset: ${offset}, limite: ${limite})...`);
+
+    // Baixa os dados, mas IGNORA a coluna comentario (que é gigante)
+    const { data, error } = await supabaseClient
+      .from('banco_questoes')
+      .select('id, user_id, banca, ano, concurso, cargo, disciplina, assunto, subassunto, tipo_questao, enunciado, alternativas, gabarito_letra, gabarito_ce, imagem_url, hash_dedup, url_origem, arquivo_origem, importado_em, created_at, updated_at, isdeleted')
+      .eq('isdeleted', false)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limite - 1);
+
+    if (error) {
+      console.error('❌ Erro ao baixar lote do banco global:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data || data.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    const collection = database.collections.banco_questoes;
+    for (const doc of data) {
+      const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+      if (!existing) {
+        await collection.insert(doc);
+      }
+    }
+
+    console.log(`✅ Baixadas ${data.length} questões do banco global.`);
+    return { success: true, count: data.length };
+  } catch (err: any) {
+    console.error('❌ Falha no pullBancoQuestoesOtimizado:', err);
+    return { success: false, error: err.message };
   }
 }

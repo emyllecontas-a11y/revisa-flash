@@ -68,54 +68,8 @@ function AppContent() {
     };
   }, [refreshUserSettings]);
 
-  useEffect(() => {
-    if (!userIdRef.current) return;
-    const userId = userIdRef.current;
-
-    let syncTimeout: NodeJS.Timeout | null = null;
-
-    const channel = supabase
-      .channel('realtime-sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public' },
-        async (payload) => {
-          console.log('📡 Mudança detectada no Supabase:', payload);
-          if (syncTimeout) {
-            clearTimeout(syncTimeout);
-            syncTimeout = null;
-          }
-          syncTimeout = setTimeout(async () => {
-            try {
-              await syncWithSupabase(userId, () => {
-                refreshUserSettings();
-              });
-              console.log('✅ Re-sincronização concluída após mudança em tempo real.');
-            } catch (syncError) {
-              console.warn('⚠️ Erro ao re-sincronizar em tempo real:', syncError);
-            } finally {
-              syncTimeout = null;
-            }
-          }, 2000);
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Inscrição em tempo real estabelecida com sucesso.');
-        } else {
-          console.log(`🔄 Status da inscrição: ${status}`);
-        }
-      });
-
-    return () => {
-      console.log('🔌 Removendo inscrição em tempo real...');
-      if (syncTimeout) {
-        clearTimeout(syncTimeout);
-        syncTimeout = null;
-      }
-      supabase.removeChannel(channel);
-    };
-  }, [refreshUserSettings]);
+  // ⚠️ REALTIME REMOVIDO: O bloco do supabase.channel foi deletado para economizar Egress e Logs.
+  // A sincronização agora ocorre por foco na aba e por timer (abaixo).
 
   useEffect(() => {
     if (!userIdRef.current) return;
