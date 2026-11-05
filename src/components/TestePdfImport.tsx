@@ -1,11 +1,16 @@
 // src/components/TestePdfImport.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { useUser } from "@clerk/clerk-react";
 import { importarPdf, type ExtracaoCompleta } from '@/services/pdfImportService';
 import type { ParseResult } from '@/services/parseQuestoesPdf';
 import { marcar, marcarCompleto } from '@/services/pdfExtracaoAvancada';
-import { Loader2 } from 'lucide-react';
+import { Loader2, FileArchive } from 'lucide-react';
+import { ImportarTecModal } from './ImportarTecModal'; // Importando o Modal do TEC
 
 export function TestePdfImport() {
+  const { user } = useUser(); // Pegando o ID do usuário
+  const [modalTecAberto, setModalTecAberto] = useState(false); // Estado do Modal do TEC
+
   const [extraindo, setExtraindo] = useState(false);
   const [extracao, setExtracao] = useState<ExtracaoCompleta | null>(null);
   const [resultado, setResultado] = useState<ParseResult | null>(null);
@@ -88,6 +93,22 @@ export function TestePdfImport() {
             {erro}
           </p>
         )}
+
+        {/* --- NOVO BOTÃO DO TEC --- */}
+        <div className="mt-5 pt-4 border-t border-border">
+          <p className="text-xs text-foreground/50 mb-3">
+            Ou importe questões estruturadas direto do TEC Concursos.
+          </p>
+          <button 
+            onClick={() => setModalTecAberto(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2"
+          >
+            <FileArchive className="h-4 w-4" />
+            Importar do TEC (.zip)
+          </button>
+        </div>
+        {/* --- FIM DO NOVO BOTÃO --- */}
+
       </div>
 
       {extracao && resultado && (
@@ -165,6 +186,13 @@ export function TestePdfImport() {
           )}
         </>
       )}
+
+      {/* MODAL DO TEC - Colocado no final do componente principal */}
+      <ImportarTecModal 
+        isOpen={modalTecAberto} 
+        onClose={() => setModalTecAberto(false)} 
+        userId={user?.id || ''} 
+      />
     </div>
   );
 }
