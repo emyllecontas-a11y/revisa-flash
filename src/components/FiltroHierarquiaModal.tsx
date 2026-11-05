@@ -1,7 +1,7 @@
 // src/components/FiltroHierarquiaModal.tsx
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, ChevronRight, FolderOpen } from "lucide-react";
+import { X, ChevronRight, FolderOpen, Search } from "lucide-react";
 
 interface Props {
   hierarquia: Record<string, Record<string, Set<string>>>;
@@ -26,6 +26,7 @@ export function FiltroHierarquiaModal({
   onClose
 }: Props) {
   const [materiaAtiva, setMateriaAtiva] = useState(fMateria);
+  const [busca, setBusca] = useState("");
 
   const disciplinas = Object.keys(hierarquia);
   const discAtual = fDisciplina || disciplinas[0] || "";
@@ -33,6 +34,17 @@ export function FiltroHierarquiaModal({
   const materias = discAtual ? Object.keys(hierarquia[discAtual] || {}) : [];
   
   const topicos = (discAtual && materiaAtiva) ? Array.from(hierarquia[discAtual]?.[materiaAtiva] || []) : [];
+
+  // Lógica de Filtro de Busca
+  const termoBusca = busca.trim().toLowerCase();
+  
+  const materiasFiltradas = materias.filter(m => 
+    m.toLowerCase().includes(termoBusca)
+  );
+
+  const topicosFiltrados = topicos.filter(t => 
+    t.toLowerCase().includes(termoBusca)
+  );
 
   const handleSelecionarMateria = (m: string) => {
     setMateriaAtiva(m);
@@ -44,7 +56,6 @@ export function FiltroHierarquiaModal({
     setFAssunto(t);
   };
 
-  // Envolvemos o return inteiro com o createPortal
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-3xl h-[600px] max-h-[90vh] flex flex-col rounded-2xl border border-border bg-surface shadow-elevated overflow-hidden">
@@ -94,8 +105,23 @@ export function FiltroHierarquiaModal({
         {/* Corpo (Duas Colunas) */}
         <div className="flex flex-1 overflow-hidden">
           {/* Coluna Esquerda: Matérias */}
-          <div className="w-1/2 border-r border-border overflow-y-auto bg-background">
-            <div className="p-3">
+          <div className="w-1/2 border-r border-border flex flex-col bg-background">
+            
+            {/* NOVO: Barra de Busca */}
+            <div className="p-3 border-b border-border bg-surface-2 shrink-0">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/40" />
+                <input 
+                  type="text" 
+                  placeholder="Pesquisar por nome..." 
+                  value={busca} 
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-1.5 text-xs text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3">
               <button
                 onClick={() => { setFMateria(""); setFAssunto(""); setMateriaAtiva(""); }}
                 className={["w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors mb-1", !fMateria ? "bg-primary/10 text-primary" : "hover:bg-surface-2 text-foreground/70"].join(" ")}
@@ -103,20 +129,24 @@ export function FiltroHierarquiaModal({
                 Todas as matérias
               </button>
               
-              {materias.map(m => {
-                const isSelected = fMateria === m;
-                const isActive = materiaAtiva === m;
-                return (
-                  <button
-                    key={m}
-                    onClick={() => handleSelecionarMateria(m)}
-                    className={["w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors mb-1", isSelected ? "bg-primary/10 text-primary" : "hover:bg-surface-2 text-foreground/70"].join(" ")}
-                  >
-                    <span className="truncate pr-2">{m}</span>
-                    <ChevronRight className={["h-4 w-4 shrink-0 transition-transform", isActive ? "text-primary" : "text-foreground/30"].join(" ")} />
-                  </button>
-                );
-              })}
+              {materiasFiltradas.length === 0 && termoBusca !== "" ? (
+                 <p className="text-xs text-center text-foreground/40 py-4">Nenhuma matéria encontrada.</p>
+              ) : (
+                materiasFiltradas.map(m => {
+                  const isSelected = fMateria === m;
+                  const isActive = materiaAtiva === m;
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => handleSelecionarMateria(m)}
+                      className={["w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors mb-1", isSelected ? "bg-primary/10 text-primary" : "hover:bg-surface-2 text-foreground/70"].join(" ")}
+                    >
+                      <span className="truncate pr-2">{m}</span>
+                      <ChevronRight className={["h-4 w-4 shrink-0 transition-transform", isActive ? "text-primary" : "text-foreground/30"].join(" ")} />
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -137,18 +167,22 @@ export function FiltroHierarquiaModal({
                     Todos os tópicos (Matéria inteira)
                   </button>
 
-                  {topicos.map(t => {
-                    const isSelected = fAssunto === t;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => handleSelecionarTopico(t)}
-                        className={["w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors mb-1 text-left", isSelected ? "bg-primary/10 text-primary" : "hover:bg-surface-2 text-foreground/70"].join(" ")}
-                      >
-                        <span className="truncate">{t}</span>
-                      </button>
-                    );
-                  })}
+                  {topicosFiltrados.length === 0 && termoBusca !== "" ? (
+                    <p className="text-xs text-center text-foreground/40 py-4">Nenhum tópico encontrado.</p>
+                  ) : (
+                    topicosFiltrados.map(t => {
+                      const isSelected = fAssunto === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => handleSelecionarTopico(t)}
+                          className={["w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors mb-1 text-left", isSelected ? "bg-primary/10 text-primary" : "hover:bg-surface-2 text-foreground/70"].join(" ")}
+                        >
+                          <span className="truncate">{t}</span>
+                        </button>
+                      );
+                    })
+                  )}
                 </>
               )}
             </div>

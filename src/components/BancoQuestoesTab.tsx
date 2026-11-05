@@ -30,7 +30,7 @@ import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
 import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
-import { pullBancoQuestoesOtimizado } from "@/lib/db"; // IMPORTANDO A FUNÇÃO DE PULL
+import { pullBancoQuestoesOtimizado } from "@/lib/db";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -81,13 +81,9 @@ export function BancoQuestoesTab() {
     setLoading(true);
     setError(null);
     try {
-      // 1. Baixa as questões da nuvem para o banco local (se houver novas)
       await pullBancoQuestoesOtimizado(user.id, 0, 50);
-      
-      // 2. Limpa duplicatas locais (caso existam)
       await limparDuplicatasLocais(user.id);
 
-      // 3. Lê os dados atualizados do banco local
       const [r1, r2, r3, r4] = await Promise.all([
         getEstatisticasBanco(user.id),
         getQuestoesDoBanco(user.id),
@@ -107,10 +103,6 @@ export function BancoQuestoesTab() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setSelecionadas(new Set()); }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
-
-  // ... (o restante do código de handleExcluirCaderno, hierarquia, filtros, etc. continua igual ao que você já tem)
-  // Para economizar espaço, mantenha todo o resto do arquivo igual ao que te enviei na mensagem anterior, 
-  // apenas garantindo que a função load() seja substituída por esta acima.
 
   const handleExcluirCaderno = async (e: React.MouseEvent, c: Caderno) => {
     e.stopPropagation();
@@ -184,9 +176,7 @@ export function BancoQuestoesTab() {
 
   return (
     <>
-      {/* Mantenha todo o JSX igual ao da versão anterior, apenas com a função load() atualizada */}
       {viewMode === "cadernos" ? (
-        // ... (código da view de cadernos mantido)
         <div>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -341,7 +331,24 @@ export function BancoQuestoesTab() {
 
       {modalNovaPasta && user?.id && (<PastaModal userId={user.id} onClose={() => setModalNovaPasta(false)} onSuccess={() => { setModalNovaPasta(false); load(); }} />)}
       {modalEditarPasta && user?.id && (<PastaModal userId={user.id} pasta={modalEditarPasta} onClose={() => setModalEditarPasta(null)} onSuccess={() => { setModalEditarPasta(null); load(); }} />)}
-      {modalNovoCaderno && user?.id && (<CadernoModal userId={user.id} pastas={pastas} questoesIds={Array.from(selecionadas)} onClose={() => setModalNovoCaderno(false)} onSuccess={() => { setModalNovoCaderno(false); setSelecionadas(new Set()); load(); toast.success("Caderno criado!"); }} />)}
+      
+      {/* CHAMADA DO MODAL NOVO CADERNO ATUALIZADA PARA PASSAR AS QUESTÕES COMPLETAS */}
+      {modalNovoCaderno && user?.id && (
+        <CadernoModal 
+          userId={user.id} 
+          pastas={pastas} 
+          questoesIds={Array.from(selecionadas)} 
+          questoesCompletas={todasQuestoes.filter(q => selecionadas.has(q.id))} 
+          onClose={() => setModalNovoCaderno(false)} 
+          onSuccess={() => { 
+            setModalNovoCaderno(false); 
+            setSelecionadas(new Set()); 
+            load(); 
+            toast.success("Caderno(s) criado(s)!"); 
+          }} 
+        />
+      )}
+      
       {modalEditarCaderno && user?.id && (<CadernoModal userId={user.id} pastas={pastas} caderno={modalEditarCaderno} onClose={() => setModalEditarCaderno(null)} onSuccess={() => { setModalEditarCaderno(null); load(); toast.success("Caderno atualizado!"); }} />)}
       {modalPraticar && user?.id && (<PlayerLivreModal userId={user.id} questoes={filtradas} onClose={() => { setModalPraticar(false); load(); }} />)}
       {cadernoAberto && user?.id && (<CadernoDetalhesModal caderno={cadernoAberto} userId={user.id} onClose={() => setCadernoAberto(null)} onUpdate={load} />)}
@@ -375,7 +382,10 @@ export function BancoQuestoesTab() {
   );
 }
 
-// (Mantenha os componentes PastaModal, CadernoModal, Chip, Badge e BadgeSoft iguais ao que você já tem)
+// ==========================================
+// COMPONENTES DE MODAL E AUXILIARES
+// ==========================================
+
 function PastaModal({ userId, pasta, onClose, onSuccess }: { userId: string; pasta?: PastaCaderno; onClose: () => void; onSuccess: () => void }) {
   const [nome, setNome] = useState(pasta?.name || "");
   const [salvando, setSalvando] = useState(false);
@@ -400,33 +410,135 @@ function PastaModal({ userId, pasta, onClose, onSuccess }: { userId: string; pas
   );
 }
 
-function CadernoModal({ userId, pastas, questoesIds, caderno, onClose, onSuccess }: { userId: string; pastas: PastaCaderno[]; questoesIds?: string[]; caderno?: Caderno; onClose: () => void; onSuccess: () => void }) {
+function CadernoModal({ userId, pastas, questoesIds, questoesCompletas, caderno, onClose, onSuccess }: { userId: string; pastas: PastaCaderno[]; questoesIds?: string[]; questoesCompletas?: QuestaoBanco[]; caderno?: Caderno; onClose: () => void; onSuccess: () => void }) {
   const [nome, setNome] = useState(caderno?.nome || "");
   const [pastaId, setPastaId] = useState<string>(caderno?.pasta_id || "sem-pasta");
   const [salvando, setSalvando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emSerie, setEmSerie] = useState(false);
+
   const handleSalvar = async () => {
-    if (!nome.trim()) return;
+    if (!emSerie && !nome.trim()) return;
     setSalvando(true); setError(null);
-    let res;
-    if (caderno) { res = await atualizarCaderno(userId, caderno.id, { nome, pasta_id: pastaId }); } else {
-      if (!questoesIds || questoesIds.length === 0) { setError("Nenhuma questão selecionada."); setSalvando(false); return; }
-      res = await criarCaderno(userId, nome, pastaId, questoesIds);
+    
+    try {
+      if (caderno) {
+        const res = await atualizarCaderno(userId, caderno.id, { nome, pasta_id: pastaId });
+        if (res.success) onSuccess(); else setError(res.error || "Erro ao salvar");
+      } else if (emSerie) {
+        if (!questoesCompletas || questoesCompletas.length === 0) {
+          setError("Nenhuma questão selecionada."); setSalvando(false); return;
+        }
+
+        const grupos = new Map<string, string[]>();
+        questoesCompletas.forEach(q => {
+          const disc = q.disciplina || "Geral";
+          if (!grupos.has(disc)) grupos.set(disc, []);
+          grupos.get(disc)!.push(q.id);
+        });
+
+        let falhas = 0;
+        let criados = 0;
+
+        for (const [disc, ids] of grupos.entries()) {
+          const nomeCaderno = `Caderno de ${disc}`;
+          const res = await criarCaderno(userId, nomeCaderno, pastaId, ids);
+          if (res.success) criados++;
+          else falhas++;
+        }
+
+        if (falhas > 0 && criados === 0) {
+          setError("Erro ao criar os cadernos em série.");
+        } else if (falhas > 0) {
+          setError(`${criados} cadernos criados, mas ${falhas} falharam.`);
+        } else {
+          onSuccess();
+        }
+      } else {
+        if (!questoesIds || questoesIds.length === 0) {
+          setError("Nenhuma questão selecionada."); setSalvando(false); return;
+        }
+        const res = await criarCaderno(userId, nome, pastaId, questoesIds);
+        if (res.success) onSuccess(); else setError(res.error || "Erro ao salvar");
+      }
+    } catch (e: any) {
+      setError(e.message || "Erro inesperado.");
+    } finally {
+      setSalvando(false);
     }
-    setSalvando(false);
-    if (res.success) onSuccess(); else setError(res.error || "Erro ao salvar");
   };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-elevated">
-        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold text-foreground">{caderno ? "Editar Caderno" : "Novo Caderno"}</h3><button onClick={onClose} className="text-foreground/50 hover:text-foreground"><X className="h-5 w-5" /></button></div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-foreground">{caderno ? "Editar Caderno" : "Novo Caderno"}</h3>
+          <button onClick={onClose} className="text-foreground/50 hover:text-foreground"><X className="h-5 w-5" /></button>
+        </div>
+        
         <div className="space-y-4">
-          <div><label className="text-sm font-medium text-foreground/70">Nome do caderno *</label><input type="text" value={nome} onChange={(e) => setNome(e.target.value)} disabled={salvando} autoFocus className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1" /></div>
-          <div><label className="text-sm font-medium text-foreground/70">Pasta (opcional)</label><select value={pastaId} onChange={(e) => setPastaId(e.target.value)} disabled={salvando} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"><option value="sem-pasta">Sem pasta</option>{pastas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-          {!caderno && questoesIds && (<div className="rounded-lg bg-primary/5 p-3 text-xs text-primary">{questoesIds.length} questões selecionadas.</div>)}
+          {!caderno && (
+            <label className="flex items-center gap-2 cursor-pointer p-3 border border-border rounded-lg bg-surface-2 hover:bg-surface-2/80 transition-colors">
+              <input 
+                type="checkbox" 
+                checked={emSerie} 
+                onChange={(e) => setEmSerie(e.target.checked)} 
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
+              <span className="text-sm font-medium text-foreground/80">Gerar cadernos em série (um por disciplina)</span>
+            </label>
+          )}
+
+          {!emSerie && (
+            <div>
+              <label className="text-sm font-medium text-foreground/70">Nome do caderno *</label>
+              <input 
+                type="text" 
+                value={nome} 
+                onChange={(e) => setNome(e.target.value)} 
+                disabled={salvando} 
+                autoFocus 
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1" 
+              />
+            </div>
+          )}
+
+          {emSerie && (
+            <div className="rounded-lg bg-primary/10 p-3 border border-primary/20">
+              <p className="text-xs text-primary font-medium">
+                Os cadernos serão nomeados automaticamente (ex: "Caderno de Português", "Caderno de Direito") e agrupados na pasta escolhida abaixo.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="text-sm font-medium text-foreground/70">Pasta de destino</label>
+            <select 
+              value={pastaId} 
+              onChange={(e) => setPastaId(e.target.value)} 
+              disabled={salvando} 
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
+            >
+              <option value="sem-pasta">Sem pasta</option>
+              {pastas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+
+          {!caderno && questoesIds && (
+            <div className="rounded-lg bg-muted p-3 text-xs text-foreground/70">
+              {questoesIds.length} questões selecionadas.
+            </div>
+          )}
+          
           {error && <div className="rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent">{error}</div>}
         </div>
-        <div className="mt-5 flex gap-2"><button onClick={onClose} disabled={salvando} className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium hover:bg-surface-2">Cancelar</button><button onClick={handleSalvar} disabled={salvando || !nome.trim()} className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{salvando ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Salvar"}</button></div>
+
+        <div className="mt-5 flex gap-2">
+          <button onClick={onClose} disabled={salvando} className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium hover:bg-surface-2">Cancelar</button>
+          <button onClick={handleSalvar} disabled={salvando || (!emSerie && !nome.trim())} className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {salvando ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Salvar"}
+          </button>
+        </div>
       </div>
     </div>
   );
