@@ -1,5 +1,6 @@
 // src/components/RelatorioDesempenhoModal.tsx
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { getDb } from "@/lib/db";
@@ -8,8 +9,8 @@ import type { QuestaoBanco } from "@/services/bancoQuestoesService";
 
 interface Props {
   userId: string;
-  cadernoId?: string; // NOVO PARÂMETRO
-  titulo?: string;    // NOVO PARÂMETRO
+  cadernoId?: string;
+  titulo?: string;
   onClose: () => void;
 }
 
@@ -41,10 +42,8 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
       try {
         const db = await getDb();
         
-        // 1. Pega todas as tentativas do usuário
         const tentativas = await db.banco_tentativas.find({ selector: { user_id: userId } }).exec();
         
-        // 2. Pega as questões (se for de um caderno específico, filtra pelos IDs dele)
         let questoesValidas = new Set<string>();
         if (cadernoId) {
           const links = await db.caderno_questoes.find({ selector: { caderno_id: cadernoId } }).exec();
@@ -59,7 +58,6 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
           }
         });
 
-        // 3. Agrupa os dados
         const materiasMap = new Map<string, Map<string, { total: number, acertos: number }>>();
 
         const taxonomia = getTaxonomia();
@@ -76,7 +74,6 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
           const qId = t.get('questao_banco_id');
           const acertou = t.get('acertou');
           
-          // Se for de um caderno específico, ignora as tentativas de questões que não estão nele
           if (cadernoId && !questoesValidas.has(qId)) return;
           
           const q = questoesMap.get(qId);
@@ -95,7 +92,6 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
           }
         });
 
-        // 4. Converte e calcula
         const resultado: MateriaStats[] = [];
         materiasMap.forEach((assuntosMap, materiaNome) => {
           let materiaTotal = 0;
@@ -150,8 +146,8 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
     { name: "Erros", value: errosGeral, color: "#ef4444" }
   ];
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-border bg-surface shadow-elevated">
         
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
@@ -266,6 +262,7 @@ export function RelatorioDesempenhoModal({ userId, cadernoId, titulo, onClose }:
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

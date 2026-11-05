@@ -69,7 +69,7 @@ async function pushWithConflictCheck(
     const chunk = ids.slice(i, i + CHUNK_SIZE);
     const { data: remoteRows, error } = await supabaseClient
       .from(collectionName)
-      .select('id, updated_at') // OTIMIZAÇÃO: Busca apenas o necessário para checar conflito
+      .select('*') // <--- Mudou aqui
       .in('id', chunk);
 
     if (error) {

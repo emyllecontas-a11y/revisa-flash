@@ -1,5 +1,6 @@
 // src/components/FiltroHierarquiaModal.tsx
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { X, ChevronRight, FolderOpen } from "lucide-react";
 
 interface Props {
@@ -26,14 +27,11 @@ export function FiltroHierarquiaModal({
 }: Props) {
   const [materiaAtiva, setMateriaAtiva] = useState(fMateria);
 
-  // REMOVIDO O .sort() AQUI
   const disciplinas = Object.keys(hierarquia);
   const discAtual = fDisciplina || disciplinas[0] || "";
   
-  // REMOVIDO O .sort() AQUI
   const materias = discAtual ? Object.keys(hierarquia[discAtual] || {}) : [];
   
-  // REMOVIDO O .sort() AQUI
   const topicos = (discAtual && materiaAtiva) ? Array.from(hierarquia[discAtual]?.[materiaAtiva] || []) : [];
 
   const handleSelecionarMateria = (m: string) => {
@@ -46,8 +44,9 @@ export function FiltroHierarquiaModal({
     setFAssunto(t);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+  // Envolvemos o return inteiro com o createPortal
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-3xl h-[600px] max-h-[90vh] flex flex-col rounded-2xl border border-border bg-surface shadow-elevated overflow-hidden">
         
         {/* Header */}
@@ -172,6 +171,7 @@ export function FiltroHierarquiaModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
