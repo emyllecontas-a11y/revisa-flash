@@ -1,7 +1,7 @@
 // src/services/importarTecService.ts
 import JSZip from 'jszip';
 import { importarQuestoesNoBanco } from './bancoQuestoesService';
-import { uploadImagemR2 } from './r2StorageService'; // IMPORTANDO O R2 AQUI
+import { uploadImagemR2 } from './r2StorageService';
 import type { QuestaoParsed } from './pdfBancoParser';
 
 export interface ResultadoImportacaoTec {
@@ -50,7 +50,8 @@ export async function importarArquivoTec(
           
           if (imagemNoZip) {
             const blob = await imagemNoZip.async("blob");
-            const urlR2 = await uploadImagemR2(blob, nomeImagem, userId);
+            // Passando o q.hash_dedup aqui para gerar o nome único
+            const urlR2 = await uploadImagemR2(blob, nomeImagem, userId, q.hash_dedup);
             if (urlR2) {
               q.enunciado = q.enunciado.replace(match[0], `[IMAGEM: ${urlR2}]`);
               q.imagem_url = urlR2;
@@ -69,7 +70,8 @@ export async function importarArquivoTec(
           
           if (imagemNoZip) {
             const blob = await imagemNoZip.async("blob");
-            const urlR2 = await uploadImagemR2(blob, nomeImagem, userId);
+            // Passando o q.hash_dedup aqui também
+            const urlR2 = await uploadImagemR2(blob, nomeImagem, userId, q.hash_dedup);
             if (urlR2) {
               q.comentario = q.comentario.replace(match[0], `[IMAGEM: ${urlR2}]`);
             }

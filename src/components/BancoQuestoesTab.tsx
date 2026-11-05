@@ -27,14 +27,14 @@ import {
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
 import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
-import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal"; // NOVO IMPORT
+import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
+import { pullBancoQuestoesOtimizado } from "@/lib/db"; // IMPORTANDO A FUNÇÃO DE PULL
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
 
-// Função auxiliar para limpar o HTML e decodificar os acentos
 function stripHtml(html: string) {
   if (!html) return '';
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -65,7 +65,7 @@ export function BancoQuestoesTab() {
   const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
   
   const [modalFiltro, setModalFiltro] = useState(false);
-  const [modalRelatorio, setModalRelatorio] = useState(false); // NOVO ESTADO
+  const [modalRelatorio, setModalRelatorio] = useState(false);
 
   const [fDisciplina, setFDisciplina] = useState("");
   const [fMateria, setFMateria] = useState("");
@@ -81,7 +81,13 @@ export function BancoQuestoesTab() {
     setLoading(true);
     setError(null);
     try {
+      // 1. Baixa as questões da nuvem para o banco local (se houver novas)
+      await pullBancoQuestoesOtimizado(user.id, 0, 50);
+      
+      // 2. Limpa duplicatas locais (caso existam)
       await limparDuplicatasLocais(user.id);
+
+      // 3. Lê os dados atualizados do banco local
       const [r1, r2, r3, r4] = await Promise.all([
         getEstatisticasBanco(user.id),
         getQuestoesDoBanco(user.id),
@@ -101,6 +107,10 @@ export function BancoQuestoesTab() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setSelecionadas(new Set()); }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
+
+  // ... (o restante do código de handleExcluirCaderno, hierarquia, filtros, etc. continua igual ao que você já tem)
+  // Para economizar espaço, mantenha todo o resto do arquivo igual ao que te enviei na mensagem anterior, 
+  // apenas garantindo que a função load() seja substituída por esta acima.
 
   const handleExcluirCaderno = async (e: React.MouseEvent, c: Caderno) => {
     e.stopPropagation();
@@ -174,7 +184,9 @@ export function BancoQuestoesTab() {
 
   return (
     <>
+      {/* Mantenha todo o JSX igual ao da versão anterior, apenas com a função load() atualizada */}
       {viewMode === "cadernos" ? (
+        // ... (código da view de cadernos mantido)
         <div>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -237,7 +249,6 @@ export function BancoQuestoesTab() {
               <span className="text-xs text-foreground/45">{stats ? `${stats.total} questões` : ""}</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {/* NOVO BOTÃO DE RELATÓRIO */}
               <button onClick={() => setModalRelatorio(true)} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors">
                 <BarChart3 className="h-4 w-4" /> Relatório
               </button>
@@ -317,7 +328,6 @@ export function BancoQuestoesTab() {
                           {q.subassunto && q.subassunto !== "Geral" && (<span className="text-[10px] text-foreground/40">› {q.subassunto}</span>)}
                           <Badge className={q.tipo_questao === "certo_errado" ? "bg-warning/15 text-warning" : "bg-primary/15 text-primary"}>{q.tipo_questao === "certo_errado" ? "C/E" : "Múltipla"}</Badge>
                         </div>
-                        {/* AQUI FOI APLICADA A LIMPEZA DO HTML */}
                         <p className="line-clamp-2 text-sm text-foreground/85">{stripHtml(q.enunciado)}</p>
                       </div>
                     </div>
@@ -355,7 +365,6 @@ export function BancoQuestoesTab() {
         />
       )}
 
-      {/* NOVO MODAL DE RELATÓRIO */}
       {modalRelatorio && user?.id && (
         <RelatorioDesempenhoModal
           userId={user.id}
@@ -366,6 +375,7 @@ export function BancoQuestoesTab() {
   );
 }
 
+// (Mantenha os componentes PastaModal, CadernoModal, Chip, Badge e BadgeSoft iguais ao que você já tem)
 function PastaModal({ userId, pasta, onClose, onSuccess }: { userId: string; pasta?: PastaCaderno; onClose: () => void; onSuccess: () => void }) {
   const [nome, setNome] = useState(pasta?.name || "");
   const [salvando, setSalvando] = useState(false);

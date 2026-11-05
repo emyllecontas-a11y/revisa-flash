@@ -30,7 +30,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const [idx, setIdx] = useState(0);
   const [selecionada, setSelecionada] = useState<string | null>(null);
   
-  // DICIONÁRIO DE RESPOSTAS CONFIRMADAS (O ID da questão mapeia para a letra)
   const [respostasConfirmadas, setRespostasConfirmadas] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
   
@@ -88,7 +87,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const handleResponder = async () => {
     if (!selecionada || respondida || !questaoAtual) return;
     
-    // Salva a resposta no dicionário
     setRespostasConfirmadas(prev => ({ ...prev, [questaoAtual.id]: selecionada }));
     
     const correta = getCorreta(questaoAtual);
@@ -328,8 +326,11 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     }
 
     return createPortal(
-      <div className="fixed inset-0 z-[100] flex flex-col bg-background overflow-y-auto">
-        <div className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
+      // FIX: O container principal não tem mais overflow-y-auto. Ele é flex-col.
+      <div className="fixed inset-0 z-[100] flex flex-col bg-background">
+        
+        {/* Header Fixo */}
+        <div className="shrink-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-medium text-foreground/60 hover:text-foreground flex items-center gap-1">
             <ChevronLeft className="h-4 w-4" /> Sair
           </button>
@@ -340,34 +341,38 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           </div>
         </div>
 
-        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 pb-32">
-          <QuestaoCard
-            numero={idx + 1}
-            total={total}
-            ano={questaoAtual.ano}
-            area={questaoAtual.disciplina}
-            instituicao={questaoAtual.banca}
-            enunciado={questaoAtual.enunciado}
-            imagens={questaoAtual.imagem_url ? [questaoAtual.imagem_url] : []}
-            tipo={questaoAtual.tipo_questao}
-            alternativas={alternativasView}
-            selecionada={selecionadaAtual}
-            eliminadas={eliminadasAtuais}
-            correta={respondida ? correta : null}
-            comentario={respondida ? questaoAtual.comentario : null}
-            revelar={respondida}
-            permitirEliminar={!respondida}
-            onSelecionar={(letra) => !respondida && setSelecionada(letra)}
-            onEliminar={toggleEliminada}
-            anotacoes={anotacoes.get(questaoAtual.id) ?? []}
-            onGrifar={(campo, cor, texto, rects) => handleGrifar(questaoAtual.id, campo, cor, texto, rects)}
-            onRemoverGrifo={handleRemoverGrifo}
-            onTrocarCorGrifo={handleTrocarCorGrifo}
-            grifarAtivo={true}
-          />
+        {/* Área Rolável (Questão) */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-3xl mx-auto w-full p-4 sm:p-6 pb-8">
+            <QuestaoCard
+              numero={idx + 1}
+              total={total}
+              ano={questaoAtual.ano}
+              area={questaoAtual.disciplina}
+              instituicao={questaoAtual.banca}
+              enunciado={questaoAtual.enunciado}
+              imagens={questaoAtual.imagem_url ? [questaoAtual.imagem_url] : []}
+              tipo={questaoAtual.tipo_questao}
+              alternativas={alternativasView}
+              selecionada={selecionadaAtual}
+              eliminadas={eliminadasAtuais}
+              correta={respondida ? correta : null}
+              comentario={respondida ? questaoAtual.comentario : null}
+              revelar={respondida}
+              permitirEliminar={!respondida}
+              onSelecionar={(letra) => !respondida && setSelecionada(letra)}
+              onEliminar={toggleEliminada}
+              anotacoes={anotacoes.get(questaoAtual.id) ?? []}
+              onGrifar={(campo, cor, texto, rects) => handleGrifar(questaoAtual.id, campo, cor, texto, rects)}
+              onRemoverGrifo={handleRemoverGrifo}
+              onTrocarCorGrifo={handleTrocarCorGrifo}
+              grifarAtivo={true}
+            />
+          </div>
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
+        {/* Footer Fixo */}
+        <div className="shrink-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
             <button
               onClick={voltar}
