@@ -87,32 +87,17 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   try {
     const ids = Array.from(rankingMap.keys());
     
-    // 🔥 CORREÇÃO AQUI: Buscando na tabela 'profiles' e trazendo o avatar_url
-    const { data: profiles, error: profileError } = await supabase
+    // 🔥 CORREÇÃO AQUI: Busca apenas as colunas reais da tabela profiles
+    const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, user_id, name, avatar_url')
+      .select('id, name, avatar_url')
       .in('id', ids);
 
-    if (profileError) {
-      console.warn("Aviso ao buscar perfis (tentando user_id):", profileError.message);
-      // Fallback caso a coluna de ID na tabela profiles se chame 'user_id'
-      const { data: profilesFallback } = await supabase
-        .from('profiles')
-        .select('user_id, name, avatar_url')
-        .in('user_id', ids);
-      
-      profilesFallback?.forEach((p: any) => {
-        if (rankingMap.has(p.user_id)) {
-          rankingMap.get(p.user_id)!.name = p.name || "Estudante";
-          rankingMap.get(p.user_id)!.avatar_url = p.avatar_url || null;
-        }
-      });
-    } else if (profiles) {
+    if (profiles) {
       profiles.forEach((p: any) => {
-        const userId = p.id || p.user_id;
-        if (rankingMap.has(userId)) {
-          rankingMap.get(userId)!.name = p.name || "Estudante";
-          rankingMap.get(userId)!.avatar_url = p.avatar_url || null;
+        if (rankingMap.has(p.id)) {
+          rankingMap.get(p.id)!.name = p.name || "Estudante";
+          rankingMap.get(p.id)!.avatar_url = p.avatar_url || null;
         }
       });
     }
@@ -240,18 +225,9 @@ export async function getMedalhas(userId: string): Promise<{ semanais: Medal[], 
     return { conquistada: jaConquistada, progresso: jaConquistada ? 1 : progresso };
   };
 
-  // --- METAS SEMANAIS ---
-  // Meta Relógio firme: 12 horas = 720 minutos
   const s2 = await checarMedalha('relogio_firme', refSemana, minEstudadosSemana >= 720, minEstudadosSemana / 720);
-  
-  // Meta Mira certeira: 100 questões
   const s3 = await checarMedalha('mira_certeira', refSemana, questoesSemana.length >= 100, questoesSemana.length / 100);
-
-  // --- METAS MENSAIS ---
-  // Meta Maratonista: 48 horas = 2880 minutos
   const m2 = await checarMedalha('maratonista', refMes, minEstudadosMes >= 2880, minEstudadosMes / 2880);
-
-  // Checagens que não mudaram (Chama acesa, Simulado e Diamante)
   const s1 = await checarMedalha('chama_acesa', refSemana, diasEstudadosSemana >= 5, diasEstudadosSemana / 5);
   const s4 = await checarMedalha('simulado_semana', refSemana, simuladosSemana.length >= 1, simuladosSemana.length / 1);
   const m1 = await checarMedalha('constancia_diamante', refMes, new Set(recordsMes.map(r => r.get('date').split('T')[0])).size >= 15, new Set(recordsMes.map(r => r.get('date').split('T')[0])).size / 15);

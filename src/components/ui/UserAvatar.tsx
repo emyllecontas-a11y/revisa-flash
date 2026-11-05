@@ -1,7 +1,6 @@
 import React from 'react';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Seu componente de avatar atual
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; 
 
-// Importando as imagens locais
 import lumiMascote from '@/assets/avatars/mascote-base.svg';
 import avatar01 from '@/assets/avatars/avatar-01.svg';
 import avatar02 from '@/assets/avatars/avatar-02.svg';
@@ -16,8 +15,8 @@ import avatar10 from '@/assets/avatars/avatar-10.svg';
 import avatar11 from '@/assets/avatars/avatar-11.svg';
 import avatar12 from '@/assets/avatars/avatar-12.svg';
 
-// Dicionário para ligar o ID salvo no banco à imagem real
-const AVATARES_MAP: Record<string, string> = {
+// 🔥 AQUI ESTÁ A CORREÇÃO: O "export" antes do dicionário
+export const AVATARES_MAP: Record<string, string> = {
   'lumi-mascote-base': lumiMascote,
   'lumi-avatar-01': avatar01,
   'lumi-avatar-02': avatar02,
@@ -38,11 +37,10 @@ interface UserAvatarProps {
   avatarTipo?: string | null;
   avatarId?: string | null;
   nome?: string;
-  className?: string; // Para controlar tamanhos (ex: h-10 w-10)
+  className?: string; 
 }
 
 export function UserAvatar({ fotoUrl, avatarTipo, avatarId, nome, className = "h-10 w-10" }: UserAvatarProps) {
-  // 1. Se o tipo for avatar e o ID existir, mostra a Lumi
   if (avatarTipo === 'avatar' && avatarId && AVATARES_MAP[avatarId]) {
     return (
       <Avatar className={className}>
@@ -52,7 +50,6 @@ export function UserAvatar({ fotoUrl, avatarTipo, avatarId, nome, className = "h
     );
   }
 
-  // 2. Se não for avatar (ou der erro), tenta mostrar a foto real
   if (fotoUrl) {
     return (
       <Avatar className={className}>
@@ -62,7 +59,6 @@ export function UserAvatar({ fotoUrl, avatarTipo, avatarId, nome, className = "h
     );
   }
 
-  // 3. Fallback: Se não tem nada, mostra a Lumi base (Mascote Oficial)
   return (
     <Avatar className={className}>
       <AvatarImage src={lumiMascote} alt="Lumi, a loba" className="object-cover bg-[#C9B6EE]" />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // ajuste se seu caminho for diferente
-import { UserAvatar } from '@/components/ui/UserAvatar';
+import { supabase } from '@/lib/supabaseClient'; 
+import { UserAvatar, AVATARES_MAP } from '@/components/ui/UserAvatar'; // 🔥 Importando o mapa aqui
 import avatarCatalog from '@/data/avatar-catalog.json';
 
 interface SeletorAvatarProps {
@@ -40,7 +40,7 @@ export function SeletorAvatar({ userId, fotoUrl, onAtualizar }: SeletorAvatarPro
     if (!error) {
       setAvatarTipo(novoTipo);
       setAvatarId(novoId);
-      onAtualizar(novoTipo, novoId); // Avisa a tela de configurações para atualizar a prévia
+      onAtualizar(novoTipo, novoId); 
     } else {
       alert("Erro ao salvar avatar. Tente novamente.");
     }
@@ -96,9 +96,9 @@ export function SeletorAvatar({ userId, fotoUrl, onAtualizar }: SeletorAvatarPro
               }`}
             >
               <div className="h-12 w-12 rounded-full overflow-hidden bg-white mb-1 shadow-sm">
-                {/* Carrega a imagem do catálogo */}
+                {/* 🔥 CORREÇÃO: Usando o mapa importado em vez de new URL */}
                 <img 
-                  src={new URL(`../../assets/${av.arquivo}`, import.meta.url).href} 
+                  src={AVATARES_MAP[av.id]} 
                   alt={av.nome} 
                   className="h-full w-full object-cover" 
                 />
