@@ -45,6 +45,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/supabase-js": "^2.108.2",
     "@tanstack/react-query": "^5.101.1",
+    "aws4fetch": "^1.0.20",
     "broadcast-channel": "^7.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
