@@ -464,21 +464,20 @@ export default function ConfigPage() {
   }, [signOut, confirmDialog]);
 
   const reabrirTour = useCallback(async () => {
-    if (!user?.id) { setMensagem("⚠️ Usuário não identificado."); setMensagemTipo('warning'); return; }
+    if (!user?.id) return;
     const ok = await confirmDialog({
       title: "Reabrir o tour guiado?",
-      description: "O Tour com a Lumi será aberto novamente na tela.",
+      description: "O Tour com a Lumi será aberto novamente a partir da tela inicial.",
       confirmText: "Reabrir",
       cancelText: "Cancelar",
     });
     if (!ok) return;
     
-    // 🔥 DISPARA O EVENTO PARA O APP-SHELL ABRIR O GUIDED TOUR
-    window.dispatchEvent(new Event('open_guided_tour'));
+    localStorage.removeItem(`tour_completed_${user.id}`);
+    localStorage.setItem('tour_active', 'true');
+    localStorage.setItem('tour_step', '0');
     
-    setMensagem("✅ Tour reaberto! Siga as instruções na tela.");
-    setMensagemTipo('success');
-    setTimeout(() => setMensagem(""), 3000);
+    window.location.href = '/'; 
   }, [user, confirmDialog]);
 
   const handleDeleteAccount = useCallback(async () => {
@@ -677,7 +676,8 @@ export default function ConfigPage() {
         </Section>
 
         <Section id="estudo" title="Plano de estudos" color={getCardColor(2)}>
-          <div className="space-y-3">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: aj-prova */}
+          <div className="space-y-3" data-tour="aj-prova">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-foreground/70">Prova-alvo *</label>
               <input
@@ -735,7 +735,8 @@ export default function ConfigPage() {
             />
           </ConfigRow>
 
-          <div className="mt-5 pt-5 border-t border-border/40">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: aj-limites */}
+          <div className="mt-5 pt-5 border-t border-border/40" data-tour="aj-limites">
             <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-3">Limites diários</h3>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -829,7 +830,8 @@ export default function ConfigPage() {
         </Section>
 
         <Section id="dados" title="Dados e sincronização" color={getCardColor(4)}>
-          <div className="mb-5">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: aj-anki */}
+          <div className="mb-5" data-tour="aj-anki">
             <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-3">Importar flashcards do Anki</h3>
             <p className="text-xs text-foreground/45 mb-3">Formatos: .txt, .csv, .apkg (tab separado: pergunta → resposta)</p>
 
@@ -885,7 +887,8 @@ export default function ConfigPage() {
             )}
           </div>
 
-          <div className="pt-5 border-t border-border/40">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: aj-backup */}
+          <div className="pt-5 border-t border-border/40" data-tour="aj-backup">
             <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-3">Backup dos dados</h3>
 
             {backupMensagem && (

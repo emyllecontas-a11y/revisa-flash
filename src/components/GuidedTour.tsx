@@ -123,7 +123,11 @@ export type GuidedTourProps = {
 export function GuidedTour({ userId, forceOpen = false, currentPath, onNavigate, onFinish }: GuidedTourProps) {
   const storageKey = `tour_completed_${userId}`;
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState(0);
+  // 🔥 LÊ O PASSO ATUAL DO LOCALSTORAGE
+  const [step, setStep] = useState<number>(() => {
+    const saved = localStorage.getItem('tour_step');
+    return saved ? parseInt(saved, 10) : 0;
+  });
   const [rect, setRect] = useState<Rect | null>(null);
   const [pos, setPos] = useState<Pos>({ top: 0, left: 0, side: "center" });
   const [ready, setReady] = useState(false);
@@ -134,13 +138,19 @@ export function GuidedTour({ userId, forceOpen = false, currentPath, onNavigate,
   useEffect(() => {
     if (!userId) return;
     if (forceOpen || !localStorage.getItem(storageKey)) {
-      setStep(0);
       setOpen(true);
     }
   }, [storageKey, userId, forceOpen]);
 
+  // 🔥 SALVA O PASSO NO LOCALSTORAGE SEMPRE QUE MUDAR
+  useEffect(() => {
+    localStorage.setItem('tour_step', step.toString());
+  }, [step]);
+
   const finish = useCallback(() => {
     localStorage.setItem(storageKey, "true");
+    localStorage.removeItem('tour_step'); // Limpa o passo
+    localStorage.setItem('tour_active', 'false'); // Avisa que o tour acabou
     setOpen(false);
     onFinish?.();
   }, [storageKey, onFinish]);
@@ -199,7 +209,11 @@ export function GuidedTour({ userId, forceOpen = false, currentPath, onNavigate,
     const signal = { cancelled: false };
     setReady(false);
     const here = currentPath ?? window.location.pathname;
-    if (s.path !== here) onNavigate?.(s.path);
+    
+    // Se o caminho da página atual for diferente do caminho do passo, navega
+    if (s.path !== here) {
+      onNavigate?.(s.path);
+    }
 
     waitForElement(s.target, signal).then((el) => {
       if (signal.cancelled) return;
@@ -218,7 +232,7 @@ export function GuidedTour({ userId, forceOpen = false, currentPath, onNavigate,
       signal.cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, step]);
+  }, [open, step, s.path]);
 
   useLayoutEffect(() => {
     if (!open) return;

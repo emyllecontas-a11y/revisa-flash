@@ -12,7 +12,6 @@ import { useClerk } from "@clerk/clerk-react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
-import { OnboardingTour } from "@/components/OnboardingTour"; // Mantido para não quebrar, mas não será mais usado na tela
 import { syncWithSupabase, readLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
@@ -150,23 +149,24 @@ function AppShellInner({
     }
   }, [user, isLoaded]);
 
-  // 🔥 LÓGICA PARA ABRIR O CARROSSEL NO PRIMEIRO ACESSO
+  // 🔥 LÓGICA PARA ABRIR O CARROSSEL E O TOUR NO PRIMEIRO ACESSO
   useEffect(() => {
     if (!user?.id) return;
     const hasSeenTour = localStorage.getItem(`tour_completed_${user.id}`);
-    if (!hasSeenTour) {
+    if (hasSeenTour) return;
+
+    const isTourActive = localStorage.getItem('tour_active') === 'true';
+
+    if (isTourActive) {
+      // Se o tour está no meio, ignora o carrossel e abre o holofote
+      setShowCarousel(false);
+      setShowTour(true);
+    } else {
+      // Se nunca viu, abre o carrossel primeiro
       setShowCarousel(true);
+      setShowTour(false);
     }
   }, [user?.id]);
-
-  // 🔥 LÓGICA PARA O BOTÃO DE AJUDA (REABRIR TOUR)
-  useEffect(() => {
-    const handleOpenTour = () => {
-      setShowTour(true);
-    };
-    window.addEventListener('open_guided_tour', handleOpenTour);
-    return () => window.removeEventListener('open_guided_tour', handleOpenTour);
-  }, []);
 
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
@@ -304,7 +304,9 @@ function AppShellInner({
           userId={user.id} 
           onFinish={() => {
             setShowCarousel(false); 
-            setShowTour(true); // Abre o Holofote logo após o carrossel
+            setShowTour(true); 
+            localStorage.setItem('tour_active', 'true');
+            localStorage.setItem('tour_step', '0');
           }} 
         />
       )}
@@ -316,7 +318,10 @@ function AppShellInner({
           currentPath={pathname}
           onNavigate={(path) => navigate(path)}
           onFinish={() => {
-            setShowTour(false); // Fecha o holofote ao terminar
+            setShowTour(false);
+            localStorage.removeItem('tour_active');
+            localStorage.removeItem('tour_step');
+            localStorage.setItem(`tour_completed_${user.id}`, "true");
           }}
         />
       )}
