@@ -105,18 +105,14 @@ export default function ConteudoPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  // ID do arquivo que está sendo baixado para o dispositivo (para mostrar spinner no botão)
   const [baixandoId, setBaixandoId] = useState<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
 
   const [cachedFileIds, setCachedFileIds] = useState<Set<string>>(new Set());
-  // Mostrar só PDFs com cópia offline (filtro)
   const [filtroOffline, setFiltroOffline] = useState(false);
-  // Progresso do "baixar todos" (null = parado)
   const [baixandoTodos, setBaixandoTodos] = useState<{ atual: number; total: number } | null>(null);
 
-  // Compartilhar com amigas (disciplina, tópico ou arquivo)
   const [compartilhar, setCompartilhar] = useState<{
     itemType: ShareItemType;
     itemId: string;
@@ -402,7 +398,6 @@ export default function ConteudoPage() {
     }
   }, [cachedFileIds, toast]);
 
-  /** Baixa todos os PDFs ainda não cacheados do tópico, em sequência. */
   const handleBaixarTodos = useCallback(async (arquivos: FileRecord[]) => {
     const pdfs = arquivos.filter(ehPdf);
     const pendentes = pdfs.filter((f) => !cachedFileIds.has(f.id));
@@ -436,7 +431,6 @@ export default function ConteudoPage() {
     else toast.error("Nenhum PDF pôde ser baixado. Verifique sua conexão.");
   }, [cachedFileIds, toast]);
 
-  /** Remove todos os caches offline dos PDFs do tópico. */
   const handleLimparOfflineTopico = useCallback(async (arquivos: FileRecord[]) => {
     const pdfs = arquivos.filter(ehPdf);
     const cacheados = pdfs.filter((f) => cachedFileIds.has(f.id));
@@ -463,12 +457,6 @@ export default function ConteudoPage() {
     toast.success(`${cacheados.length} cópia(s) offline removida(s).`);
   }, [cachedFileIds, confirmDialog, toast]);
 
-  /**
-   * Baixa o arquivo para o DISPOSITIVO (disco), com o nome original.
-   * Usa fetch + blob + <a download> — força o download mesmo quando o
-   * servidor responde com Content-Disposition: inline.
-   * Se o navegador bloquear (CORS), abre em nova aba como fallback.
-   */
   const handleBaixarArquivo = useCallback(async (file: FileRecord) => {
     setBaixandoId(file.id);
     try {
@@ -941,7 +929,6 @@ export default function ConteudoPage() {
   ];
   const getCardColor = (index: number) => CARD_COLORS[index % CARD_COLORS.length];
 
-  // Modal de compartilhar (usado nas três telas)
   const modalCompartilhar = compartilhar && userId ? (
     <CompartilharModal
       open={true}
@@ -1003,8 +990,10 @@ export default function ConteudoPage() {
                 </button>
               ))}
             </div>
+            {/* 🔥 ETIQUETA ADICIONADA AQUI: conteudo-criar */}
             <button
               onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
+              data-tour="conteudo-criar"
               className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
             >
               <Plus className="h-3.5 w-3.5" /> Nova disciplina
@@ -1012,7 +1001,6 @@ export default function ConteudoPage() {
           </div>
 
           {disciplinasFiltradas.length > 0 ? (
-            /* MUDANÇA: grid-cols-1 explícito no mobile */
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {disciplinasFiltradas.map((d, index) => {
                 const counts = getStatusCounts(d.id);
@@ -1381,7 +1369,6 @@ export default function ConteudoPage() {
       : null;
     const currentFiles = filesMap[topico.id] || [];
 
-    // Contadores e filtro de offline
     const pdfsDoTopico = currentFiles.filter(ehPdf);
     const pdfsOffline = pdfsDoTopico.filter((f) => cachedFileIds.has(f.id));
     const totalPdfs = pdfsDoTopico.length;
@@ -1412,9 +1399,11 @@ export default function ConteudoPage() {
             <h1 className="font-display text-2xl font-semibold tracking-tight break-words sm:text-3xl">{topico.name}</h1>
           </div>
           <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            {/* 🔥 ETIQUETA ADICIONADA AQUI: conteudo-status */}
             <select
               value={topico.status}
               onChange={(e) => handleUpdateTopicStatus(topico.id, e.target.value)}
+              data-tour="conteudo-status"
               className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 outline-none focus:border-primary"
             >
               {statusOptions.map((opt) => (
@@ -1436,16 +1425,12 @@ export default function ConteudoPage() {
           </div>
         </header>
 
-        {/* MUDANÇA: grid-cols-1 no mobile (antes só tinha lg:grid-cols-3) */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* MUDANÇA: min-w-0 na section */}
           <section className="min-w-0 space-y-6 lg:col-span-2">
-            {/* NOVO: Card de subtópicos */}
             <SubtopicoCard topicoId={topico.id} userId={userId} />
 
-            {/* MUDANÇA: p-4 no mobile, p-6 a partir de sm */}
-            <div className="rf-card min-w-0 p-4 sm:p-6">
-              {/* MUDANÇA: flex-wrap + gap para o botão "Enviar arquivo" descer quando faltar espaço */}
+            {/* 🔥 ETIQUETA ADICIONADA AQUI: conteudo-materiais */}
+            <div className="rf-card min-w-0 p-4 sm:p-6" data-tour="conteudo-materiais">
               <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-xs font-medium uppercase tracking-widest text-foreground/40">Materiais</h3>
@@ -1549,12 +1534,10 @@ export default function ConteudoPage() {
                     const isCached = isPdf && cachedFileIds.has(a.id);
                     const filePath = resolveStoragePath(a);
                     return (
-                      /* MUDANÇA: flex-wrap — os botões caem para a linha de baixo quando não cabem */
                       <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-background/40 p-3">
                         <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${cor}`}>
                           <Icon className="h-4 w-4" />
                         </div>
-                        {/* MUDANÇA: basis-40 faz o nome ter uma largura mínima antes de quebrar a linha */}
                         <div className="min-w-0 flex-1 basis-40">
                           <div className="flex items-center gap-1.5">
                             <div className="truncate text-sm font-medium">{a.nome}</div>
@@ -1568,12 +1551,10 @@ export default function ConteudoPage() {
                               </span>
                             )}
                           </div>
-                          {/* MUDANÇA: truncate */}
                           <div className="truncate text-[11px] text-foreground/45">
                             {a.tipo} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
                           </div>
                         </div>
-                        {/* MUDANÇA: ml-auto para alinhar os botões à direita quando estiverem na linha de baixo */}
                         <div className="ml-auto flex items-center gap-1">
                           {isPdf && (
                             <button
@@ -1661,7 +1642,6 @@ export default function ConteudoPage() {
             </div>
           </section>
 
-          {/* MUDANÇA: min-w-0 no aside */}
           <aside className="min-w-0 space-y-4 lg:sticky lg:top-20 lg:self-start">
             <div className="rf-card p-5">
               <header className="mb-3 text-xs font-medium uppercase tracking-widest text-foreground/40">Progresso</header>

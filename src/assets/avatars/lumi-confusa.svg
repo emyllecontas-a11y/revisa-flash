@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Lumi Confusa"><title>Lumi Confusa</title><rect width="200" height="200" fill="#FDE0E6"/><g transform="rotate(-10 100 110)"><circle cx="100" cy="104" r="78" fill="#fff" opacity=".14"/><path d="M52 108 L54 34 Q56 24 66 30 L92 54 L108 54 L134 30 Q144 24 146 34 L148 108 Q148 168 100 170 Q52 168 52 108Z" fill="#290E1F"/>
+<path d="M62 42 L64 64 L82 52Z M138 42 L136 64 L118 52Z" fill="#FCE9D8"/>
+<ellipse cx="100" cy="132" rx="28" ry="22" fill="#FCE9D8"/>
+<path d="M92 122 Q100 118 108 122 L100 131Z" fill="#290E1F"/>
+<path d="M90 144 Q96 138 102 144 T114 142" stroke="#290E1F" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+<circle cx="80" cy="102" r="12" fill="#FCE9D8"/><circle cx="78" cy="103" r="6.5" fill="#290E1F"/><circle cx="76" cy="100" r="2.2" fill="#fff"/><circle cx="120" cy="104" r="9" fill="#FCE9D8"/><circle cx="120" cy="105" r="5" fill="#290E1F"/><circle cx="118" cy="103" r="1.8" fill="#fff"/>
+<path d="M68 86 L90 88 M108 84 Q120 66 134 80" stroke="#FCE9D8" stroke-width="3.5" fill="none" stroke-linecap="round"/></g>
+<text x="152" y="70" font-family="Arial, sans-serif" font-weight="900" font-size="52" fill="#FE7802" stroke="#290E1F" stroke-width="2">?</text></svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Lumi Notificação"><title>Lumi Notificação</title><rect width="200" height="200" fill="#FFF1C9"/><circle cx="100" cy="104" r="78" fill="#fff" opacity=".14"/><path d="M52 108 L54 34 Q56 24 66 30 L92 54 L108 54 L134 30 Q144 24 146 34 L148 108 Q148 168 100 170 Q52 168 52 108Z" fill="#290E1F"/>
+<path d="M62 42 L64 64 L82 52Z M138 42 L136 64 L118 52Z" fill="#FCE9D8"/>
+<ellipse cx="100" cy="132" rx="28" ry="22" fill="#FCE9D8"/>
+<path d="M92 122 Q100 118 108 122 L100 131Z" fill="#290E1F"/>
+<ellipse cx="100" cy="142" rx="7" ry="8" fill="#290E1F"/>
+<circle cx="80" cy="102" r="14" fill="#FCE9D8"/><circle cx="120" cy="102" r="14" fill="#FCE9D8"/>
+<circle cx="80" cy="100" r="6" fill="#290E1F"/><circle cx="120" cy="100" r="6" fill="#290E1F"/><circle cx="78" cy="97" r="2.2" fill="#fff"/><circle cx="118" cy="97" r="2.2" fill="#fff"/>
+<path d="M66 78 Q80 68 92 76 M108 76 Q120 68 134 78" stroke="#FCE9D8" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+<g transform="translate(100 14) rotate(-12)"><path d="M-12 14 q0 -18 12 -18 q12 0 12 18 l4 4 h-32Z" fill="#FFC94A" stroke="#290E1F" stroke-width="2"/><circle cy="21" r="3.5" fill="#FE7802"/></g>
+<path d="M74 8 l-8 -4 M72 18 h-9 M126 8 l8 -4 M128 18 h9" stroke="#FE7802" stroke-width="3" stroke-linecap="round"/></svg>

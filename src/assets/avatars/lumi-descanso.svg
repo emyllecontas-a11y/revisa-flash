@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Lumi Descanso"><title>Lumi Descanso</title><rect width="200" height="200" fill="#E3DAF5"/><circle cx="100" cy="104" r="78" fill="#fff" opacity=".14"/><path d="M52 108 L54 34 Q56 24 66 30 L92 54 L108 54 L134 30 Q144 24 146 34 L148 108 Q148 168 100 170 Q52 168 52 108Z" fill="#290E1F"/>
+<path d="M62 42 L64 64 L82 52Z M138 42 L136 64 L118 52Z" fill="#FCE9D8"/>
+<ellipse cx="100" cy="132" rx="28" ry="22" fill="#FCE9D8"/>
+<path d="M92 122 Q100 118 108 122 L100 131Z" fill="#290E1F"/>
+<rect x="30" y="160" width="140" height="30" rx="15" fill="#fff"/><path d="M50 170 q50 10 100 0" stroke="#C9B6EE" stroke-width="2" fill="none"/>
+<path d="M70 102 Q80 112 90 102 M110 102 Q120 112 130 102" stroke="#FCE9D8" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+<ellipse cx="70" cy="120" rx="7" ry="4" fill="#FE7802" opacity=".4"/><ellipse cx="130" cy="120" rx="7" ry="4" fill="#FE7802" opacity=".4"/>
+<path d="M94 142 Q100 146 106 142" stroke="#290E1F" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+<g fill="#290E1F" font-family="Arial, sans-serif" font-weight="900"><text x="148" y="56" font-size="20">Z</text><text x="166" y="38" font-size="15">z</text><text x="180" y="24" font-size="11">z</text></g></svg>

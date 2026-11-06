@@ -642,8 +642,10 @@ export default function SessoesPage() {
   return (
     <AppShell title="Sessões">
       <div className="mb-5 flex justify-end">
+        {/* 🔥 ETIQUETA ADICIONADA AQUI: sessoes-registrar */}
         <button
           onClick={() => { resetManualForm(); setManualOpen(true); }}
+          data-tour="sessoes-registrar"
           className="btn-sun flex items-center gap-1.5 px-4 py-2 text-sm"
         >
           <Plus className="h-4 w-4" /> Sessão manual
@@ -831,7 +833,8 @@ export default function SessoesPage() {
           </div>
 
           {/* ===== GRÁFICO: TEMPO POR DIA ===== */}
-          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: sessoes-grafico */}
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5" data-tour="sessoes-grafico">
             <SectionTitle>Tempo por dia (últimos 7 dias)</SectionTitle>
             {weekData.some((d) => d.minutes > 0) ? (
               <div className="h-48">
@@ -870,7 +873,8 @@ export default function SessoesPage() {
           </section>
 
           {/* ===== GRÁFICO: POR DISCIPLINA ===== */}
-          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: sessoes-disciplina */}
+          <section className="min-w-0 rounded-3xl rf-card p-4 sm:p-5" data-tour="sessoes-disciplina">
             <SectionTitle>Por disciplina</SectionTitle>
             {disciplineData.length > 0 ? (
               <div style={{ height: Math.max(160, disciplineData.length * 44) }}>

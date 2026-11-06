@@ -11,7 +11,6 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useAppUser } from "@/contexts/UserContext";
 import { getDb, syncWithSupabase, readLastSync } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
-import { OnboardingTour } from "@/components/OnboardingTour";
 import { PlanoDiaCard } from "@/components/PlanoDiaCard";
 
 interface ProximaRevisao {
@@ -290,8 +289,6 @@ export default function DashboardPage() {
 
   return (
     <AppShell breadcrumb="Início">
-      <OnboardingTour />
-
       {/* CABEÇALHO: TÍTULO + BOTÃO REGISTRAR ESTUDO */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Início</h1>
@@ -310,7 +307,8 @@ export default function DashboardPage() {
           {getSaudacao()}, {userName.split(" ")[0]}.
         </h1>
 
-        <div className="mt-6 flex flex-wrap items-center gap-2.5">
+        {/* 🔥 ADICIONADO: data-tour="inicio-prova" */}
+        <div className="mt-6 flex flex-wrap items-center gap-2.5" data-tour="inicio-prova">
           <MiniStat icon={<Flame className="h-5 w-5" />} label="Sequência" value={`${streak} dias`} />
           <MiniStat icon={<BookOpen className="h-5 w-5" />} label="Flashcards hoje" value={dueCards.length} />
           <MiniStat icon={<Target className="h-5 w-5" />} label="Dias até a prova" value={diasAteProva} />
@@ -322,7 +320,8 @@ export default function DashboardPage() {
         {/* NOVO: Plano de hoje (substitui o checklist manual) */}
         <PlanoDiaCard />
 
-        <section className="card-lip p-5 flex flex-col" style={{ '--lip': 'var(--primary)' } as React.CSSProperties}>
+        {/* 🔥 ADICIONADO: data-tour="inicio-flash" */}
+        <section className="card-lip p-5 flex flex-col" style={{ '--lip': 'var(--primary)' } as React.CSSProperties} data-tour="inicio-flash">
           <header className="mb-4">
             <h2 className="font-display text-base font-semibold text-foreground">Flashcards hoje</h2>
           </header>
@@ -341,7 +340,8 @@ export default function DashboardPage() {
           </Link>
         </section>
 
-        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties}>
+        {/* 🔥 ADICIONADO: data-tour="inicio-progresso" */}
+        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties} data-tour="inicio-progresso">
           <header className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold text-foreground">Progresso por disciplina</h2>
@@ -379,7 +379,8 @@ export default function DashboardPage() {
           )}
         </section>
 
-        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties}>
+        {/* 🔥 ADICIONADO: data-tour="inicio-revisoes" */}
+        <section className="card-lip p-5" style={{ '--lip': 'var(--accent)' } as React.CSSProperties} data-tour="inicio-revisoes">
           <header className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-base font-semibold text-foreground">Próximas revisões</h2>
             <Link to="/calendario" className="text-xs font-medium text-primary hover:underline">Ver agenda</Link>

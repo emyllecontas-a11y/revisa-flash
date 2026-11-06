@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Lumi Dica"><title>Lumi Dica</title><rect width="200" height="200" fill="#FCE9D8"/><circle cx="100" cy="104" r="78" fill="#fff" opacity=".14"/><path d="M52 108 L54 34 Q56 24 66 30 L92 54 L108 54 L134 30 Q144 24 146 34 L148 108 Q148 168 100 170 Q52 168 52 108Z" fill="#290E1F"/>
+<path d="M62 42 L64 64 L82 52Z M138 42 L136 64 L118 52Z" fill="#FCE9D8"/>
+<ellipse cx="100" cy="132" rx="28" ry="22" fill="#FCE9D8"/>
+<path d="M92 122 Q100 118 108 122 L100 131Z" fill="#290E1F"/>
+<path d="M88 138 Q100 150 114 136" stroke="#290E1F" stroke-width="3" fill="none" stroke-linecap="round"/>
+<path d="M70 104 Q80 96 90 104" stroke="#FCE9D8" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+<circle cx="120" cy="102" r="13" fill="#FCE9D8"/><circle cx="123" cy="97" r="7" fill="#290E1F"/><circle cx="125" cy="94" r="2.4" fill="#fff"/>
+<path d="M70 88 L90 90 M108 80 Q120 70 134 78" stroke="#FCE9D8" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+<rect x="160" y="96" width="8" height="26" rx="4" fill="#290E1F"/>
+<ellipse cx="164" cy="132" rx="14" ry="13" fill="#290E1F"/><ellipse cx="164" cy="134" rx="7" ry="7" fill="#FCE9D8"/>
+<circle cx="164" cy="98" r="4" fill="#FCE9D8"/>
+<g transform="translate(164 52)"><circle r="18" fill="#FE7802" opacity=".2"/><path d="M0 -14 a11 11 0 0 1 7 20 v5 h-14 v-5 a11 11 0 0 1 7 -20Z" fill="#FFC94A" stroke="#290E1F" stroke-width="2"/><rect x="-6" y="12" width="12" height="5" rx="2" fill="#290E1F"/>
+<path d="M-24 -6 h-6 M24 -6 h6 M0 -22 v-6 M-17 -20 l-4 -4 M17 -20 l4 -4" stroke="#FE7802" stroke-width="2.5" stroke-linecap="round"/></g></svg>

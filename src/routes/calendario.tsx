@@ -20,7 +20,7 @@ import { enqueueOperation } from "@/services/queueService";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { PlanoDiaCard } from "@/components/PlanoDiaCard";
-import { PlanoGerenciamentoView } from "@/components/PlanoGerenciamentoView"; // <-- IMPORT ADICIONADO
+import { PlanoGerenciamentoView } from "@/components/PlanoGerenciamentoView";
 import { useRevisoesSubtopico } from "@/hooks/useRevisoesSubtopico";
 
 interface Revisao {
@@ -505,8 +505,10 @@ export default function CalendarioPage() {
             )}
 
             <div className="mb-4 flex justify-end">
+              {/* 🔥 ETIQUETA ADICIONADA AQUI: cal-registrar */}
               <button
                 onClick={() => setModo("registrar")}
+                data-tour="cal-registrar"
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
               >
                 <Plus className="h-4 w-4" /> Registrar estudo
@@ -518,7 +520,8 @@ export default function CalendarioPage() {
                 <header className="mb-5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <h2 className="font-display text-lg font-bold">{tituloMes}</h2>
-                    <div className="flex items-center gap-1">
+                    {/* 🔥 ETIQUETA ADICIONADA AQUI: cal-mes */}
+                    <div className="flex items-center gap-1" data-tour="cal-mes">
                       <button onClick={mesAnterior} className="grid h-7 w-7 place-items-center rounded-md border border-border hover:bg-white/5" aria-label="Mês anterior">
                         <ChevronLeft className="h-3.5 w-3.5" />
                       </button>
@@ -532,7 +535,8 @@ export default function CalendarioPage() {
                   </div>
                 </header>
 
-                <div className="grid grid-cols-7 gap-2">
+                {/* 🔥 ETIQUETA ADICIONADA AQUI: cal-dias */}
+                <div className="grid grid-cols-7 gap-2" data-tour="cal-dias">
                   {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
                     <div key={i} className="px-2 py-2 text-center text-[10px] font-medium tracking-widest text-foreground/40">
                       {d}

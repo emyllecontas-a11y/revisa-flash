@@ -240,8 +240,10 @@ export default function ErrosPage() {
               >
                 <FolderOpen className="h-3.5 w-3.5" /> Gerenciar disciplinas
               </button>
+              {/* 🔥 ETIQUETA ADICIONADA AQUI: erros-registrar */}
               <button
                 onClick={() => openCreateModal()}
+                data-tour="erros-registrar"
                 className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
                 <Plus className="h-3.5 w-3.5" /> Registrar erro
@@ -398,7 +400,8 @@ export default function ErrosPage() {
           <div className="inline-flex items-center gap-2 text-xs text-foreground/55">
             <Filter className="h-3.5 w-3.5" /> Ordenado por reincidência
           </div>
-          <div className="flex flex-wrap gap-1">
+          {/* 🔥 ETIQUETA ADICIONADA AQUI: erros-tipos */}
+          <div className="flex flex-wrap gap-1" data-tour="erros-tipos">
             {["Todos", "Conceito", "Interpretação", "Memória", "Atenção"].map((t) => (
               <button
                 key={t}

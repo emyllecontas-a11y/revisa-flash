@@ -832,7 +832,10 @@ export default function FlashcardsPage() {
                 {topicoEstudoAtivo === "__sem_topico__" && (
                   <span className="ml-2 text-foreground/60">· Sem sub-baralho</span>
                 )}
-                {isLeech && <span className="ml-2 text-accent">🩸 Sanguessuga</span>}
+                {/* 🔥 ETIQUETA ADICIONADA AQUI: flash-sanguessuga */}
+                {isLeech && (
+                  <span data-tour="flash-sanguessuga" className="ml-2 text-accent">🩸 Sanguessuga</span>
+                )}
               </span>
               <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {sessaoCards.length}</span>
             </div>
@@ -867,7 +870,8 @@ export default function FlashcardsPage() {
               position={`${currentCardIndex + 1}/${sessaoCards.length}`}
             />
             {virado && (
-              <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in">
+              // 🔥 ETIQUETA ADICIONADA AQUI: flash-botoes
+              <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in" data-tour="flash-botoes">
                 <FsrsButton label="Errei" hint="10 min" variant="again" onClick={() => handleRating("again")} disabled={isRating} />
                 <FsrsButton label="Difícil" hint="2 dias" variant="hard" onClick={() => handleRating("hard")} disabled={isRating} />
                 <FsrsButton label="Bom" hint="4 dias" variant="good" onClick={() => handleRating("good")} disabled={isRating} />
@@ -1018,11 +1022,13 @@ export default function FlashcardsPage() {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {isOwner && (
+                // 🔥 ETIQUETA ADICIONADA AQUI: flash-compartilhar
                 <button
                   onClick={() => {
                     setIsMembersModalOpen(true);
                     setErrorMessage("");
                   }}
+                  data-tour="flash-compartilhar"
                   className="rfm-btn rfm-btn--outline"
                   style={{ "--tone": "var(--primary)" } as CSSProperties}
                 >
@@ -1308,8 +1314,10 @@ export default function FlashcardsPage() {
               {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Estudar hoje
             </button>
+            {/* 🔥 ETIQUETA ADICIONADA AQUI: flash-novo */}
             <button
               onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
+              data-tour="flash-novo"
               className="btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
             >
               <Plus className="h-3.5 w-3.5" /> Novo baralho

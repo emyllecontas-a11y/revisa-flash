@@ -12,7 +12,7 @@ import { useClerk } from "@clerk/clerk-react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";
-import { OnboardingTour } from "@/components/OnboardingTour";
+import { OnboardingTour } from "@/components/OnboardingTour"; // Mantido para não quebrar, mas não será mais usado na tela
 import { syncWithSupabase, readLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
@@ -21,7 +21,9 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { useComunidadeBadge } from "@/hooks/useComunidadeBadge";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
-import { UserAvatar } from "@/components/ui/UserAvatar"; // 🔥 NOVA IMPORTAÇÃO AQUI
+import { UserAvatar } from "@/components/ui/UserAvatar"; 
+import { NewOnboarding } from "@/components/NewOnboarding";
+import { GuidedTour } from "@/components/GuidedTour";
 
 function LoadingScreen() {
   return (
@@ -40,7 +42,6 @@ function LoadingScreen() {
   );
 }
 
-// ROTAS DIVIDIDAS PARA O MOBILE
 const MAIN_ROTAS = [
   { to: "/", label: "Início", icon: "home" },
   { to: "/conteudo", label: "Conteúdo", icon: "book" },
@@ -109,14 +110,16 @@ function AppShellInner({
 
   const [profileName, setProfileName] = useState<string>("Usuário");
   const [avatarFromSupabase, setAvatarFromSupabase] = useState<string | null>(null);
-  
-  // 🔥 NOVOS ESTADOS AQUI
   const [avatarTipo, setAvatarTipo] = useState<string | null>(null);
   const [avatarId, setAvatarId] = useState<string | null>(null);
 
   const [streak, setStreak] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+
+  // 🔥 ESTADOS PARA OS TUTORIAIS
+  const [showCarousel, setShowCarousel] = useState(false);
+  const [showTour, setShowTour] = useState(false);
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -125,8 +128,6 @@ function AppShellInner({
       if (!user?.id) return;
       try {
         const supabaseClient = await getSupabaseWithToken();
-        
-        // 🔥 BUSCANDO AS NOVAS COLUNAS AQUI
         const { data } = await supabaseClient
           .from('profiles')
           .select('name, avatar_url, avatar_tipo, avatar_id')
@@ -135,8 +136,6 @@ function AppShellInner({
           
         if (data?.name) setProfileName(data.name);
         if (data?.avatar_url) setAvatarFromSupabase(data.avatar_url);
-        
-        // 🔥 SALVANDO NO ESTADO
         if (data?.avatar_tipo) setAvatarTipo(data.avatar_tipo);
         if (data?.avatar_id) setAvatarId(data.avatar_id);
         
@@ -150,6 +149,24 @@ function AppShellInner({
       loadProfile();
     }
   }, [user, isLoaded]);
+
+  // 🔥 LÓGICA PARA ABRIR O CARROSSEL NO PRIMEIRO ACESSO
+  useEffect(() => {
+    if (!user?.id) return;
+    const hasSeenTour = localStorage.getItem(`tour_completed_${user.id}`);
+    if (!hasSeenTour) {
+      setShowCarousel(true);
+    }
+  }, [user?.id]);
+
+  // 🔥 LÓGICA PARA O BOTÃO DE AJUDA (REABRIR TOUR)
+  useEffect(() => {
+    const handleOpenTour = () => {
+      setShowTour(true);
+    };
+    window.addEventListener('open_guided_tour', handleOpenTour);
+    return () => window.removeEventListener('open_guided_tour', handleOpenTour);
+  }, []);
 
   useEffect(() => {
     if (!studyRecords || studyRecords.length === 0) {
@@ -280,8 +297,31 @@ function AppShellInner({
 
   return (
     <div className="min-h-screen overflow-x-hidden" style={{ backgroundColor: 'var(--sidebar)' }}>
-      <OnboardingTour />
+      
+      {/* 🔥 TUTORIAIS AQUI */}
+      {user?.id && showCarousel && (
+        <NewOnboarding 
+          userId={user.id} 
+          onFinish={() => {
+            setShowCarousel(false); 
+            setShowTour(true); // Abre o Holofote logo após o carrossel
+          }} 
+        />
+      )}
 
+      {user?.id && showTour && (
+        <GuidedTour 
+          userId={user.id} 
+          forceOpen={true}
+          currentPath={pathname}
+          onNavigate={(path) => navigate(path)}
+          onFinish={() => {
+            setShowTour(false); // Fecha o holofote ao terminar
+          }}
+        />
+      )}
+
+      {/* AQUI COMEÇA O APP NORMAL */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col lg:flex" style={{ backgroundColor: 'var(--sidebar)' }}>
         <div className="flex items-center gap-2.5 px-5 py-5">
           <LogoIcon size={40} />
@@ -320,8 +360,6 @@ function AppShellInner({
             {lastSyncTime ? `Sincronizado às ${lastSyncTime}` : "Nunca sincronizado"}
           </div>
           <div className="flex items-center gap-3 rounded-full bg-white/5 p-2">
-            
-            {/* 🔥 COMPONENTE NOVO AQUI NO MENU LATERAL */}
             <UserAvatar
               fotoUrl={avatarFromSupabase}
               avatarTipo={avatarTipo}
@@ -329,7 +367,6 @@ function AppShellInner({
               nome={profileName}
               className="h-9 w-9"
             />
-            
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold text-white">{profileName}</div>
               <div className="truncate text-[10px] text-white/50">Estudante</div>

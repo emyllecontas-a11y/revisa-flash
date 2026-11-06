@@ -44,8 +44,7 @@ export default function SimuladosPage() {
   const { user } = useAppUser();
   const { records: studyRecords } = useStudy();
 
-    // A aba ativa é lida/escrita na URL (?tab=listas). Sem parâmetro → "simulados".
-  // Isso permite que "voltar" para uma lista reabra a aba correta.
+  // A aba ativa é lida/escrita na URL (?tab=listas). Sem parâmetro → "simulados".
   const [searchParams, setSearchParams] = useSearchParams();
   const mainTab: 'simulados' | 'listas' | 'banco' =
     searchParams.get('tab') === 'listas' ? 'listas'
@@ -80,7 +79,7 @@ export default function SimuladosPage() {
   const [historicoFilter, setHistoricoFilter] = useState('');
 
   const [gerenciandoSimulado, setGerenciandoSimulado] = useState<Simulado | null>(null);
-    const [simuladoParaCompartilhar, setSimuladoParaCompartilhar] = useState<Simulado | null>(null);
+  const [simuladoParaCompartilhar, setSimuladoParaCompartilhar] = useState<Simulado | null>(null);
 
   // ---- Pastas de simulados ----
   const [pastas, setPastas] = useState<SimuladoPasta[]>([]);
@@ -584,8 +583,10 @@ export default function SimuladosPage() {
                   <TrendingUp className="h-4 w-4" /> Estatísticas
                 </button>
               )}
+              {/* 🔥 ETIQUETA ADICIONADA AQUI: questoes-importar */}
               <button
                 onClick={() => setIsImportModalOpen(true)}
+                data-tour="questoes-importar"
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
               >
                 <Upload className="h-4 w-4" /> Novo simulado
@@ -886,7 +887,8 @@ export default function SimuladosPage() {
                 </div>
 
                 {resultadosLista.length >= 2 && (
-                  <section className="mb-4 rf-card p-4">
+                  // 🔥 ETIQUETA ADICIONADA AQUI: questoes-comparar
+                  <section className="mb-4 rf-card p-4" data-tour="questoes-comparar">
                     <div className="flex items-center justify-between">
                       <button onClick={() => setComparisonExpanded(!comparisonExpanded)} className="flex items-center gap-2">
                         <BarChart3 className="h-5 w-5 text-primary" />
@@ -1047,7 +1049,8 @@ export default function SimuladosPage() {
                   </section>
                 )}
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                {/* 🔥 ETIQUETA ADICIONADA AQUI: questoes-analise */}
+                <div className="grid gap-4 lg:grid-cols-2" data-tour="questoes-analise">
                   <section className="rf-card p-4">
                     <h3 className="mb-3 font-display text-sm font-semibold">📈 Evolução dos resultados</h3>
                     {evolucaoData.length > 0 ? (

@@ -96,6 +96,7 @@ export default function ComunidadePage() {
             onClick={() => trocarTab("ranking")}
             label="Ranking"
             icon={<Trophy className="h-4 w-4" />}
+            data-tour="com-ranking"
           />
 
           {/* ABA 2: AMIZADES */}
@@ -105,6 +106,7 @@ export default function ComunidadePage() {
             label="Amizades"
             badge={invitesCount}
             badgeTone="primary"
+            data-tour="com-amizades"
           />
 
           {/* ABA 3: COMPARTILHADO */}
@@ -113,6 +115,7 @@ export default function ComunidadePage() {
             onClick={() => trocarTab("compartilhado")}
             label="Compartilhado comigo"
             badge={sharedCount}
+            data-tour="com-compartilhado"
           />
           
         </div>
@@ -132,6 +135,7 @@ function BotaoTab({
   badge,
   badgeTone = "muted",
   icon,
+  "data-tour": dataTour,
 }: {
   ativo: boolean;
   onClick: () => void;
@@ -139,11 +143,13 @@ function BotaoTab({
   badge?: number;
   badgeTone?: "muted" | "primary";
   icon?: React.ReactNode;
+  "data-tour"?: string;
 }) {
   const mostrarBadge = typeof badge === "number" && badge > 0;
   return (
     <button
       onClick={onClick}
+      data-tour={dataTour}
       className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 shrink-0 ${
         ativo
           ? "border-primary text-primary"

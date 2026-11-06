@@ -241,7 +241,6 @@ export default function ConfigPage() {
       const { data: urlData } = supabaseClient.storage.from('avatars').getPublicUrl(fileName);
       const avatarUrl = urlData.publicUrl;
       
-      // 🔥 MUDANÇA: Ao subir foto, força o tipo 'foto'
       const { error: updateError } = await supabaseClient.from('profiles').upsert({ 
         id: userId, 
         avatar_url: avatarUrl, 
@@ -251,7 +250,7 @@ export default function ConfigPage() {
       
       if (updateError) throw updateError;
       setAvatarUrl(avatarUrl);
-      setAvatarTipo('foto'); // Atualiza o estado local
+      setAvatarTipo('foto');
       setMensagem('✅ Foto de perfil atualizada com sucesso!');
       setMensagemTipo('success');
       setTimeout(() => window.location.reload(), 1500);
@@ -290,7 +289,6 @@ export default function ConfigPage() {
   };
 
   const importarAnki = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (código original do anki mantido intacto)
     const file = event.target.files?.[0];
     if (!file) return;
     setImportando(true);
@@ -384,7 +382,6 @@ export default function ConfigPage() {
   }, [userId, confirmDialog]);
 
   const exportarBackup = useCallback(() => {
-    // ... (código original mantido intacto)
     try {
       const backup = {
         version: "1.0.0",
@@ -417,7 +414,6 @@ export default function ConfigPage() {
   }, []);
 
   const importarBackup = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (código original mantido intacto)
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -448,7 +444,6 @@ export default function ConfigPage() {
   }, []);
 
   const handleLogout = useCallback(async () => {
-    // ... (código original mantido intacto)
     const ok = await confirmDialog({
       title: "Sair da conta?",
       description: "Você será redirecionado para a tela de login.",
@@ -469,22 +464,24 @@ export default function ConfigPage() {
   }, [signOut, confirmDialog]);
 
   const reabrirTour = useCallback(async () => {
-    // ... (código original mantido intacto)
     if (!user?.id) { setMensagem("⚠️ Usuário não identificado."); setMensagemTipo('warning'); return; }
     const ok = await confirmDialog({
-      title: "Reabrir o tour de boas-vindas?",
-      description: "A página será recarregada para começar do início.",
+      title: "Reabrir o tour guiado?",
+      description: "O Tour com a Lumi será aberto novamente na tela.",
       confirmText: "Reabrir",
       cancelText: "Cancelar",
     });
     if (!ok) return;
-    localStorage.removeItem(`tour_completed_${user.id}`);
-    localStorage.removeItem('onboarding_completed');
-    window.location.reload();
+    
+    // 🔥 DISPARA O EVENTO PARA O APP-SHELL ABRIR O GUIDED TOUR
+    window.dispatchEvent(new Event('open_guided_tour'));
+    
+    setMensagem("✅ Tour reaberto! Siga as instruções na tela.");
+    setMensagemTipo('success');
+    setTimeout(() => setMensagem(""), 3000);
   }, [user, confirmDialog]);
 
   const handleDeleteAccount = useCallback(async () => {
-    // ... (código original mantido intacto)
     if (!userId) { setMensagem("❌ Usuário não autenticado."); setMensagemTipo('error'); return; }
     const ok = await confirmDialog({
       title: "Excluir sua conta?",
@@ -525,7 +522,6 @@ export default function ConfigPage() {
   }, [userId, signOut, confirmDialog]);
 
   const handleSaveFlashcardSettings = useCallback(async () => {
-    // ... (código original mantido intacto)
     if (flashcardSettings.daily_limit < 1) { setMensagem("⚠️ O limite diário deve ser pelo menos 1."); setMensagemTipo('warning'); return; }
     if (flashcardSettings.new_cards_per_day < 0) { setMensagem("⚠️ O número de novos cards não pode ser negativo."); setMensagemTipo('warning'); return; }
     if (flashcardSettings.max_reviews_per_day < 0) { setMensagem("⚠️ O número de revisões não pode ser negativo."); setMensagemTipo('warning'); return; }
@@ -585,7 +581,6 @@ export default function ConfigPage() {
         <Section id="perfil" title="Perfil" color={getCardColor(0)}>
           <div className="flex items-center gap-4 mb-5">
             <div className="relative">
-              {/* 🔥 MUDANÇA AQUI: Usando o componente global */}
               <UserAvatar 
                 fotoUrl={avatarUrl} 
                 avatarTipo={avatarTipo} 
@@ -629,7 +624,6 @@ export default function ConfigPage() {
             </div>
           </div>
 
-          {/* 🔥 MUDANÇA AQUI: Adicionando o seletor de avatares */}
           {userId && (
             <div className="mt-6 pt-6 border-t border-border/40">
               <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-4">
