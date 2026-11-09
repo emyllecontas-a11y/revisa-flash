@@ -151,11 +151,11 @@ export function FicharioCard({ title, topicCount, progress, color, onOpen, onSha
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const pct = Math.max(0, Math.min(100, Math.round(progress)));
 
-  // Ajuste dinâmico do tamanho da fonte
+  // Ajuste dinâmico do tamanho da fonte (Diminuído para não cortar palavras)
   const titleSize = 
-    title.length > 20 ? "text-[13px] sm:text-sm leading-tight" :
-    title.length > 12 ? "text-sm sm:text-base leading-tight" :
-    "text-lg sm:text-xl leading-tight";
+    title.length > 20 ? "text-[11px] sm:text-xs leading-tight" :
+    title.length > 12 ? "text-xs sm:text-[13px] leading-tight" :
+    "text-sm sm:text-[15px] leading-tight";
 
   const handleOpen = () => {
     if (open) return;
@@ -180,9 +180,9 @@ export function FicharioCard({ title, topicCount, progress, color, onOpen, onSha
         <div aria-hidden className="rf-fc-stack absolute inset-y-1.5 left-1 right-2 rounded-r-lg" />
         <div aria-hidden className="rf-fc-sheet absolute inset-y-1.5 left-1 right-3 overflow-hidden rounded-r-lg pl-14 pr-3 pt-5">
           <Holes className="top-[18%] bottom-[18%]" />
-          <p className="rf-fc-hand text-2xl font-bold text-[var(--fc-ink)]">Sumário</p>
-          <p className="rf-fc-hand text-lg leading-8 text-[var(--fc-ink-soft)]">{topicCount} tópicos</p>
-          <p className="rf-fc-hand text-lg leading-8 text-[var(--fc-ink-soft)]">{pct}% concluído</p>
+          <p className="rf-fc-hand text-xl font-bold text-[var(--fc-ink)]">Sumário</p>
+          <p className="rf-fc-hand text-base leading-8 text-[var(--fc-ink-soft)]">{topicCount} tópicos</p>
+          <p className="rf-fc-hand text-base leading-8 text-[var(--fc-ink-soft)]">{pct}% concluído</p>
         </div>
 
         <button
@@ -202,14 +202,14 @@ export function FicharioCard({ title, topicCount, progress, color, onOpen, onSha
             </span>
 
             <span className="ml-5 flex flex-1 flex-col py-4 pl-4 pr-10">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--fc-on-cover)] opacity-70">Fichário</span>
+              <span className="text-[8px] font-semibold uppercase tracking-[0.25em] text-[var(--fc-on-cover)] opacity-70">Fichário</span>
 
               <span className="mt-3 block rounded-lg border border-[var(--fc-plate-edge)] bg-[var(--fc-plate)] px-3 py-2.5 shadow-[inset_0_1px_3px_oklch(0_0_0/0.25)]">
                 <span className={`line-clamp-3 font-extrabold text-[var(--fc-on-cover)] ${titleSize}`}>{title}</span>
               </span>
 
               <span className="mt-auto block">
-                <span className="flex items-baseline justify-between text-xs font-medium text-[var(--fc-on-cover)]">
+                <span className="flex items-baseline justify-between text-[10px] sm:text-[11px] font-medium text-[var(--fc-on-cover)]">
                   <span className="opacity-80">{topicCount} tópicos</span>
                   <span className="font-bold">{pct}%</span>
                 </span>

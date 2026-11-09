@@ -105,11 +105,11 @@ export interface NotebookCardProps {
 export function NotebookCard({ title, questionCount, folderName, color, onOpen, onEdit, onDelete }: NotebookCardProps) {
   const c = color ?? notebookColorFor(folderName || title);
   
-  // Ajuste dinâmico do tamanho da fonte
+  // Ajuste dinâmico do tamanho da fonte (Diminuído)
   const titleSize = 
-    title.length > 24 ? "text-[14px]" :
-    title.length > 16 ? "text-[17px]" :
-    "text-[22px]";
+    title.length > 24 ? "text-[12px]" :
+    title.length > 16 ? "text-[14px]" :
+    "text-[18px]";
 
   return (
     <div className="rf-nb group relative pl-2 pb-2" data-color={c}>
@@ -129,23 +129,26 @@ export function NotebookCard({ title, questionCount, folderName, color, onOpen, 
         <span aria-hidden className="absolute inset-y-0 right-[13%] w-2 bg-[var(--nb-band)] opacity-85 shadow-[1px_0_0_oklch(1_0_0/0.12)]" />
         <span aria-hidden className="rf-nb-ribbon absolute -bottom-3 right-[27%] h-8 w-3.5 bg-[var(--nb-ribbon)] transition-all duration-300 group-hover:-bottom-4 group-hover:h-9" />
 
-        <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--nb-on-cover)] opacity-70">Caderno</span>
+        {/* Letra do "Caderno" diminuída */}
+        <span className="text-[9px] font-semibold uppercase tracking-[0.25em] text-[var(--nb-on-cover)] opacity-70">Caderno</span>
 
         <span className="rf-nb-label relative mt-4 mr-[14%] block rounded-[3px] py-[9px] pl-[26px] pr-2.5 -rotate-[0.6deg]">
           <span className={`rf-nb-title line-clamp-3 break-words font-bold text-[var(--nb-ink)] ${titleSize}`}>{title}</span>
-          <span className="rf-nb-title block text-[15px] font-semibold text-[var(--nb-ink-soft)] mt-1">
+          {/* Letra das questões diminuída */}
+          <span className="rf-nb-title block text-[13px] font-semibold text-[var(--nb-ink-soft)] mt-1">
             {questionCount} {questionCount === 1 ? "questão" : "questões"}
           </span>
         </span>
 
         <span className="mt-auto flex min-w-0 items-center pr-[14%]">
           {folderName ? (
-            <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-[var(--nb-band)]/40 px-2.5 py-1 text-[11px] font-medium text-[var(--nb-on-cover)]">
+            /* Letra da pasta diminuída */
+            <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-[var(--nb-band)]/40 px-2.5 py-1 text-[10px] font-medium text-[var(--nb-on-cover)]">
               <Folder className="h-3 w-3 shrink-0" />
               <span className="truncate">{folderName}</span>
             </span>
           ) : (
-            <span className="text-[11px] font-medium text-[var(--nb-on-cover)] opacity-60">Sem pasta</span>
+            <span className="text-[10px] font-medium text-[var(--nb-on-cover)] opacity-60">Sem pasta</span>
           )}
         </span>
       </button>
