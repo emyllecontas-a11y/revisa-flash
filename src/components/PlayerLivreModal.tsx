@@ -47,7 +47,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
   const questaoAtual = questoesSorteio[idx];
   const respondida = questaoAtual ? !!respostasConfirmadas[questaoAtual.id] : false;
 
-  // Efeito do cronômetro
   useEffect(() => {
     if (fase === "jogando" && !respondida) {
       timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
@@ -57,7 +56,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [fase, respondida, idx]);
 
-  // Carregar anotações
   useEffect(() => {
     if (!userId || questoesSorteio.length === 0) return;
     const ids = questoesSorteio.map(q => q.id);
@@ -130,7 +128,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     if (selecionada === letra) setSelecionada(null);
   };
 
-  // Atalhos de teclado
   useEffect(() => {
     if (fase !== "jogando" || !questaoAtual) return;
     const handler = (e: KeyboardEvent) => {
@@ -326,10 +323,8 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
     }
 
     return createPortal(
-      // FIX: O container principal não tem mais overflow-y-auto. Ele é flex-col.
       <div className="fixed inset-0 z-[100] flex flex-col bg-background">
         
-        {/* Header Fixo */}
         <div className="shrink-0 z-10 bg-surface/80 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-medium text-foreground/60 hover:text-foreground flex items-center gap-1">
             <ChevronLeft className="h-4 w-4" /> Sair
@@ -341,7 +336,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           </div>
         </div>
 
-        {/* Área Rolável (Questão) */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-3xl mx-auto w-full p-4 sm:p-6 pb-8">
             <QuestaoCard
@@ -362,6 +356,7 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
               permitirEliminar={!respondida}
               onSelecionar={(letra) => !respondida && setSelecionada(letra)}
               onEliminar={toggleEliminada}
+              questaoId={questaoAtual.id}  // ← ÚNICA LINHA ADICIONADA
               anotacoes={anotacoes.get(questaoAtual.id) ?? []}
               onGrifar={(campo, cor, texto, rects) => handleGrifar(questaoAtual.id, campo, cor, texto, rects)}
               onRemoverGrifo={handleRemoverGrifo}
@@ -371,7 +366,6 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
           </div>
         </div>
 
-        {/* Footer Fixo */}
         <div className="shrink-0 bg-surface/80 backdrop-blur-md border-t border-border p-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
             <button

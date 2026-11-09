@@ -69,7 +69,7 @@ async function pushWithConflictCheck(
     const chunk = ids.slice(i, i + CHUNK_SIZE);
     const { data: remoteRows, error } = await supabaseClient
       .from(collectionName)
-      .select('*') // <--- Mudou aqui
+      .select('*')
       .in('id', chunk);
 
     if (error) {
@@ -590,7 +590,6 @@ const resultadoListaSchema = {
   required: ['id', 'lista_id', 'user_id'],
 };
 
-// ⚠️ v14: campo folder_id adicionado
 const simuladoSchema = {
   title: 'simulado schema',
   version: 0,
@@ -1238,7 +1237,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // files — somente pull
     {
       const collection = database.collections.files;
       if (collection) {
@@ -1265,7 +1263,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // resultados_lista — puxa tudo
     {
       const collection = database.collections.resultados_lista;
       const { data, error } = await supabaseClient
@@ -1301,7 +1298,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // resultados_simulado — puxa tudo
     {
       const collection = database.collections.resultados_simulado;
       const { data, error } = await supabaseClient
@@ -1337,7 +1333,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // caderno_questoes (link, sem user_id — sincroniza via caderno_id)
     {
       const collection = database.collections.caderno_questoes;
       const cadernosCollection = database.collections.cadernos;
@@ -1381,7 +1376,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // listas_questoes (link)
     {
       const collection = database.collections.listas_questoes;
       const listasCollection = database.collections.listas;
@@ -1429,7 +1423,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // simulados → questoes → alternativas
     {
       const chunkArray = <T,>(arr: T[], size: number): T[][] => {
         const chunks: T[][] = [];
@@ -1500,7 +1493,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         }
       }
 
-      // Push dos simulados (agora inclui folder_id automaticamente)
       const localSimsToPush = await simuladosCollection.find({
         selector: { created_by: userIdStr, updated_at: { $gt: lastSyncGlobal } }
       }).exec();
@@ -1518,7 +1510,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     }
 
-    // study_sessions
     try {
       const decksCollection = database.collections.decks;
       const userDecks = await decksCollection.find({
@@ -1571,7 +1562,6 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       houveErro = true;
     }
 
-    // Conteúdo compartilhado por amigos (somente leitura)
     try {
       const { syncSharedContent } = await import('./sharedSync');
       const okShared = await syncSharedContent(userIdStr);
@@ -1599,8 +1589,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
 // ============================================================
 // PULL SOB DEMANDA DO BANCO DE QUESTÕES
 // ============================================================
-// Função para ser chamada APENAS quando o usuário abrir a tela do Banco de Questões
-// ou quando for resolver uma questão que não está no cache local.
+// Função antiga mantida por compatibilidade (paginação manual)
 export async function pullBancoQuestoesOtimizado(userId: string, pagina: number = 0, limite: number = 50) {
   try {
     const database = await getDb();
@@ -1610,7 +1599,6 @@ export async function pullBancoQuestoesOtimizado(userId: string, pagina: number 
     
     console.log(`📥 Baixando lote de questões do banco global (offset: ${offset}, limite: ${limite})...`);
 
-    // Baixa os dados, mas IGNORA a coluna comentario (que é gigante)
     const { data, error } = await supabaseClient
       .from('banco_questoes')
       .select('id, user_id, banca, ano, concurso, cargo, disciplina, assunto, subassunto, tipo_questao, enunciado, alternativas, gabarito_letra, gabarito_ce, imagem_url, hash_dedup, url_origem, arquivo_origem, importado_em, created_at, updated_at, isdeleted')
@@ -1640,5 +1628,73 @@ export async function pullBancoQuestoesOtimizado(userId: string, pagina: number 
   } catch (err: any) {
     console.error('❌ Falha no pullBancoQuestoesOtimizado:', err);
     return { success: false, error: err.message };
+  }
+}
+
+// ============================================================
+// NOVO: PULL COMPLETO DO BANCO DE QUESTÕES (traz TODAS)
+// ============================================================
+// Baixa todas as questões do banco global em lotes de 500 até acabar.
+// Uso: no load do BancoQuestoesTab, substituir pullBancoQuestoesOtimizado por esta.
+export async function pullTodasQuestoesBanco(userId: string) {
+  const LIMITE_POR_LOTE = 500;
+  const MAX_LOTES = 40; // segurança: até 20.000 questões
+  let totalBaixadas = 0;
+  let totalJaExistiam = 0;
+  let lotesProcessados = 0;
+
+  try {
+    const database = await getDb();
+    const supabaseClient = await getSupabaseWithToken();
+    const collection = database.collections.banco_questoes;
+
+    let offset = 0;
+    let temMais = true;
+
+    console.log('📥 Puxando TODAS as questões do banco global...');
+
+    while (temMais && lotesProcessados < MAX_LOTES) {
+      const { data, error } = await supabaseClient
+        .from('banco_questoes')
+        .select('id, user_id, banca, ano, concurso, cargo, disciplina, assunto, subassunto, tipo_questao, enunciado, alternativas, gabarito_letra, gabarito_ce, imagem_url, hash_dedup, url_origem, arquivo_origem, importado_em, created_at, updated_at, isdeleted')
+        .eq('isdeleted', false)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + LIMITE_POR_LOTE - 1);
+
+      if (error) {
+        console.error(`❌ Erro no lote ${lotesProcessados + 1}:`, error);
+        return { success: false, error: error.message, total: totalBaixadas, jaExistiam: totalJaExistiam };
+      }
+
+      if (!data || data.length === 0) {
+        temMais = false;
+        break;
+      }
+
+      for (const doc of data) {
+        const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+        if (!existing) {
+          await collection.insert(doc);
+          totalBaixadas++;
+        } else {
+          totalJaExistiam++;
+        }
+      }
+
+      lotesProcessados++;
+      offset += LIMITE_POR_LOTE;
+
+      console.log(`   → Lote ${lotesProcessados}: ${data.length} baixadas (total novas: ${totalBaixadas})`);
+
+      if (data.length < LIMITE_POR_LOTE) {
+        temMais = false;
+      }
+    }
+
+    console.log(`✅ Pull completo: ${totalBaixadas} novas, ${totalJaExistiam} já existiam.`);
+    return { success: true, total: totalBaixadas, jaExistiam: totalJaExistiam };
+  } catch (err: any) {
+    console.error('❌ Falha no pullTodasQuestoesBanco:', err);
+    return { success: false, error: err.message, total: totalBaixadas, jaExistiam: totalJaExistiam };
   }
 }

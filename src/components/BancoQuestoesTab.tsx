@@ -32,7 +32,7 @@ import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
 import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
-import { pullBancoQuestoesOtimizado } from "@/lib/db";
+import { pullTodasQuestoesBanco } from "@/lib/db";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -88,17 +88,22 @@ export function BancoQuestoesTab() {
   const [busca, setBusca] = useState("");
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
 
-  // NOVOS ESTADOS: adicionar rápido
+  // Adicionar aleatórias
   const [qtdAdicionar, setQtdAdicionar] = useState("10");
   const [cadernoDestino, setCadernoDestino] = useState("");
   const [adicionando, setAdicionando] = useState(false);
+
+  // Paginação
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const itensPorPagina = 100;
 
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setError(null);
     try {
-      await pullBancoQuestoesOtimizado(user.id, 0, 50);
+      // NOVO: puxa TODAS as questões (não só 50)
+      await pullTodasQuestoesBanco(user.id);
       await limparDuplicatasLocais(user.id);
 
       const [r1, r2, r3, r4] = await Promise.all([
@@ -119,7 +124,11 @@ export function BancoQuestoesTab() {
   }, [user?.id]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setSelecionadas(new Set()); }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
+
+  useEffect(() => {
+    setSelecionadas(new Set());
+    setPaginaAtual(1);
+  }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
 
   const handleExcluirCaderno = async (e: React.MouseEvent, c: Caderno) => {
     e.stopPropagation();
@@ -137,7 +146,6 @@ export function BancoQuestoesTab() {
     if (res.success) { if (pastaSelecionada === p.id) setPastaSelecionada(null); load(); toast.success("Pasta excluída"); } else toast.error("Erro", { description: res.error });
   };
 
-  // NOVO: adicionar N aleatórias ao caderno escolhido
   const handleAdicionarAleatorias = async () => {
     const n = parseInt(qtdAdicionar, 10);
     if (isNaN(n) || n < 1) { toast.error("Informe uma quantidade válida (≥ 1)."); return; }
@@ -149,7 +157,6 @@ export function BancoQuestoesTab() {
       const existingRes = await getQuestoesDoCaderno(cadernoDestino);
       const existingIds = new Set((existingRes.data || []).map(q => q.id));
 
-      // Candidatas = filtradas que ainda NÃO estão no caderno
       const candidatas = filtradas.filter(q => !existingIds.has(q.id));
       if (candidatas.length === 0) {
         toast.success("Todas as questões filtradas já estão nesse caderno.");
@@ -174,7 +181,6 @@ export function BancoQuestoesTab() {
     }
   };
 
-  // NOVO: adicionar apenas as selecionadas manualmente
   const handleAdicionarSelecionadas = async () => {
     if (selecionadas.size === 0) return;
     if (!cadernoDestino) { toast.error("Escolha um caderno de destino."); return; }
@@ -253,6 +259,13 @@ export function BancoQuestoesTab() {
       return true;
     });
   }, [todasQuestoes, fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
+
+  // Paginação
+  const totalPaginas = Math.ceil(filtradas.length / itensPorPagina);
+  const filtradasPaginadas = useMemo(() => {
+    const inicio = (paginaAtual - 1) * itensPorPagina;
+    return filtradas.slice(inicio, inicio + itensPorPagina);
+  }, [filtradas, paginaAtual]);
 
   const temFiltroAtivo = !!(fDisciplina || fMateria || fAssunto || fBanca || fAno || fTipo || busca);
   const limparFiltros = () => { setFDisciplina(""); setFMateria(""); setFAssunto(""); setFBanca(""); setFAno(""); setFTipo(""); setBusca(""); };
@@ -372,7 +385,7 @@ export function BancoQuestoesTab() {
             </div>
           </div>
 
-          {/* NOVO: barra de adicionar N aleatórias */}
+          {/* Adicionar N aleatórias */}
           {filtradas.length > 0 && cadernos.length > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <Shuffle className="h-4 w-4 text-primary" />
@@ -407,7 +420,7 @@ export function BancoQuestoesTab() {
             </div>
           )}
 
-          {/* BARRA DE SELEÇÃO (modificada com botão de adicionar ao caderno) */}
+          {/* Adicionar selecionadas */}
           {selecionadas.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <CheckCircle2 className="h-4 w-4 text-primary" />
@@ -453,28 +466,52 @@ export function BancoQuestoesTab() {
               {temFiltroAtivo && (<button onClick={limparFiltros} className="mt-3 text-xs text-primary hover:underline">Limpar filtros</button>)}
             </div>
           ) : (
-            <div className="rf-card p-2 sm:p-3">
-              <ul className="divide-y divide-border">
-                {filtradas.map((q) => (
-                  <li key={q.id}>
-                    <div className="flex gap-3 py-3">
-                      <input type="checkbox" checked={selecionadas.has(q.id)} onChange={() => toggleSelecionada(q.id)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]" />
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                          <Badge>{q.banca}</Badge>
-                          {q.ano && <Badge>{q.ano}</Badge>}
-                          <Badge className="bg-primary/10 text-primary font-semibold">{q.disciplina}</Badge>
-                          {q.assunto && <BadgeSoft>{q.assunto}</BadgeSoft>}
-                          {q.subassunto && q.subassunto !== "Geral" && (<span className="text-[10px] text-foreground/40">› {q.subassunto}</span>)}
-                          <Badge className={q.tipo_questao === "certo_errado" ? "bg-warning/15 text-warning" : "bg-primary/15 text-primary"}>{q.tipo_questao === "certo_errado" ? "C/E" : "Múltipla"}</Badge>
+            <>
+              <div className="rf-card p-2 sm:p-3">
+                <ul className="divide-y divide-border">
+                  {filtradasPaginadas.map((q) => (
+                    <li key={q.id}>
+                      <div className="flex gap-3 py-3">
+                        <input type="checkbox" checked={selecionadas.has(q.id)} onChange={() => toggleSelecionada(q.id)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]" />
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                            <Badge>{q.banca}</Badge>
+                            {q.ano && <Badge>{q.ano}</Badge>}
+                            <Badge className="bg-primary/10 text-primary font-semibold">{q.disciplina}</Badge>
+                            {q.assunto && <BadgeSoft>{q.assunto}</BadgeSoft>}
+                            {q.subassunto && q.subassunto !== "Geral" && (<span className="text-[10px] text-foreground/40">› {q.subassunto}</span>)}
+                            <Badge className={q.tipo_questao === "certo_errado" ? "bg-warning/15 text-warning" : "bg-primary/15 text-primary"}>{q.tipo_questao === "certo_errado" ? "C/E" : "Múltipla"}</Badge>
+                          </div>
+                          <p className="line-clamp-2 text-sm text-foreground/85">{stripHtml(q.enunciado)}</p>
                         </div>
-                        <p className="line-clamp-2 text-sm text-foreground/85">{stripHtml(q.enunciado)}</p>
                       </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {totalPaginas > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
+                    disabled={paginaAtual === 1}
+                    className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
+                  >
+                    ← Anterior
+                  </button>
+                  <span className="text-xs text-foreground/60">
+                    Página {paginaAtual} de {totalPaginas} ({filtradas.length} questões)
+                  </span>
+                  <button
+                    onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaAtual === totalPaginas}
+                    className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
+                  >
+                    Próxima →
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

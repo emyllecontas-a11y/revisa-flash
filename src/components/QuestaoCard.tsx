@@ -1,8 +1,9 @@
 // src/components/QuestaoCard.tsx
-import { Bookmark, Check, Scissors, X } from "lucide-react";
+import { Bookmark, Check, Loader2, Scissors, X } from "lucide-react";
 import { Fragment } from "react";
 import parse from 'html-react-parser';
 import { TextoGrifavel } from "@/components/TextoGrifavel";
+import { useComentarioQuestao } from "@/hooks/useComentarioQuestao";
 import type {
   AnotacaoQuestao,
   CampoAlvo,
@@ -50,6 +51,9 @@ export interface QuestaoCardProps {
   onEliminar?: (letra: string) => void;
   onMarcar?: () => void;
 
+  // NOVO: ID da questão para lazy loading do comentário
+  questaoId?: string | null;
+
   anotacoes?: AnotacaoQuestao[];
   onGrifar?: (campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => void;
   onRemoverGrifo?: (id: string) => void;
@@ -77,29 +81,21 @@ function TextoFormatado({
 
   let processed = texto;
 
-  // 1. Converte a tag [IMAGEM: url] para uma tag <img> real
   processed = processed.replace(
     /\[IMAGEM:\s*(.+?)\]/g,
     '<img src="$1" alt="Imagem" class="my-3 max-h-80 rounded-lg border border-border object-contain" />'
   );
 
-  // 2. Limpeza agressiva de espaços vindos do TEC
   processed = processed
-    // Remove parágrafos completamente vazios (ex: <p>&nbsp;</p> ou <p> </p>)
     .replace(/<p>\s*(&nbsp;|\s)*<\/p>/gi, '')
-    // Substitui &nbsp; por um espaço normal para não forçar quebra de linha
     .replace(/&nbsp;/gi, ' ')
-    // Remove quebras de linha excessivas (mais de 2 <br> seguidos)
     .replace(/(<br\s*\/?>\s*){3,}/gi, '<br><br>')
-    // Limita o excesso de \n (quebras no texto puro) a no máximo 2
     .replace(/\n{3,}/g, '\n\n');
 
-  // 3. Se não tiver tags HTML, converte \n para <br>
   if (!/<[a-z\/][\s\S]*>/i.test(processed)) {
     processed = processed.replace(/\n/g, '<br>');
   }
 
-  // 4. Renderiza o HTML limpo
   if (/<[a-z\/][\s\S]*>|&[a-z0-9]+;/i.test(processed)) {
     return (
       <div className="[&_p]:mb-2 [&_p]:mt-0 [&_br]:block [&_img]:block">
@@ -108,7 +104,6 @@ function TextoFormatado({
     );
   }
 
-  // Fallback antigo (arrays de intervalo)
   const n = texto.length;
   const mask = new Uint8Array(n);
   for (const s of sublinhados ?? []) {
@@ -175,6 +170,7 @@ export function QuestaoCard({
   onSelecionar,
   onEliminar,
   onMarcar,
+  questaoId = null,
   anotacoes,
   onGrifar,
   onRemoverGrifo,
@@ -184,6 +180,13 @@ export function QuestaoCard({
   const isCertoErrado = tipo === "certo_errado";
   const grifoHabilitado = !!onGrifar;
   const podeGrifar = grifoHabilitado && grifarAtivo;
+
+  // NOVO: lazy loading do comentário — só busca quando `revelar` for true
+  const {
+    comentario: comentarioResolvido,
+    loading: carregandoComentario,
+    erro: erroComentario,
+  } = useComentarioQuestao(questaoId, comentario, revelar);
 
   const grifosDoCampo = (campo: CampoAlvo): AnotacaoQuestao[] =>
     (anotacoes ?? []).filter((a) => a.campo_alvo === campo && !a.isdeleted);
@@ -234,7 +237,6 @@ export function QuestaoCard({
             onRemover={onRemoverGrifo}
             onTrocarCor={onTrocarCorGrifo}
           >
-            {/* Removido o whitespace-pre-wrap daqui */}
             <div className="text-sm leading-relaxed">
               <TextoFormatado
                 texto={enunciado}
@@ -408,29 +410,41 @@ export function QuestaoCard({
           </div>
         )}
 
-        {revelar && comentario && (
+        {revelar && (carregandoComentario || comentarioResolvido || erroComentario) && (
           <div className="mt-6 rounded-2xl bg-muted p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-primary">
               Comentário
+              {carregandoComentario && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             </p>
-            {grifoHabilitado ? (
-              <TextoGrifavel
-                grifos={grifosDoCampo("comentario")}
-                ativo={podeGrifar}
-                onGrifar={(cor, texto, rects) => onGrifar!("comentario", cor, texto, rects)}
-                onRemover={onRemoverGrifo}
-                onTrocarCor={onTrocarCorGrifo}
-              >
-                {/* Removido o whitespace-pre-wrap daqui também */}
+
+            {carregandoComentario ? (
+              <p className="mt-2 text-xs text-muted-foreground italic">
+                Carregando comentário...
+              </p>
+            ) : erroComentario ? (
+              <p className="mt-2 text-xs text-accent">
+                Erro ao carregar comentário: {erroComentario}
+              </p>
+            ) : comentarioResolvido ? (
+              grifoHabilitado ? (
+                <TextoGrifavel
+                  grifos={grifosDoCampo("comentario")}
+                  ativo={podeGrifar}
+                  onGrifar={(cor, texto, rects) => onGrifar!("comentario", cor, texto, rects)}
+                  onRemover={onRemoverGrifo}
+                  onTrocarCor={onTrocarCorGrifo}
+                >
+                  <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    <TextoFormatado texto={comentarioResolvido} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
+                  </div>
+                </TextoGrifavel>
+              ) : (
                 <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
+                  <TextoFormatado texto={comentarioResolvido} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
                 </div>
-              </TextoGrifavel>
-            ) : (
-              <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                <TextoFormatado texto={comentario} sublinhados={sublinhadosComentario} negritos={negritosComentario} italicos={italicosComentario} />
-              </div>
-            )}
+              )
+            ) : null}
+
             {selecionada && correta && (
               <div className="mt-3 flex gap-4 text-xs">
                 <span>Sua resposta: <b>{selecionada}</b></span>

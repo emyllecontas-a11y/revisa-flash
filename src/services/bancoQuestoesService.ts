@@ -60,7 +60,7 @@ export async function importarQuestoesNoBanco(
 
     for (const q of questoes) {
       try {
-        // AGORA VERIFICA O HASH GLOBAL (SEM FILTRO DE user_id) PARA NÃO DUPLICAR NO BANCO TODO
+        // Verifica hash global (sem filtro de user_id) para não duplicar
         const existente = await db.banco_questoes.findOne({
           selector: { hash_dedup: q.hash_dedup, isdeleted: false },
         }).exec();
@@ -72,7 +72,7 @@ export async function importarQuestoesNoBanco(
 
         const nova: QuestaoBanco = {
           id: crypto.randomUUID(),
-          user_id: userId, // Continua salvando quem criou a questão
+          user_id: userId,
           banca: q.banca,
           ano: q.ano,
           concurso: q.concurso,
@@ -106,6 +106,42 @@ export async function importarQuestoesNoBanco(
       }
     }
 
+    // PUSH PÓS-IMPORTAÇÃO: garante que as questões estão na nuvem imediatamente
+    if (novas > 0 && idsInseridos.length > 0) {
+      try {
+        const { getSupabaseWithToken } = await import('@/lib/supabaseClient');
+        const supabaseClient = await getSupabaseWithToken();
+
+        const novasQuestoes: any[] = [];
+        const BATCH_BUSCA = 100;
+        for (let i = 0; i < idsInseridos.length; i += BATCH_BUSCA) {
+          const chunk = idsInseridos.slice(i, i + BATCH_BUSCA);
+          const docs = await db.banco_questoes.find({ selector: { id: { $in: chunk } } }).exec();
+          docs.forEach((d: any) => novasQuestoes.push(d.toJSON()));
+        }
+
+        const BATCH_UPSERT = 200;
+        let upsertOk = 0;
+        let upsertErr = 0;
+        for (let i = 0; i < novasQuestoes.length; i += BATCH_UPSERT) {
+          const chunk = novasQuestoes.slice(i, i + BATCH_UPSERT);
+          const { error: upsertError } = await supabaseClient
+            .from('banco_questoes')
+            .upsert(chunk, { onConflict: 'id' });
+
+          if (upsertError) {
+            console.error(`[bancoQuestoes] Erro no push pós-import (lote ${Math.floor(i / BATCH_UPSERT) + 1}):`, upsertError);
+            upsertErr += chunk.length;
+          } else {
+            upsertOk += chunk.length;
+          }
+        }
+        console.log(`[bancoQuestoes] Push pós-import: ${upsertOk} enviadas à nuvem, ${upsertErr} com erro.`);
+      } catch (pushErr) {
+        console.error('[bancoQuestoes] Erro no push pós-importação (a fila de sync vai tentar depois):', pushErr);
+      }
+    }
+
     return { success: true, novas, jaExistentes, erros, idsInseridos };
   } catch (e: any) {
     console.error('[bancoQuestoes] Erro ao importar lote:', e);
@@ -123,10 +159,8 @@ export async function getQuestoesDoBanco(
     busca?: string;
   }
 ): Promise<{ success: boolean; data?: QuestaoBanco[]; error?: string }> {
-  // Não precisa de userId aqui para ler, mas mantemos na assinatura para não quebrar a UI
   try {
     const db = await getDb();
-    // REMOVIDO O FILTRO user_id PARA LER TUDO
     const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     let data: QuestaoBanco[] = docs.map((d: any) => d.toJSON() as QuestaoBanco);
 
@@ -156,7 +190,6 @@ export async function getEstatisticasBanco(
 }> {
   try {
     const db = await getDb();
-    // REMOVIDO O FILTRO user_id PARA LER TUDO
     const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     const porBanca: Record<string, number> = {};
     const porDisciplina: Record<string, number> = {};
@@ -182,7 +215,6 @@ export async function excluirQuestaoDoBanco(questaoId: string, userId: string): 
   try {
     const db = await getDb();
     const doc = await db.banco_questoes.findOne({ selector: { id: questaoId } }).exec();
-    // Só pode excluir se for o dono
     if (!doc || doc.get('user_id') !== userId) return { success: false, error: 'Você só pode excluir questões que você mesmo criou.' };
 
     const agora = nowIso();
@@ -207,7 +239,7 @@ export async function salvarTentativaAvulsa(
     const agora = nowIso();
     const tentativa = {
       id: crypto.randomUUID(),
-      user_id: userId, // As tentativas continuam privadas
+      user_id: userId,
       questao_banco_id: questaoId,
       resposta,
       acertou,
@@ -229,25 +261,83 @@ export async function salvarTentativaAvulsa(
 export async function limparDuplicatasLocais(userId: string): Promise<void> {
   try {
     const db = await getDb();
-    // Busca todas para checar duplicatas globais
     const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
     
     const vistos = new Set<string>();
     for (const doc of docs) {
       const hash = doc.get('hash_dedup');
       if (vistos.has(hash)) {
-        // Se for duplicada e for MINHA, posso deletar para limpar o banco
         if (doc.get('user_id') === userId) {
           const agora = nowIso();
           await doc.patch({ isdeleted: true, updated_at: agora });
           await enqueueOperation('update', 'banco_questoes', { id: doc.get('id'), isdeleted: true, updated_at: agora });
         }
-        // Se for de outra pessoa, eu não faço nada (o RLS do Supabase impediria a edição)
       } else {
         vistos.add(hash);
       }
     }
   } catch (e) {
     console.error('[bancoQuestoes] Erro ao limpar duplicatas:', e);
+  }
+}
+
+// ============================================================
+// COMENTÁRIO SOB DEMANDA (v16)
+// ============================================================
+// O pull em lote NÃO traz comentário (campo grande). Quando o
+// usuário abre uma questão sem comentário local, buscamos SÓ
+// aquela coluna no Supabase. Fica salva localmente e nunca
+// mais é buscada neste dispositivo.
+export async function buscarComentarioSobDemanda(
+  questaoId: string
+): Promise<{ success: boolean; comentario: string | null; error?: string }> {
+  if (!questaoId) return { success: false, comentario: null, error: 'ID vazio' };
+
+  try {
+    const db = await getDb();
+    const doc = await db.banco_questoes.findOne({ selector: { id: questaoId } }).exec();
+
+    if (!doc) {
+      return { success: false, comentario: null, error: 'Questão não encontrada localmente' };
+    }
+
+    // 1) Já tem local? Retorna direto (caminho rápido, sem rede)
+    const comentarioLocal = doc.get('comentario');
+    if (comentarioLocal && typeof comentarioLocal === 'string' && comentarioLocal.trim()) {
+      return { success: true, comentario: comentarioLocal };
+    }
+
+    // 2) Não tem local → busca SÓ o comentário no Supabase
+    console.log(`📥 Buscando comentário sob demanda: ${questaoId}`);
+    const { getSupabaseWithToken } = await import('@/lib/supabaseClient');
+    const supabaseClient = await getSupabaseWithToken();
+
+    const { data, error } = await supabaseClient
+      .from('banco_questoes')
+      .select('comentario')
+      .eq('id', questaoId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ Erro ao buscar comentário:', error);
+      return { success: false, comentario: null, error: error.message };
+    }
+
+    const comentarioRemoto = data?.comentario ?? null;
+    if (!comentarioRemoto) {
+      return { success: true, comentario: null };
+    }
+
+    // 3) Salva local (sem enqueueOperation — já existe na nuvem, é só cache)
+    try {
+      await doc.patch({ comentario: comentarioRemoto });
+    } catch (patchErr) {
+      console.warn('⚠️ Falha ao salvar comentário localmente:', patchErr);
+    }
+
+    return { success: true, comentario: comentarioRemoto };
+  } catch (e: any) {
+    console.error('❌ Falha no buscarComentarioSobDemanda:', e);
+    return { success: false, comentario: null, error: e?.message || 'Erro inesperado' };
   }
 }
