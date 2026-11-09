@@ -17,12 +17,14 @@ import {
   excluirCaderno,
   atualizarPasta,
   excluirPasta,
+  adicionarQuestoesAoCaderno,
+  getQuestoesDoCaderno,
   type PastaCaderno,
   type Caderno
 } from "@/services/cadernoService";
 import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
-  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter, BarChart3
+  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter, BarChart3, Shuffle
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
@@ -39,6 +41,16 @@ function stripHtml(html: string) {
   if (!html) return '';
   const doc = new DOMParser().parseFromString(html, 'text/html');
   return doc.body.textContent || "";
+}
+
+// Fisher-Yates shuffle (uniforme)
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 export function BancoQuestoesTab() {
@@ -75,6 +87,11 @@ export function BancoQuestoesTab() {
   const [fTipo, setFTipo] = useState<TipoFiltro>("");
   const [busca, setBusca] = useState("");
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+
+  // NOVOS ESTADOS: adicionar rápido
+  const [qtdAdicionar, setQtdAdicionar] = useState("10");
+  const [cadernoDestino, setCadernoDestino] = useState("");
+  const [adicionando, setAdicionando] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -118,6 +135,78 @@ export function BancoQuestoesTab() {
     if (!ok || !user?.id) return;
     const res = await excluirPasta(user.id, p.id);
     if (res.success) { if (pastaSelecionada === p.id) setPastaSelecionada(null); load(); toast.success("Pasta excluída"); } else toast.error("Erro", { description: res.error });
+  };
+
+  // NOVO: adicionar N aleatórias ao caderno escolhido
+  const handleAdicionarAleatorias = async () => {
+    const n = parseInt(qtdAdicionar, 10);
+    if (isNaN(n) || n < 1) { toast.error("Informe uma quantidade válida (≥ 1)."); return; }
+    if (!cadernoDestino) { toast.error("Escolha um caderno de destino."); return; }
+    if (filtradas.length === 0) { toast.error("Nenhuma questão filtrada."); return; }
+
+    setAdicionando(true);
+    try {
+      const existingRes = await getQuestoesDoCaderno(cadernoDestino);
+      const existingIds = new Set((existingRes.data || []).map(q => q.id));
+
+      // Candidatas = filtradas que ainda NÃO estão no caderno
+      const candidatas = filtradas.filter(q => !existingIds.has(q.id));
+      if (candidatas.length === 0) {
+        toast.success("Todas as questões filtradas já estão nesse caderno.");
+        return;
+      }
+
+      const ids = shuffle(candidatas).slice(0, n).map(q => q.id);
+      const res = await adicionarQuestoesAoCaderno(cadernoDestino, ids);
+
+      if (res.success) {
+        if (ids.length < n) {
+          toast.success(`${ids.length} adicionada(s). Só havia ${candidatas.length} nova(s) disponível(is).`);
+        } else {
+          toast.success(`${ids.length} questão(ões) adicionada(s)!`);
+        }
+        load();
+      } else {
+        toast.error("Erro ao adicionar", { description: res.error });
+      }
+    } finally {
+      setAdicionando(false);
+    }
+  };
+
+  // NOVO: adicionar apenas as selecionadas manualmente
+  const handleAdicionarSelecionadas = async () => {
+    if (selecionadas.size === 0) return;
+    if (!cadernoDestino) { toast.error("Escolha um caderno de destino."); return; }
+
+    setAdicionando(true);
+    try {
+      const existingRes = await getQuestoesDoCaderno(cadernoDestino);
+      const existingIds = new Set((existingRes.data || []).map(q => q.id));
+
+      const ids = Array.from(selecionadas).filter(id => !existingIds.has(id));
+      if (ids.length === 0) {
+        toast.success("Todas as questões selecionadas já estão nesse caderno.");
+        return;
+      }
+
+      const res = await adicionarQuestoesAoCaderno(cadernoDestino, ids);
+
+      if (res.success) {
+        const duplicadas = selecionadas.size - ids.length;
+        if (duplicadas > 0) {
+          toast.success(`${ids.length} adicionada(s). ${duplicadas} já estava(m) no caderno.`);
+        } else {
+          toast.success(`${ids.length} questão(ões) adicionada(s)!`);
+        }
+        setSelecionadas(new Set());
+        load();
+      } else {
+        toast.error("Erro ao adicionar", { description: res.error });
+      }
+    } finally {
+      setAdicionando(false);
+    }
   };
 
   const hierarquia = useMemo(() => {
@@ -283,12 +372,73 @@ export function BancoQuestoesTab() {
             </div>
           </div>
 
+          {/* NOVO: barra de adicionar N aleatórias */}
+          {filtradas.length > 0 && cadernos.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
+              <Shuffle className="h-4 w-4 text-primary" />
+              <span className="text-xs font-medium text-foreground/70">Adicionar</span>
+              <input
+                type="number"
+                min={1}
+                max={filtradas.length}
+                value={qtdAdicionar}
+                onChange={(e) => setQtdAdicionar(e.target.value)}
+                disabled={adicionando}
+                className="w-16 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
+              />
+              <span className="text-xs text-foreground/70">aleatórias ao caderno</span>
+              <select
+                value={cadernoDestino}
+                onChange={(e) => setCadernoDestino(e.target.value)}
+                disabled={adicionando}
+                className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
+              >
+                <option value="">Escolha um caderno...</option>
+                {cadernos.map(c => <option key={c.id} value={c.id}>{c.nome} ({c.questoes_count || 0})</option>)}
+              </select>
+              <button
+                onClick={handleAdicionarAleatorias}
+                disabled={adicionando || !cadernoDestino}
+                className="ml-auto inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {adicionando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                Adicionar
+              </button>
+            </div>
+          )}
+
+          {/* BARRA DE SELEÇÃO (modificada com botão de adicionar ao caderno) */}
           {selecionadas.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <CheckCircle2 className="h-4 w-4 text-primary" />
               <span className="text-xs font-medium">{selecionadas.size} selecionada{selecionadas.size > 1 ? "s" : ""}</span>
-              <button onClick={() => setModalNovoCaderno(true)} className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"><Plus className="h-3.5 w-3.5" /> Criar caderno</button>
-              <button onClick={() => setSelecionadas(new Set())} className="text-xs text-foreground/55 hover:text-foreground">Limpar seleção</button>
+
+              {cadernos.length > 0 && (
+                <>
+                  <select
+                    value={cadernoDestino}
+                    onChange={(e) => setCadernoDestino(e.target.value)}
+                    disabled={adicionando}
+                    className="ml-auto rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
+                  >
+                    <option value="">Escolha um caderno...</option>
+                    {cadernos.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                  <button
+                    onClick={handleAdicionarSelecionadas}
+                    disabled={adicionando || !cadernoDestino}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {adicionando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    Adicionar selecionadas
+                  </button>
+                </>
+              )}
+
+              <button onClick={() => setModalNovoCaderno(true)} className={`${cadernos.length > 0 ? "" : "ml-auto "}inline-flex items-center gap-1.5 rounded-full border border-primary px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10`}>
+                <Plus className="h-3.5 w-3.5" /> Criar caderno novo
+              </button>
+              <button onClick={() => setSelecionadas(new Set())} className="text-xs text-foreground/55 hover:text-foreground">Limpar</button>
             </div>
           )}
 
@@ -332,7 +482,6 @@ export function BancoQuestoesTab() {
       {modalNovaPasta && user?.id && (<PastaModal userId={user.id} onClose={() => setModalNovaPasta(false)} onSuccess={() => { setModalNovaPasta(false); load(); }} />)}
       {modalEditarPasta && user?.id && (<PastaModal userId={user.id} pasta={modalEditarPasta} onClose={() => setModalEditarPasta(null)} onSuccess={() => { setModalEditarPasta(null); load(); }} />)}
       
-      {/* CHAMADA DO MODAL NOVO CADERNO ATUALIZADA PARA PASSAR AS QUESTÕES COMPLETAS */}
       {modalNovoCaderno && user?.id && (
         <CadernoModal 
           userId={user.id} 
