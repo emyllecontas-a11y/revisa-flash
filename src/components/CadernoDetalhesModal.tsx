@@ -11,10 +11,15 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { getDb, pullBancoQuestoesOtimizado } from "@/lib/db";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 
+// Função para limpar o HTML bruto e mostrar só o texto
+function stripHtml(html: string) {
+  if (!html) return '';
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent || "";
+}
+
 // ============================================================
 // HELPER: Garante que as questões do caderno estejam no cache local.
-// 1) Faz um pull genérico (rápido, pega o que já é recente).
-// 2) Busca especificamente as questões que o caderno usa e ainda faltam.
 // ============================================================
 async function puxarQuestoesFaltantes(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
@@ -216,7 +221,8 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
                         <span className="text-[10px] font-medium bg-muted px-1.5 py-0.5 rounded-full">{q.ano}</span>
                         <span className="text-[10px] font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{q.disciplina}</span>
                       </div>
-                      <p className="text-sm text-foreground/80 line-clamp-2">{q.enunciado}</p>
+                      {/* APLICADO O stripHtml AQUI */}
+                      <p className="text-sm text-foreground/80 line-clamp-2">{stripHtml(q.enunciado)}</p>
                     </div>
                     <button onClick={() => handleRemover(q)} className="shrink-0 p-2 text-foreground/30 hover:text-accent transition-colors" title="Remover do caderno">
                       <Trash2 className="h-4 w-4" />
@@ -287,7 +293,8 @@ export function CadernoDetalhesModal({ caderno, userId, onClose, onUpdate }: Pro
                           <span className="text-[10px] font-medium bg-muted px-1.5 py-0.5 rounded-full">{q.banca}</span>
                           <span className="text-[10px] font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{q.disciplina}</span>
                         </div>
-                        <p className="text-sm text-foreground/80 line-clamp-2">{q.enunciado}</p>
+                        {/* APLICADO O stripHtml AQUI TAMBÉM */}
+                        <p className="text-sm text-foreground/80 line-clamp-2">{stripHtml(q.enunciado)}</p>
                       </div>
                     </li>
                   ))}
