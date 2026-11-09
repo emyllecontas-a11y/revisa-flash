@@ -1,10 +1,11 @@
-// src/components/FicharioConteudo.tsx
+/**
+ * FicharioConteudo — visual da aba "Conteúdo" do RevisaFlash.
+ */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ArrowLeft, BookOpen, Check, Crown, MoreHorizontal, Play, Plus, Share2, Trash2, Trophy,
 } from "lucide-react";
 
-// ✅ CORRIGIDO: usa "nao_estudado" (o que o banco já usa) em vez de "nao_iniciado"
 export type TopicStatus = "nao_estudado" | "estudando" | "revisado" | "dominado";
 
 export interface FicharioTopic {
@@ -150,6 +151,12 @@ export function FicharioCard({ title, topicCount, progress, color, onOpen, onSha
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const pct = Math.max(0, Math.min(100, Math.round(progress)));
 
+  // Ajuste dinâmico do tamanho da fonte
+  const titleSize = 
+    title.length > 20 ? "text-[13px] sm:text-sm leading-tight" :
+    title.length > 12 ? "text-sm sm:text-base leading-tight" :
+    "text-lg sm:text-xl leading-tight";
+
   const handleOpen = () => {
     if (open) return;
     if (prefersReducedMotion()) return onOpen?.();
@@ -198,7 +205,7 @@ export function FicharioCard({ title, topicCount, progress, color, onOpen, onSha
               <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--fc-on-cover)] opacity-70">Fichário</span>
 
               <span className="mt-3 block rounded-lg border border-[var(--fc-plate-edge)] bg-[var(--fc-plate)] px-3 py-2.5 shadow-[inset_0_1px_3px_oklch(0_0_0/0.25)]">
-                <span className="line-clamp-3 text-lg font-extrabold leading-tight text-[var(--fc-on-cover)] sm:text-xl">{title}</span>
+                <span className={`line-clamp-3 font-extrabold text-[var(--fc-on-cover)] ${titleSize}`}>{title}</span>
               </span>
 
               <span className="mt-auto block">
@@ -333,7 +340,6 @@ const W = 340;
 const ROW = 112;
 const TOP = 70;
 
-// ✅ CORRIGIDO: chave "nao_estudado" em vez de "nao_iniciado"
 const NODE: Record<TopicStatus | "now", { bg: string; dark: string; fg: string }> = {
   dominado: { bg: "var(--fc-gold)", dark: "var(--fc-gold-dark)", fg: "var(--fc-gold-ink)" },
   revisado: { bg: "var(--fc-done)", dark: "var(--fc-done-dark)", fg: "var(--fc-ink)" },

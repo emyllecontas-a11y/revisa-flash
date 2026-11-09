@@ -1,28 +1,5 @@
 /**
  * NotebookCard — visual de "caderno de verdade" para a lista "Meus Cadernos".
- *
- * Arquivo só de visual: não busca dados, não salva nada. Passe as props e os callbacks.
- *
- * Uso:
- *   <NotebookGrid>
- *     {cadernos.map((c) => (
- *       <NotebookCard
- *         key={c.id}
- *         title={c.nome}
- *         questionCount={c.questoes.length}
- *         folderName={c.pasta?.nome}
- *         onOpen={() => abrir(c.id)}
- *         onEdit={() => editar(c.id)}
- *         onDelete={() => excluir(c.id)}
- *       />
- *     ))}
- *     <NewNotebookCard onClick={criarCaderno} />
- *   </NotebookGrid>
- *
- * Dependências: React 19, Tailwind, lucide-react.
- * Fonte do título (opcional): Google Fonts "Caveat" — sem ela o título usa uma fonte cursiva do sistema.
- *   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
- * As cores do caderno ficam todas no bloco NOTEBOOK_CSS abaixo (variáveis --nb-*).
  */
 import type { ReactNode } from "react";
 import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
@@ -82,7 +59,7 @@ const NOTEBOOK_CSS = `
   background-position: 0 0, 0 9px, 0 0;
   box-shadow: 0 1px 0 oklch(0 0 0 / 0.08), 0 4px 10px -4px oklch(0 0 0 / 0.45);
 }
-.rf-nb-title { font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive; line-height: 22px; }
+.rf-nb-title { font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive; line-height: 1.1; }
 .rf-nb-ring {
   background: linear-gradient(180deg, var(--nb-ring) 0%, var(--nb-ring) 45%, var(--nb-ring-shade) 100%);
   box-shadow: 0 1px 1px oklch(0 0 0 / 0.5);
@@ -95,7 +72,6 @@ const NOTEBOOK_CSS = `
 `;
 
 function NotebookStyles() {
-  // React 19 deduplica pelo href e coloca no <head> uma vez só.
   return (
     <style href="rf-notebook-card" precedence="default">
       {NOTEBOOK_CSS}
@@ -120,7 +96,6 @@ export interface NotebookCardProps {
   title: string;
   questionCount: number;
   folderName?: string | null;
-  /** Se não passar, a cor sai do nome da pasta (ou do título). */
   color?: NotebookColor;
   onOpen?: () => void;
   onEdit?: () => void;
@@ -129,11 +104,17 @@ export interface NotebookCardProps {
 
 export function NotebookCard({ title, questionCount, folderName, color, onOpen, onEdit, onDelete }: NotebookCardProps) {
   const c = color ?? notebookColorFor(folderName || title);
+  
+  // Ajuste dinâmico do tamanho da fonte
+  const titleSize = 
+    title.length > 24 ? "text-[14px]" :
+    title.length > 16 ? "text-[17px]" :
+    "text-[22px]";
+
   return (
     <div className="rf-nb group relative pl-2 pb-2" data-color={c}>
       <NotebookStyles />
 
-      {/* folhas aparecendo por trás da capa */}
       <div aria-hidden className="rf-nb-pages absolute inset-y-2 left-3 right-0 rounded-r-md transition-transform duration-300 group-hover:translate-x-1" />
       <div aria-hidden className="rf-nb-pages absolute bottom-0 left-3 right-1 top-3 rounded-r-md opacity-90 transition-transform duration-300 group-hover:translate-x-2 group-hover:translate-y-0.5" />
 
@@ -145,18 +126,14 @@ export function NotebookCard({ title, questionCount, folderName, color, onOpen, 
       >
         <Spiral />
 
-        {/* elástico */}
         <span aria-hidden className="absolute inset-y-0 right-[13%] w-2 bg-[var(--nb-band)] opacity-85 shadow-[1px_0_0_oklch(1_0_0/0.12)]" />
-
-        {/* fita marcadora */}
         <span aria-hidden className="rf-nb-ribbon absolute -bottom-3 right-[27%] h-8 w-3.5 bg-[var(--nb-ribbon)] transition-all duration-300 group-hover:-bottom-4 group-hover:h-9" />
 
         <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--nb-on-cover)] opacity-70">Caderno</span>
 
-        {/* etiqueta pautada */}
         <span className="rf-nb-label relative mt-4 mr-[14%] block rounded-[3px] py-[9px] pl-[26px] pr-2.5 -rotate-[0.6deg]">
-          <span className="rf-nb-title line-clamp-3 break-words text-[22px] font-bold text-[var(--nb-ink)]">{title}</span>
-          <span className="rf-nb-title block text-[17px] font-semibold text-[var(--nb-ink-soft)]">
+          <span className={`rf-nb-title line-clamp-3 break-words font-bold text-[var(--nb-ink)] ${titleSize}`}>{title}</span>
+          <span className="rf-nb-title block text-[15px] font-semibold text-[var(--nb-ink-soft)] mt-1">
             {questionCount} {questionCount === 1 ? "questão" : "questões"}
           </span>
         </span>
@@ -191,7 +168,6 @@ export function NotebookCard({ title, questionCount, folderName, color, onOpen, 
   );
 }
 
-/** Caderno "em branco" para criar um novo. */
 export function NewNotebookCard({ onClick, label = "Novo caderno" }: { onClick?: () => void; label?: string }) {
   return (
     <div className="rf-nb group relative pl-2 pb-2">
@@ -210,7 +186,6 @@ export function NewNotebookCard({ onClick, label = "Novo caderno" }: { onClick?:
   );
 }
 
-/** Grade responsiva: 2 colunas no celular, até 4 no computador. */
 export function NotebookGrid({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">{children}</div>;
 }
