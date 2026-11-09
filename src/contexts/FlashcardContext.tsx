@@ -1,6 +1,6 @@
 // src/contexts/FlashcardContext.tsx
 
-import React, { createContext, useContext, useState, useMemo, useCallback, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, ReactNode, useEffect, useRef } from 'react';
 import { getDb, syncWithSupabase } from '@/lib/db';
 import { supabase, getSupabaseWithToken } from '@/lib/supabaseClient';
 import { uid } from '@/utils/helpers';
@@ -158,6 +158,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [loading, setLoading] = useState(true);
 
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const lastSettingsStrRef = useRef<string>('');
 
   const scheduler = useMemo(() => new FSRSScheduler(), []);
 
@@ -459,9 +460,18 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         const db = await getDb();
         const collection = db.collections.user_settings;
         if (collection) {
-          subscription = collection.$.subscribe(() => {
-            console.log('🔄 Mudança detectada em user_settings, recarregando...');
-            refreshUserSettings();
+          subscription = collection.$.subscribe((changeEvent) => {
+            // 1. Só age se a mudança for no documento de configurações DESTE usuário
+            if (changeEvent.documentId === getFixedSettingsId(userId)) {
+              const newSettingsStr = JSON.stringify(changeEvent.documentData);
+              
+              // 2. Evita o loop: só recarrega se os dados forem realmente diferentes
+              if (lastSettingsStrRef.current !== newSettingsStr) {
+                lastSettingsStrRef.current = newSettingsStr;
+                console.log('🔄 Mudança real detectada em user_settings, recarregando...');
+                refreshUserSettings();
+              }
+            }
           });
         }
       } catch (error) {
