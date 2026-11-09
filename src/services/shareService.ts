@@ -87,7 +87,10 @@ export async function addShare(
     throw new FriendError('Não foi possível compartilhar agora.');
   }
   const supabase = await getSupabaseWithToken();
+  
+  // CORRIGIDO: Adicionado crypto.randomUUID() para gerar o ID do share
   const { error } = await supabase.from('shares').insert({
+    id: crypto.randomUUID(),
     owner_id: myId,
     shared_with_id: friendId,
     item_type: itemType,
