@@ -24,7 +24,7 @@ import {
 } from "@/services/cadernoService";
 import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
-  ArrowLeft, FolderOpen, ChevronRight, FileText, Pencil, Trash2, Filter, BarChart3, Shuffle
+  ArrowLeft, FolderOpen, FileText, Pencil, Trash2, Filter, BarChart3, Shuffle
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
@@ -33,6 +33,7 @@ import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal"
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getTaxonomia } from "@/services/taxonomiaService";
 import { pullTodasQuestoesBanco } from "@/lib/db";
+import { NotebookCard, NewNotebookCard, NotebookGrid } from "./NotebookCard";
 
 type TipoFiltro = "" | "multipla_escolha" | "certo_errado";
 type ViewMode = "questoes" | "cadernos";
@@ -43,7 +44,6 @@ function stripHtml(html: string) {
   return doc.body.textContent || "";
 }
 
-// Fisher-Yates shuffle (uniforme)
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -88,12 +88,10 @@ export function BancoQuestoesTab() {
   const [busca, setBusca] = useState("");
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
 
-  // Adicionar aleatórias
   const [qtdAdicionar, setQtdAdicionar] = useState("10");
   const [cadernoDestino, setCadernoDestino] = useState("");
   const [adicionando, setAdicionando] = useState(false);
 
-  // Paginação
   const [paginaAtual, setPaginaAtual] = useState(1);
   const itensPorPagina = 100;
 
@@ -102,7 +100,6 @@ export function BancoQuestoesTab() {
     setLoading(true);
     setError(null);
     try {
-      // NOVO: puxa TODAS as questões (não só 50)
       await pullTodasQuestoesBanco(user.id);
       await limparDuplicatasLocais(user.id);
 
@@ -130,8 +127,8 @@ export function BancoQuestoesTab() {
     setPaginaAtual(1);
   }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
 
-  const handleExcluirCaderno = async (e: React.MouseEvent, c: Caderno) => {
-    e.stopPropagation();
+  // ✅ CORRIGIDO: sem React.MouseEvent, compatível com NotebookCard
+  const handleExcluirCaderno = async (c: Caderno) => {
     const ok = await confirmDialog({ title: "Excluir caderno?", description: `O caderno "${c.nome}" será apagado.`, confirmText: "Excluir", destructive: true });
     if (!ok || !user?.id) return;
     const res = await excluirCaderno(user.id, c.id);
@@ -236,10 +233,6 @@ export function BancoQuestoesTab() {
     return tree;
   }, [todasQuestoes]);
 
-  const disciplinasDisponiveis = useMemo(() => Object.keys(hierarquia), [hierarquia]);
-  const materiasDisponiveis = useMemo(() => fDisciplina ? Object.keys(hierarquia[fDisciplina] || {}) : [], [hierarquia, fDisciplina]);
-  const assuntosDisponiveis = useMemo(() => (fDisciplina && fMateria) ? Array.from(hierarquia[fDisciplina]?.[fMateria] || []) : [], [hierarquia, fDisciplina, fMateria]);
-
   const bancasDisponiveis = useMemo(() => { const set = new Set<string>(); todasQuestoes.forEach(q => { if (q.banca) set.add(q.banca); }); return Array.from(set).sort(); }, [todasQuestoes]);
   const anosDisponiveis = useMemo(() => { const set = new Set<number>(); todasQuestoes.forEach(q => { if (q.ano) set.add(q.ano); }); return Array.from(set).sort((a, b) => b - a); }, [todasQuestoes]);
 
@@ -260,7 +253,6 @@ export function BancoQuestoesTab() {
     });
   }, [todasQuestoes, fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
 
-  // Paginação
   const totalPaginas = Math.ceil(filtradas.length / itensPorPagina);
   const filtradasPaginadas = useMemo(() => {
     const inicio = (paginaAtual - 1) * itensPorPagina;
@@ -285,7 +277,6 @@ export function BancoQuestoesTab() {
               <button onClick={() => setViewMode("questoes")} className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-surface-2"><ArrowLeft className="h-3.5 w-3.5" /> Voltar</button>
               <Folder className="h-5 w-5 text-primary" /><h2 className="font-display text-lg font-bold">Meus Cadernos</h2>
             </div>
-            <button onClick={() => setModalNovoCaderno(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"><Plus className="h-4 w-4" /> Novo Caderno</button>
           </div>
           <div className="mb-5 flex flex-wrap items-center gap-2">
             <Chip active={pastaSelecionada === null} onClick={() => setPastaSelecionada(null)}>Todas as pastas</Chip>
@@ -307,30 +298,23 @@ export function BancoQuestoesTab() {
               <p className="mt-1 max-w-xs text-xs text-foreground/45">Selecione questões na aba anterior e crie um caderno.</p>
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <NotebookGrid>
+              <NewNotebookCard onClick={() => setModalNovoCaderno(true)} />
               {cadernosFiltrados.map(c => {
                 const pasta = pastas.find(p => p.id === c.pasta_id);
                 return (
-                  <div key={c.id} className="rf-card p-4 flex flex-col hover:border-primary/50 transition-colors cursor-pointer group" onClick={() => setCadernoAberto(c)}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary"><FileText className="h-4 w-4" /></div>
-                        <h3 className="font-display text-sm font-bold line-clamp-1">{c.nome}</h3>
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => { e.stopPropagation(); setModalEditarCaderno(c); }} className="p-1 text-foreground/40 hover:text-primary rounded-full"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button onClick={(e) => handleExcluirCaderno(e, c)} className="p-1 text-foreground/40 hover:text-accent rounded-full"><Trash2 className="h-3.5 w-3.5" /></button>
-                      </div>
-                    </div>
-                    {c.descricao && <p className="mt-2 text-xs text-foreground/50 line-clamp-2">{c.descricao}</p>}
-                    <div className="mt-auto pt-4 flex items-center justify-between text-xs text-foreground/45">
-                      <span className="font-medium">{c.questoes_count || 0} questões</span>
-                      {pasta && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"><Folder className="h-3 w-3" /> {pasta.name}</span>}
-                    </div>
-                  </div>
+                  <NotebookCard
+                    key={c.id}
+                    title={c.nome}
+                    questionCount={c.questoes_count || 0}
+                    folderName={pasta?.name}
+                    onOpen={() => setCadernoAberto(c)}
+                    onEdit={() => setModalEditarCaderno(c)}
+                    onDelete={() => handleExcluirCaderno(c)}
+                  />
                 );
               })}
-            </div>
+            </NotebookGrid>
           )}
         </div>
       ) : (
@@ -385,42 +369,23 @@ export function BancoQuestoesTab() {
             </div>
           </div>
 
-          {/* Adicionar N aleatórias */}
           {filtradas.length > 0 && cadernos.length > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <Shuffle className="h-4 w-4 text-primary" />
               <span className="text-xs font-medium text-foreground/70">Adicionar</span>
-              <input
-                type="number"
-                min={1}
-                max={filtradas.length}
-                value={qtdAdicionar}
-                onChange={(e) => setQtdAdicionar(e.target.value)}
-                disabled={adicionando}
-                className="w-16 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
-              />
+              <input type="number" min={1} max={filtradas.length} value={qtdAdicionar} onChange={(e) => setQtdAdicionar(e.target.value)} disabled={adicionando} className="w-16 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary" />
               <span className="text-xs text-foreground/70">aleatórias ao caderno</span>
-              <select
-                value={cadernoDestino}
-                onChange={(e) => setCadernoDestino(e.target.value)}
-                disabled={adicionando}
-                className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
-              >
+              <select value={cadernoDestino} onChange={(e) => setCadernoDestino(e.target.value)} disabled={adicionando} className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary">
                 <option value="">Escolha um caderno...</option>
                 {cadernos.map(c => <option key={c.id} value={c.id}>{c.nome} ({c.questoes_count || 0})</option>)}
               </select>
-              <button
-                onClick={handleAdicionarAleatorias}
-                disabled={adicionando || !cadernoDestino}
-                className="ml-auto inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-              >
+              <button onClick={handleAdicionarAleatorias} disabled={adicionando || !cadernoDestino} className="ml-auto inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
                 {adicionando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
                 Adicionar
               </button>
             </div>
           )}
 
-          {/* Adicionar selecionadas */}
           {selecionadas.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
               <CheckCircle2 className="h-4 w-4 text-primary" />
@@ -428,20 +393,11 @@ export function BancoQuestoesTab() {
 
               {cadernos.length > 0 && (
                 <>
-                  <select
-                    value={cadernoDestino}
-                    onChange={(e) => setCadernoDestino(e.target.value)}
-                    disabled={adicionando}
-                    className="ml-auto rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
-                  >
+                  <select value={cadernoDestino} onChange={(e) => setCadernoDestino(e.target.value)} disabled={adicionando} className="ml-auto rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary">
                     <option value="">Escolha um caderno...</option>
                     {cadernos.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                   </select>
-                  <button
-                    onClick={handleAdicionarSelecionadas}
-                    disabled={adicionando || !cadernoDestino}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                  >
+                  <button onClick={handleAdicionarSelecionadas} disabled={adicionando || !cadernoDestino} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
                     {adicionando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                     Adicionar selecionadas
                   </button>
@@ -492,23 +448,9 @@ export function BancoQuestoesTab() {
 
               {totalPaginas > 1 && (
                 <div className="mt-4 flex items-center justify-center gap-2">
-                  <button
-                    onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
-                    disabled={paginaAtual === 1}
-                    className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
-                  >
-                    ← Anterior
-                  </button>
-                  <span className="text-xs text-foreground/60">
-                    Página {paginaAtual} de {totalPaginas} ({filtradas.length} questões)
-                  </span>
-                  <button
-                    onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
-                    disabled={paginaAtual === totalPaginas}
-                    className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
-                  >
-                    Próxima →
-                  </button>
+                  <button onClick={() => setPaginaAtual(p => Math.max(1, p - 1))} disabled={paginaAtual === 1} className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40">← Anterior</button>
+                  <span className="text-xs text-foreground/60">Página {paginaAtual} de {totalPaginas} ({filtradas.length} questões)</span>
+                  <button onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))} disabled={paginaAtual === totalPaginas} className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium hover:bg-surface-2 disabled:opacity-40">Próxima →</button>
                 </div>
               )}
             </>
@@ -521,17 +463,9 @@ export function BancoQuestoesTab() {
       
       {modalNovoCaderno && user?.id && (
         <CadernoModal 
-          userId={user.id} 
-          pastas={pastas} 
-          questoesIds={Array.from(selecionadas)} 
-          questoesCompletas={todasQuestoes.filter(q => selecionadas.has(q.id))} 
+          userId={user.id} pastas={pastas} questoesIds={Array.from(selecionadas)} questoesCompletas={todasQuestoes.filter(q => selecionadas.has(q.id))} 
           onClose={() => setModalNovoCaderno(false)} 
-          onSuccess={() => { 
-            setModalNovoCaderno(false); 
-            setSelecionadas(new Set()); 
-            load(); 
-            toast.success("Caderno(s) criado(s)!"); 
-          }} 
+          onSuccess={() => { setModalNovoCaderno(false); setSelecionadas(new Set()); load(); toast.success("Caderno(s) criado(s)!"); }} 
         />
       )}
       
@@ -542,34 +476,24 @@ export function BancoQuestoesTab() {
       {modalFiltro && (
         <FiltroHierarquiaModal
           hierarquia={hierarquia}
-          fDisciplina={fDisciplina}
-          setFDisciplina={setFDisciplina}
-          fMateria={fMateria}
-          setFMateria={setFMateria}
-          fAssunto={fAssunto}
-          setFAssunto={setFAssunto}
-          bancasDisponiveis={bancasDisponiveis}
-          fBanca={fBanca}
-          setFBanca={setFBanca}
-          anosDisponiveis={anosDisponiveis}
-          fAno={fAno}
-          setFAno={setFAno}
+          fDisciplina={fDisciplina} setFDisciplina={setFDisciplina}
+          fMateria={fMateria} setFMateria={setFMateria}
+          fAssunto={fAssunto} setFAssunto={setFAssunto}
+          bancasDisponiveis={bancasDisponiveis} fBanca={fBanca} setFBanca={setFBanca}
+          anosDisponiveis={anosDisponiveis} fAno={fAno} setFAno={setFAno}
           onClose={() => setModalFiltro(false)}
         />
       )}
 
       {modalRelatorio && user?.id && (
-        <RelatorioDesempenhoModal
-          userId={user.id}
-          onClose={() => setModalRelatorio(false)}
-        />
+        <RelatorioDesempenhoModal userId={user.id} onClose={() => setModalRelatorio(false)} />
       )}
     </>
   );
 }
 
 // ==========================================
-// COMPONENTES DE MODAL E AUXILIARES
+// COMPONENTES AUXILIARES (PastaModal, CadernoModal, Chip, Badge, BadgeSoft)
 // ==========================================
 
 function PastaModal({ userId, pasta, onClose, onSuccess }: { userId: string; pasta?: PastaCaderno; onClose: () => void; onSuccess: () => void }) {
@@ -606,52 +530,29 @@ function CadernoModal({ userId, pastas, questoesIds, questoesCompletas, caderno,
   const handleSalvar = async () => {
     if (!emSerie && !nome.trim()) return;
     setSalvando(true); setError(null);
-    
     try {
       if (caderno) {
         const res = await atualizarCaderno(userId, caderno.id, { nome, pasta_id: pastaId });
         if (res.success) onSuccess(); else setError(res.error || "Erro ao salvar");
       } else if (emSerie) {
-        if (!questoesCompletas || questoesCompletas.length === 0) {
-          setError("Nenhuma questão selecionada."); setSalvando(false); return;
-        }
-
+        if (!questoesCompletas || questoesCompletas.length === 0) { setError("Nenhuma questão selecionada."); setSalvando(false); return; }
         const grupos = new Map<string, string[]>();
-        questoesCompletas.forEach(q => {
-          const disc = q.disciplina || "Geral";
-          if (!grupos.has(disc)) grupos.set(disc, []);
-          grupos.get(disc)!.push(q.id);
-        });
-
-        let falhas = 0;
-        let criados = 0;
-
+        questoesCompletas.forEach(q => { const disc = q.disciplina || "Geral"; if (!grupos.has(disc)) grupos.set(disc, []); grupos.get(disc)!.push(q.id); });
+        let falhas = 0; let criados = 0;
         for (const [disc, ids] of grupos.entries()) {
-          const nomeCaderno = `Caderno de ${disc}`;
-          const res = await criarCaderno(userId, nomeCaderno, pastaId, ids);
-          if (res.success) criados++;
-          else falhas++;
+          const res = await criarCaderno(userId, `Caderno de ${disc}`, pastaId, ids);
+          if (res.success) criados++; else falhas++;
         }
-
-        if (falhas > 0 && criados === 0) {
-          setError("Erro ao criar os cadernos em série.");
-        } else if (falhas > 0) {
-          setError(`${criados} cadernos criados, mas ${falhas} falharam.`);
-        } else {
-          onSuccess();
-        }
+        if (falhas > 0 && criados === 0) setError("Erro ao criar os cadernos em série.");
+        else if (falhas > 0) setError(`${criados} cadernos criados, mas ${falhas} falharam.`);
+        else onSuccess();
       } else {
-        if (!questoesIds || questoesIds.length === 0) {
-          setError("Nenhuma questão selecionada."); setSalvando(false); return;
-        }
+        if (!questoesIds || questoesIds.length === 0) { setError("Nenhuma questão selecionada."); setSalvando(false); return; }
         const res = await criarCaderno(userId, nome, pastaId, questoesIds);
         if (res.success) onSuccess(); else setError(res.error || "Erro ao salvar");
       }
-    } catch (e: any) {
-      setError(e.message || "Erro inesperado.");
-    } finally {
-      setSalvando(false);
-    }
+    } catch (e: any) { setError(e.message || "Erro inesperado."); }
+    finally { setSalvando(false); }
   };
 
   return (
@@ -661,64 +562,30 @@ function CadernoModal({ userId, pastas, questoesIds, questoesCompletas, caderno,
           <h3 className="text-lg font-semibold text-foreground">{caderno ? "Editar Caderno" : "Novo Caderno"}</h3>
           <button onClick={onClose} className="text-foreground/50 hover:text-foreground"><X className="h-5 w-5" /></button>
         </div>
-        
         <div className="space-y-4">
           {!caderno && (
             <label className="flex items-center gap-2 cursor-pointer p-3 border border-border rounded-lg bg-surface-2 hover:bg-surface-2/80 transition-colors">
-              <input 
-                type="checkbox" 
-                checked={emSerie} 
-                onChange={(e) => setEmSerie(e.target.checked)} 
-                className="h-4 w-4 accent-[var(--primary)]"
-              />
+              <input type="checkbox" checked={emSerie} onChange={(e) => setEmSerie(e.target.checked)} className="h-4 w-4 accent-[var(--primary)]" />
               <span className="text-sm font-medium text-foreground/80">Gerar cadernos em série (um por disciplina)</span>
             </label>
           )}
-
           {!emSerie && (
             <div>
               <label className="text-sm font-medium text-foreground/70">Nome do caderno *</label>
-              <input 
-                type="text" 
-                value={nome} 
-                onChange={(e) => setNome(e.target.value)} 
-                disabled={salvando} 
-                autoFocus 
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1" 
-              />
+              <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} disabled={salvando} autoFocus className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1" />
             </div>
           )}
-
-          {emSerie && (
-            <div className="rounded-lg bg-primary/10 p-3 border border-primary/20">
-              <p className="text-xs text-primary font-medium">
-                Os cadernos serão nomeados automaticamente (ex: "Caderno de Português", "Caderno de Direito") e agrupados na pasta escolhida abaixo.
-              </p>
-            </div>
-          )}
-
+          {emSerie && (<div className="rounded-lg bg-primary/10 p-3 border border-primary/20"><p className="text-xs text-primary font-medium">Os cadernos serão nomeados automaticamente (ex: "Caderno de Português") e agrupados na pasta escolhida abaixo.</p></div>)}
           <div>
             <label className="text-sm font-medium text-foreground/70">Pasta de destino</label>
-            <select 
-              value={pastaId} 
-              onChange={(e) => setPastaId(e.target.value)} 
-              disabled={salvando} 
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
-            >
+            <select value={pastaId} onChange={(e) => setPastaId(e.target.value)} disabled={salvando} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1">
               <option value="sem-pasta">Sem pasta</option>
               {pastas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
-
-          {!caderno && questoesIds && (
-            <div className="rounded-lg bg-muted p-3 text-xs text-foreground/70">
-              {questoesIds.length} questões selecionadas.
-            </div>
-          )}
-          
+          {!caderno && questoesIds && (<div className="rounded-lg bg-muted p-3 text-xs text-foreground/70">{questoesIds.length} questões selecionadas.</div>)}
           {error && <div className="rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent">{error}</div>}
         </div>
-
         <div className="mt-5 flex gap-2">
           <button onClick={onClose} disabled={salvando} className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium hover:bg-surface-2">Cancelar</button>
           <button onClick={handleSalvar} disabled={salvando || (!emSerie && !nome.trim())} className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">

@@ -36,6 +36,8 @@ import {
   GerenciarPastasSimuladoModal,
   MoverSimuladoParaPastaModal,
 } from "@/components/PastasSimuladoModals";
+import { BlocoCard, BlocoGrid } from "@/components/BlocoFixacao";
+import { getDb } from "@/lib/db";
 
 export default function SimuladosPage() {
   const navigate = useNavigate();
@@ -749,11 +751,11 @@ export default function SimuladosPage() {
             )}
           </>
         )
-      ) : mainTab === 'listas' ? (
-        <ListasTab />
-      ) : (
-        <BancoQuestoesTab />
-      )}
+) : mainTab === 'listas' ? (
+  <FixacaoTab />
+) : (
+  <BancoQuestoesTab />
+)}
 
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
@@ -1295,5 +1297,89 @@ function HistoricoCardMini({ resultado, onVerResultado, onExcluir }: { resultado
         <Trash2 className="h-3.5 w-3.5" />
       </button>
     </div>
+  );
+}
+
+function FixacaoTab() {
+  const { user } = useAppUser();
+  const navigate = useNavigate();
+  const [disciplinas, setDisciplinas] = useState<{ id: string; nome: string; listCount: number; accuracy: number | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const db = await getDb();
+        // Busca disciplinas do usuário
+        const discDocs = await db.disciplines.find({ selector: { user_id: user.id, isDeleted: { $ne: true } } }).exec();
+        // Busca listas do usuário (que é o que a Fixação usa)
+        const listaDocs = await db.listas.find({ selector: { user_id: user.id, isdeleted: false } }).exec();
+        // Busca resultados para calcular taxa de acerto
+        const resultadoDocs = await db.resultados_lista.find({ selector: { user_id: user.id, isdeleted: false } }).exec();
+
+        const resultadoPorLista = new Map<string, any>();
+        resultadoDocs.forEach((d: any) => resultadoPorLista.set(d.get('lista_id'), d.toJSON()));
+
+        const disciplinasMap = new Map<string, { id: string; nome: string; listas: any[] }>();
+        discDocs.forEach((d: any) => {
+          disciplinasMap.set(d.get('id'), { id: d.get('id'), nome: d.get('name'), listas: [] });
+        });
+
+        // Agrupa listas por disciplina
+        listaDocs.forEach((l: any) => {
+          const j = l.toJSON();
+          const d = disciplinasMap.get(j.discipline_id);
+          if (d) d.listas.push(j);
+        });
+
+        const result = Array.from(disciplinasMap.values()).map(d => {
+          let totalQ = 0, totalA = 0;
+          d.listas.forEach(l => {
+            const r = resultadoPorLista.get(l.id);
+            if (r) { totalQ += r.total_questoes || 0; totalA += r.acertos || 0; }
+          });
+          return {
+            id: d.id,
+            nome: d.nome,
+            listCount: d.listas.length,
+            accuracy: totalQ > 0 ? Math.round((totalA / totalQ) * 100) : null,
+          };
+        }).filter(d => d.listCount > 0); // Só mostra quem tem lista
+
+        setDisciplinas(result);
+      } catch (e) {
+        console.error('Erro ao carregar fixação:', e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [user?.id]);
+
+  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  if (disciplinas.length === 0) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
+        <div className="text-center">
+          <p className="text-sm text-foreground/40">Você ainda não tem listas de fixação.</p>
+          <p className="mt-1 text-xs text-foreground/30">Crie listas em Conteúdo → Tópicos para que elas apareçam aqui.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <BlocoGrid>
+      {disciplinas.map((d) => (
+        <BlocoCard
+          key={d.id}
+          title={d.nome}
+          listCount={d.listCount}
+          accuracy={d.accuracy}
+          onOpen={() => navigate(`/listas/${d.id}`)}
+        />
+      ))}
+    </BlocoGrid>
   );
 }

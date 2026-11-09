@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/useToast";
 import { SubtopicoCard } from "@/components/SubtopicoCard";
 import { CompartilharModal } from "@/components/compartilhar-modal";
 import type { ShareItemType } from "@/services/shareService";
+import { FicharioCard, FicharioGrid, FicharioAberto, type TopicStatus } from "@/components/FicharioConteudo";
 
 interface Disciplina {
   id: string;
@@ -990,7 +991,6 @@ export default function ConteudoPage() {
                 </button>
               ))}
             </div>
-            {/* 🔥 ETIQUETA ADICIONADA AQUI: conteudo-criar */}
             <button
               onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
               data-tour="conteudo-criar"
@@ -1001,81 +1001,23 @@ export default function ConteudoPage() {
           </div>
 
           {disciplinasFiltradas.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {disciplinasFiltradas.map((d, index) => {
+            <FicharioGrid>
+              {disciplinasFiltradas.map((d) => {
                 const counts = getStatusCounts(d.id);
                 const progresso = counts.total > 0 ? Math.round((counts.concluidos / counts.total) * 100) : 0;
-                const cor = getCardColor(index);
                 return (
-                  <div
+                  <FicharioCard
                     key={d.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => abrirDisciplina(d.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        abrirDisciplina(d.id);
-                      }
-                    }}
-                    className="card-lip group min-w-0 p-5 flex flex-col min-h-[180px] text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
-                    style={{ '--lip': cor } as React.CSSProperties}
-                  >
-                    <header className="mb-4 flex items-start justify-between">
-                      <div
-                        className="grid h-12 w-12 shrink-0 place-items-center"
-                        style={{ color: cor }}
-                      >
-                        <Folder
-                          className="h-8 w-8"
-                          strokeWidth={2.4}
-                          fill={`color-mix(in oklab, ${cor} 35%, transparent)`}
-                        />
-                      </div>
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCompartilhar({ itemType: 'discipline', itemId: d.id, itemName: d.name });
-                          }}
-                          className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-foreground transition-colors"
-                          aria-label="Compartilhar com amigas"
-                          title="Compartilhar com amigas"
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteDiscipline(d.id); }}
-                          className="grid h-7 w-7 place-items-center rounded-md text-foreground/40 hover:bg-white/5 hover:text-destructive transition-colors"
-                          aria-label="Excluir"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </header>
-
-                    <h3 className="font-display text-base font-semibold tracking-tight line-clamp-2">
-                      {d.name}
-                    </h3>
-                    <p className="mt-1 text-xs text-foreground/45">
-                      {counts.total} tópico{counts.total !== 1 ? 's' : ''} · {progresso}% concluído
-                    </p>
-
-                    <div className="mt-auto pt-4">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${progresso}%`,
-                            background: `linear-gradient(90deg, ${cor}, color-mix(in oklab, ${cor} 70%, var(--accent)))`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                    title={d.name}
+                    topicCount={counts.total}
+                    progress={progresso}
+                    onOpen={() => abrirDisciplina(d.id)}
+                    onShare={() => setCompartilhar({ itemType: 'discipline', itemId: d.id, itemName: d.name })}
+                    onMore={() => handleDeleteDiscipline(d.id)}
+                  />
                 );
               })}
-            </div>
+            </FicharioGrid>
           ) : (
             <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
               <p className="text-sm text-foreground/40">
@@ -1147,7 +1089,7 @@ export default function ConteudoPage() {
   // ============================================================
   // DETALHE DA DISCIPLINA
   // ============================================================
-  if (modo === "disciplina-detalhe" && selectedDisciplineId) {
+ if (modo === "disciplina-detalhe" && selectedDisciplineId) {
     const disciplina = getDisciplinaById(selectedDisciplineId);
     if (!disciplina) {
       setModo("disciplinas");
@@ -1155,139 +1097,23 @@ export default function ConteudoPage() {
     }
 
     const topicosDaDisciplina = getTopicosPorDisciplina(selectedDisciplineId);
-    const counts = getStatusCounts(selectedDisciplineId);
-    const progresso = counts.total > 0 ? Math.round((counts.concluidos / counts.total) * 100) : 0;
 
     return (
       <>
         <AppShell breadcrumb={`Conteúdo · ${disciplina.name}`}>
-          <button
-            onClick={voltarParaDisciplinas}
-            className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-foreground/55 hover:text-foreground"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" /> Voltar para Disciplinas
-          </button>
-
-          <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
-                <Folder className="h-6 w-6" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[11px] font-medium uppercase tracking-widest text-foreground/40">Disciplina</span>
-                <h1 className="font-display text-2xl font-semibold tracking-tight break-words sm:text-3xl">{disciplina.name}</h1>
-                <p className="mt-1 max-w-xl text-sm text-foreground/55">Todos os tópicos desta disciplina.</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 self-start sm:self-auto">
-              <button
-                onClick={() => { setIsAddTopicModalOpen(true); setErrorMessage(""); }}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                <Plus className="h-3.5 w-3.5" /> Novo tópico
-              </button>
-              <button
-                onClick={() => setCompartilhar({ itemType: 'discipline', itemId: disciplina.id, itemName: disciplina.name })}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2"
-              >
-                <Share2 className="h-3.5 w-3.5" /> Compartilhar
-              </button>
-              <button
-                onClick={() => handleDeleteDiscipline(selectedDisciplineId)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/15"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Excluir
-              </button>
-            </div>
-          </header>
-
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Mini icon={<Layers className="h-4 w-4" />} l="Tópicos" v={counts.total} />
-            <Mini l="Concluídos" v={counts.concluidos} />
-            <Mini l="Em andamento" v={counts.emAndamento} />
-            <Mini l="Progresso" v={`${progresso}%`} tone="accent" />
-          </div>
-
-          <h2 className="mb-3 font-display text-base font-semibold">Tópicos</h2>
-
-          {topicosDaDisciplina.length > 0 ? (
-            <div className="topic-trail">
-              {Array.from(
-                { length: Math.ceil(topicosDaDisciplina.length / 3) },
-                (_, grupoIdx) => {
-                  const grupo = topicosDaDisciplina.slice(grupoIdx * 3, grupoIdx * 3 + 3);
-                  const isReversed = grupoIdx % 2 === 1;
-
-                  return (
-                    <ol
-                      key={grupoIdx}
-                      className={`trail-nodes ${isReversed ? "trail-reverse" : ""}`}
-                    >
-                      {grupo.map((t, posNoGrupo) => {
-                        const idxGlobal = grupoIdx * 3 + posNoGrupo;
-                        const isCurrent = t.status === "estudando";
-                        const isFirst = idxGlobal === 0;
-                        const isLast = idxGlobal === topicosDaDisciplina.length - 1;
-
-                        return (
-                          <li
-                            key={t.id}
-                            className={`trail-node trail-position-${posNoGrupo} ${isCurrent ? "trail-current" : ""}`}
-                          >
-                            <div className="relative group">
-                              <button
-                                type="button"
-                                className="trail-step inline-flex items-center"
-                                onClick={() => abrirTopico(t.id)}
-                                aria-label={`Abrir tópico: ${t.name}`}
-                              >
-                                <span className="trail-circle">
-                                  {(() => {
-                                    const IconeTopico = getTopicIcon(t.status);
-                                    return <IconeTopico aria-hidden="true" />;
-                                  })()}
-                                  {isCurrent && (
-                                    <span className="trail-check">
-                                      <Check />
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="trail-label">{t.name}</span>
-                              </button>
-                              <div className="trail-step-arrows pointer-events-none absolute top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity">
-                                <button
-                                  type="button"
-                                  onClick={() => moveTopic(t.id, "up")}
-                                  disabled={isFirst}
-                                  className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  aria-label="Mover para cima"
-                                >
-                                  <ChevronUp className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => moveTopic(t.id, "down")}
-                                  disabled={isLast}
-                                  className="grid h-6 w-6 place-items-center rounded-md text-foreground/40 hover:bg-surface-2 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  aria-label="Mover para baixo"
-                                >
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  );
-                }
-              )}
-            </div>
-          ) : (
-            <div className="flex min-h-[150px] items-center justify-center rounded-2xl border border-dashed border-white/10">
-              <p className="text-sm text-foreground/40">Nenhum tópico criado. Clique em "Novo tópico" para começar.</p>
-            </div>
-          )}
+          <FicharioAberto
+            title={disciplina.name}
+            topics={topicosDaDisciplina.map(t => ({
+              id: t.id,
+              title: t.name,
+              status: t.status as TopicStatus,
+            }))}
+            onBack={voltarParaDisciplinas}
+            onTopicClick={(id) => abrirTopico(String(id))}
+            onNewTopic={() => { setIsAddTopicModalOpen(true); setErrorMessage(""); }}
+            onShare={() => setCompartilhar({ itemType: 'discipline', itemId: disciplina.id, itemName: disciplina.name })}
+            onDelete={() => handleDeleteDiscipline(selectedDisciplineId)}
+          />
         </AppShell>
 
         {modalCompartilhar}
