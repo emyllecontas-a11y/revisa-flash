@@ -140,7 +140,7 @@ export function AulasPage() {
         {/* ===== Lista de aulas em Árvore ===== */}
         <aside className={`${mobileView === "player" ? "hidden lg:block" : "block"} min-w-0`}>
           <div className="lg:sticky lg:top-6">
-            <h2 className="rf-au-hand text-5xl text-foreground mb-4">Minhas Aulas</h2>
+            <h2 className="font-display text-lg font-bold text-foreground mb-4">Minhas Aulas</h2>
 
             <div className="lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto lg:pr-2 pb-4">
               {Object.entries(arvore).map(([disciplina, assuntos]) => (

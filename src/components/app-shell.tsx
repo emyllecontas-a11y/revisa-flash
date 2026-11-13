@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Video
+  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Video,
+  PanelLeftClose, PanelLeftOpen
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
@@ -121,6 +122,17 @@ function AppShellInner({
   // 🔥 ESTADOS PARA OS TUTORIAIS
   const [showCarousel, setShowCarousel] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  const [isSidebarMinimized, setIsSidebarMinimized] = useState(() => {
+    return localStorage.getItem('unavox_sidebar_minimized') === 'true';
+  });
+
+  const toggleSidebarMinimized = () => {
+    setIsSidebarMinimized((prev) => {
+      const next = !prev;
+      localStorage.setItem('unavox_sidebar_minimized', String(next));
+      return next;
+    });
+  };
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -329,19 +341,40 @@ function AppShellInner({
       )}
 
       {/* AQUI COMEÇA O APP NORMAL */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col lg:flex" style={{ backgroundColor: 'var(--sidebar)' }}>
-        <div className="flex items-center gap-2.5 px-5 py-5">
-          <LogoIcon size={40} />
-          <div>
-            <div className="font-display text-base font-bold tracking-tight text-white">
-              Revisa<span className="text-primary">Flash</span>
-            </div>
-            <div className="text-[10px] uppercase tracking-widest text-white/50">ENARE 2026</div>
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 hidden flex-col lg:flex transition-all duration-300 ${
+          isSidebarMinimized ? "w-[76px]" : "w-[248px]"
+        }`}
+        style={{ backgroundColor: 'var(--sidebar)' }}
+      >
+        <div className={`flex items-center ${isSidebarMinimized ? "justify-center px-2 py-5" : "gap-2.5 px-5 py-5 justify-between"}`}>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <LogoIcon size={40} />
+            {!isSidebarMinimized && (
+              <div className="truncate">
+                <div className="font-display text-base font-bold tracking-tight text-white">
+                  Revisa<span className="text-primary">Flash</span>
+                </div>
+                <div className="text-[10px] uppercase tracking-widest text-white/50">ENARE 2026</div>
+              </div>
+            )}
           </div>
+          <button
+            onClick={toggleSidebarMinimized}
+            className={`grid h-7 w-7 place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors ${
+              isSidebarMinimized ? "absolute -right-3 top-6 bg-sidebar border border-white/20 shadow-md rounded-full" : ""
+            }`}
+            title={isSidebarMinimized ? "Expandir menu" : "Minimizar menu"}
+            aria-label={isSidebarMinimized ? "Expandir menu" : "Minimizar menu"}
+          >
+            {isSidebarMinimized ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+          </button>
         </div>
 
         <nav className="mt-2 flex-1 space-y-1 px-3">
-          <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/50">Principal</div>
+          {!isSidebarMinimized && (
+            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/50">Principal</div>
+          )}
           {TODAS_ROTAS.map((r) => (
             <NavItem
               key={r.to}
@@ -350,23 +383,26 @@ function AppShellInner({
               iconKey={r.icon as RouteIcon}
               active={pathname === r.to}
               badge={r.to === "/comunidade" ? comunidadeBadge : undefined}
+              minimized={isSidebarMinimized}
             />
           ))}
         </nav>
 
         <div className="space-y-3 p-3">
-          {streak > 0 && (
+          {streak > 0 && !isSidebarMinimized && (
             <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs">
               <Flame className="h-3.5 w-3.5 text-primary" />
               <span className="font-semibold text-white">{streak} dias</span>
               <span className="text-white/60">de sequência</span>
             </div>
           )}
-          <div className="flex items-center gap-2 text-[10px] text-white/50">
-            <RefreshCw className="h-3 w-3" />
-            {lastSyncTime ? `Sincronizado às ${lastSyncTime}` : "Nunca sincronizado"}
-          </div>
-          <div className="flex items-center gap-3 rounded-full bg-white/5 p-2">
+          {!isSidebarMinimized && (
+            <div className="flex items-center gap-2 text-[10px] text-white/50">
+              <RefreshCw className="h-3 w-3" />
+              {lastSyncTime ? `Sincronizado às ${lastSyncTime}` : "Nunca sincronizado"}
+            </div>
+          )}
+          <div className={`flex items-center gap-3 rounded-full bg-white/5 p-2 ${isSidebarMinimized ? "justify-center p-1.5" : ""}`}>
             <UserAvatar
               fotoUrl={avatarFromSupabase}
               avatarTipo={avatarTipo}
@@ -374,18 +410,34 @@ function AppShellInner({
               nome={profileName}
               className="h-9 w-9"
             />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-semibold text-white">{profileName}</div>
-              <div className="truncate text-[10px] text-white/50">Estudante</div>
-            </div>
-            <button onClick={handleLogout} className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/10 hover:text-white transition-colors" aria-label="Sair">
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
+            {!isSidebarMinimized && (
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-white">{profileName}</div>
+                <div className="truncate text-[10px] text-white/50">Estudante</div>
+              </div>
+            )}
+            {!isSidebarMinimized && (
+              <button onClick={handleLogout} className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/10 hover:text-white transition-colors" aria-label="Sair">
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
+          {isSidebarMinimized && (
+            <div className="flex justify-center pt-1">
+              <button
+                onClick={toggleSidebarMinimized}
+                className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors"
+                title="Expandir menu"
+                aria-label="Expandir menu"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
-      <div className="lg:pl-[248px]">
+      <div className={`transition-all duration-300 ${isSidebarMinimized ? "lg:pl-[76px]" : "lg:pl-[248px]"}`}>
         <div className="p-2 lg:p-3" style={{ backgroundColor: 'var(--sidebar)' }}>
           <div
             className="flex flex-col overflow-hidden"
@@ -451,25 +503,27 @@ function AppShellInner({
   );
 }
 
-function NavItem({ to, label, iconKey, active, badge }: { to: string; label: string; iconKey: RouteIcon; active: boolean; badge?: number; }) {
+function NavItem({ to, label, iconKey, active, badge, minimized }: { to: string; label: string; iconKey: RouteIcon; active: boolean; badge?: number; minimized?: boolean; }) {
   const Icon = ICONS[iconKey];
   const showBadge = typeof badge === "number" && badge > 0;
   return (
     <Link
       to={to}
+      title={minimized ? label : undefined}
       className={[
-        "flex items-center gap-3 rounded-full px-3 py-2.5 text-sm font-medium transition-colors",
+        "flex items-center gap-3 rounded-full px-3 py-2.5 text-sm font-medium transition-colors relative",
         active ? "bg-[#1a0512] text-primary" : "text-white/80 hover:bg-white/10 hover:text-white",
+        minimized ? "justify-center px-0 py-3" : "",
       ].join(" ")}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      <span className="truncate">{label}</span>
+      {!minimized && <span className="truncate">{label}</span>}
       {showBadge ? (
-        <span className="ml-auto min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-bold tabular-nums text-primary-foreground">
-          {badge! > 99 ? "99+" : badge}
+        <span className={minimized ? "absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" : "ml-auto min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-bold tabular-nums text-primary-foreground"}>
+          {!minimized && (badge! > 99 ? "99+" : badge)}
         </span>
       ) : (
-        active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
+        !minimized && active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
       )}
     </Link>
   );
