@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { QueryClient } from '@tanstack/react-query';
-import { AuthenticateWithRedirectCallback, SignIn } from '@clerk/clerk-react';
+import { AuthenticateWithRedirectCallback, SignIn } from '@clerk/react';
 
 // Importa as páginas
 import Cadastro from './routes/cadastro';

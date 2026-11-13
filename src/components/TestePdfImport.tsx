@@ -1,6 +1,6 @@
 // src/components/TestePdfImport.tsx
 import { useState, useEffect, useMemo } from 'react';
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@clerk/react";
 import { importarPdf, type ExtracaoCompleta } from '@/services/pdfImportService';
 import type { ParseResult } from '@/services/parseQuestoesPdf';
 import { marcar, marcarCompleto } from '@/services/pdfExtracaoAvancada';

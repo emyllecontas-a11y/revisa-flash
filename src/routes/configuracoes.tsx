@@ -6,7 +6,7 @@ import {
   Camera, HelpCircle
 } from "lucide-react";
 import { useAppUser } from "@/contexts/UserContext";
-import { useClerk } from "@clerk/clerk-react";
+import { useClerk } from "@clerk/react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";

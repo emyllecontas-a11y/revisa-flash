@@ -8,7 +8,7 @@ import {
 import type { ReactNode } from "react";
 import { useAppUser } from "@/contexts/UserContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
-import { useClerk } from "@clerk/clerk-react";
+import { useClerk } from "@clerk/react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
 import { LogoIcon } from "@/components/LogoIcon";

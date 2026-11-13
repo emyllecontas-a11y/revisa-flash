@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { useSignUp } from '@clerk/clerk-react';
+import { useSignUp } from '@clerk/react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { LogoIcon } from '@/components/LogoIcon';
 import { Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
