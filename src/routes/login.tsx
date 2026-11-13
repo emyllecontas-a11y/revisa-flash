@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useSignIn } from '@clerk/react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { LogoIcon } from '@/components/LogoIcon';
@@ -21,7 +21,15 @@ export default function LoginPage() {
   const redirectParam = searchParams.get('redirect') || '/';
   const isDev = import.meta.env.DEV;
 
-  const { isLoaded, signIn, setActive } = useSignIn();
+  const { isLoaded: clerkIsLoaded, signIn, setActive } = useSignIn();
+  const [forcedLoaded, setForcedLoaded] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setForcedLoaded(true), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isLoaded = clerkIsLoaded || forcedLoaded;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
