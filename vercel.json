@@ -3,6 +3,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/__clerk/:path*",
+      "destination": "/api/proxy?path=:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
