@@ -246,7 +246,6 @@ function AppWithAuth() {
       fallbackRedirectUrl="/"
       __experimental_billing={{ enabled: true }}
       appearance={{}}
-      proxyUrl="https://una-vox.vercel.app/__clerk"
     >
       <UserProvider>
         <Root />
