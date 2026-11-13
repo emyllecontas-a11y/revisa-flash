@@ -1,6 +1,6 @@
 // src/contexts/UserContext.tsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useUser as useClerkUser } from '@clerk/clerk-react';
+import { useUser as useClerkUser } from '@clerk/react';
 
 type User = {
   id: string;
