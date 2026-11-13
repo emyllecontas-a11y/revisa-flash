@@ -24,6 +24,7 @@ const MAX_RETRIES = 5;
 const UPSERT_CONFLICT: Record<string, string> = {
   progresso_simulado: 'simulado_id,user_id',
   progresso_lista: 'lista_id,user_id',
+  progresso_lista: 'id',
 };
 
 // ============================================================
