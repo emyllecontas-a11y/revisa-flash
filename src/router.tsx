@@ -19,6 +19,7 @@ import TestePdf from './routes/teste-pdf';
 import TesteParser from './routes/teste-parser';
 import PdfPage from './routes/pdf.$fileId';
 import Sessoes from './routes/sessoes';
+import Aulas from './routes/aulas';
 // 🔥 NOVA: tela única que junta "Compartilhado comigo" + "Amizades"
 import Comunidade from './routes/comunidade';
 
@@ -157,6 +158,14 @@ export const router = createBrowserRouter([
     element: (
       <ClerkProtectedRoute>
         <Sessoes />
+      </ClerkProtectedRoute>
+    ),
+  },
+  {
+    path: '/aulas',
+    element: (
+      <ClerkProtectedRoute>
+        <Aulas />
       </ClerkProtectedRoute>
     ),
   },
