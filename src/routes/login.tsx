@@ -75,11 +75,15 @@ export default function LoginPage() {
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
         navigate(redirectParam, { replace: true });
+      } else if (result.status === 'needs_identifier_verification' || result.status === 'needs_first_factor') {
+        // Caso o Clerk v6 exija alguma verificação adicional configurada no painel
+        setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
       } else {
         console.warn('Status de login não-completo:', result.status);
-        setError('Não foi possível concluir o login. Verifique seus dados.');
+        setError(`Não foi possível concluir o login (Status: ${result.status || 'desconhecido'}).`);
       }
     } catch (err: any) {
+      console.error('Erro no login do Clerk:', err);
       const clerkError = err?.errors?.[0];
       setError(clerkError?.longMessage || clerkError?.message || 'E-mail ou senha incorretos.');
     } finally {
