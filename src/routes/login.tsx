@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { useSignIn } from '@clerk/react';
+import { useSignIn, useUser } from '@clerk/react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAppUser } from '@/contexts/UserContext';
 import { LogoIcon } from '@/components/LogoIcon';
@@ -23,15 +23,24 @@ export default function LoginPage() {
   const isDev = import.meta.env.DEV;
 
   const { isLoaded: clerkIsLoaded, signIn, setActive } = useSignIn();
-  const { isSignedIn, isLoaded: userIsLoaded } = useAppUser();
+  const { isLoaded: userIsLoaded, isSignedIn: appUserIsSignedIn } = useAppUser();
+  const { isSignedIn: clerkIsSignedIn } = useUser();
   const [forcedLoaded, setForcedLoaded] = useState(false);
 
-  // Route guard: redirect authenticated users away from login page
+  // Route guard: redirect authenticated users away from login page immediately
+  // Check both Clerk's user state and our app context
   useEffect(() => {
-    if (userIsLoaded && isSignedIn) {
+    // If Clerk reports user is signed in, redirect immediately
+    if (clerkIsLoaded && clerkIsSignedIn) {
       navigate(redirectParam, { replace: true });
+      return;
     }
-  }, [userIsLoaded, isSignedIn, navigate, redirectParam]);
+    // Fallback to app user context
+    if (userIsLoaded && appUserIsSignedIn) {
+      navigate(redirectParam, { replace: true });
+      return;
+    }
+  }, [clerkIsLoaded, clerkIsSignedIn, userIsLoaded, appUserIsSignedIn, navigate, redirectParam]);
 
   useEffect(() => {
     const timer = setTimeout(() => setForcedLoaded(true), 3000);
@@ -46,29 +55,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkingSession, setCheckingSession] = useState(true);
-
-  // Check for existing session on mount
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        // Check if there's an existing Clerk session
-        const res = await fetch('/api/auth/session', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.isSignedIn) {
-            navigate(redirectParam, { replace: true });
-            return;
-          }
-        }
-      } catch {
-        // Ignore errors, proceed to login form
-      } finally {
-        setCheckingSession(false);
-      }
-    };
-    checkSession();
-  }, [navigate, redirectParam]);
 
   // Estados para segundo fator (Device Trust / MFA)
   const [step, setStep] = useState<'password' | 'second_factor'>('password');
@@ -88,8 +74,6 @@ export default function LoginPage() {
         redirectUrlComplete: redirectParam,
       });
     } catch (err: any) {
-      console.error('Erro ao entrar com Google:', err);
-      console.error('Clerk Google error details:', JSON.stringify(err, null, 2));
       setError(err?.errors?.[0]?.message || 'Não foi possível entrar com Google.');
       setGoogleLoading(false);
     }
@@ -106,6 +90,12 @@ export default function LoginPage() {
       return;
     }
 
+    // Check for existing active session before creating new sign-in
+    if (clerkIsSignedIn) {
+      navigate(redirectParam, { replace: true });
+      return;
+    }
+
     setLoading(true);
     try {
       // Clerk v6 headless flow:
@@ -114,36 +104,19 @@ export default function LoginPage() {
       // 3. password({ password }) — verifica a senha
       // 4. Se status === 'complete', finalize() cria a sessão
       // 5. Se status === 'needs_client_trust' ou 'needs_second_factor', preparar segundo fator
-      console.log('=== CLERK SIGNIN: Iniciando create ===');
-      const createResult = await signIn.create({
+      await signIn.create({
         identifier: email.trim(),
       });
-      console.log('create result:', createResult);
-      console.log('signIn.status after create:', signIn?.status);
-      console.log('signIn.firstFactorVerification after create:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Selecionando fator password ===');
-      const selectFactorResult = await signIn.selectFirstFactor('password');
-      console.log('selectFirstFactor result:', selectFactorResult);
-      console.log('signIn.status after selectFirstFactor:', signIn?.status);
-      console.log('signIn.firstFactorVerification after selectFirstFactor:', signIn?.firstFactorVerification);
+      await signIn.selectFirstFactor('password');
 
-      console.log('=== CLERK SIGNIN: Verificando password ===');
-      const passwordResult = await signIn.password({
+      await signIn.password({
         password,
       });
-      console.log('password result:', passwordResult);
-      console.log('signIn.status after password:', signIn?.status);
-      console.log('signIn.firstFactorVerification after password:', signIn?.firstFactorVerification);
 
       // Se status for 'complete', finaliza direto
       if (signIn?.status === 'complete') {
-        console.log('=== CLERK SIGNIN: Finalizando (status complete) ===');
         const finalizeResult = await signIn.finalize();
-        console.log('finalize result:', finalizeResult);
-        console.log('finalizeResult.status:', finalizeResult?.status);
-        console.log('finalizeResult.createdSessionId:', finalizeResult?.createdSessionId);
-
         if (finalizeResult.status === 'complete') {
           await setActive({ session: finalizeResult.createdSessionId });
           navigate(redirectParam, { replace: true });
@@ -155,12 +128,8 @@ export default function LoginPage() {
       // Status 'needs_second_factor' = MFA do usuário (2FA habilitado)
       // Ambos exigem segundo fator. O Clerk v6 expõe supportedSecondFactors no secondFactorVerification.
       if (signIn?.status === 'needs_client_trust' || signIn?.status === 'needs_second_factor') {
-        console.log(`=== CLERK SIGNIN: Status ${signIn?.status} — preparando segundo fator ===`);
-        console.log('signIn.secondFactorVerification:', signIn?.secondFactorVerification);
-
         // Verifica quais fatores de segundo fator estão disponíveis
         const supportedFactors = signIn?.secondFactorVerification?.supportedSecondFactors || [];
-        console.log('Supported second factors:', supportedFactors);
 
         // Preferir email_code se disponível (Device Trust usa email_code por padrão)
         const hasEmailCode = supportedFactors.includes('email_code');
@@ -175,9 +144,7 @@ export default function LoginPage() {
         setSecondFactorStrategy(chosenStrategy);
 
         // Prepara o segundo fator (envia o código)
-        console.log(`=== CLERK SIGNIN: Preparando segundo fator (${chosenStrategy}) ===`);
-        const prepareResult = await signIn.prepareSecondFactor({ strategy: chosenStrategy });
-        console.log('prepareSecondFactor result:', prepareResult);
+        await signIn.prepareSecondFactor({ strategy: chosenStrategy });
 
         setCodeSent(true);
         setStep('second_factor');
@@ -185,40 +152,25 @@ export default function LoginPage() {
       }
 
       // Outros status não-completos
-      console.warn('Status de login não-completo:', signIn?.status);
-      console.warn('signIn completo para debug:', JSON.stringify(signIn, null, 2));
       setError(`Não foi possível concluir o login (Status: ${signIn?.status || 'desconhecido'}).`);
     } catch (err: any) {
-      console.error('=== ERRO CLERK LOGIN ===');
-      console.error('Erro completo:', err);
-      console.error('Erro stringificado:', JSON.stringify(err, null, 2));
-      console.error('err.errors:', err?.errors);
-      console.error('err.message:', err?.message);
-      console.error('err.code:', err?.code);
-      console.error('err.status:', err?.status);
-      // Try to get response body if it's a fetch error
-      if (err?.response) {
-        console.error('Clerk response status:', err.response.status);
-        try {
-          const responseText = await err.response.text();
-          console.error('Clerk response body:', responseText);
-        } catch (e) {
-          console.error('Falha ao ler response body:', e);
-        }
-      }
-      if (err?.cause) {
-        console.error('Clerk cause:', err.cause);
-      }
-
-      // Verifica erros específicos do Clerk v6
+      // Tratamento específico: "You're already signed in" — usuário já tem sessão ativa
       const clerkErrors = err?.errors;
       if (Array.isArray(clerkErrors) && clerkErrors.length > 0) {
         const firstError = clerkErrors[0];
-        console.error('Clerk error code:', firstError?.code);
-        console.error('Clerk error meta:', firstError?.meta);
-        console.error('Clerk error longMessage:', firstError?.longMessage);
+        const errorCode = firstError?.code;
+        const errorMessage = firstError?.longMessage || firstError?.message || '';
 
-        // Códigos comuns que indicam configuração faltando
+        // Se o erro indica que o usuário já está logado, redireciona silenciosamente
+        if (errorCode === 'form_identifier_exists' ||
+            errorCode === 'already_signed_in' ||
+            errorMessage.toLowerCase().includes('already signed in') ||
+            errorMessage.toLowerCase().includes('já está logado')) {
+          navigate(redirectParam, { replace: true });
+          return;
+        }
+
+        // Códigos comuns que indicam configuração faltando no painel do Clerk
         const configCodes = [
           'form_password_not_enabled',
           'form_identifier_not_enabled',
@@ -226,9 +178,8 @@ export default function LoginPage() {
           'form_email_not_verified',
         ];
 
-        if (configCodes.includes(firstError?.code)) {
-          const msg = `Configuração necessária no painel do Clerk: ${firstError.longMessage || firstError.message}`;
-          console.error('⚠️ PROBLEMA DE CONFIGURAÇÃO:', msg);
+        if (configCodes.includes(errorCode)) {
+          const msg = `Configuração necessária no painel do Clerk: ${errorMessage}`;
           setError(msg);
           return;
         }
@@ -236,7 +187,6 @@ export default function LoginPage() {
 
       const clerkError = err?.errors?.[0];
       const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'E-mail ou senha incorretos.';
-      console.error('Mensagem final para usuário:', errorMsg);
       setError(errorMsg);
     } finally {
       setLoading(false);
@@ -256,23 +206,14 @@ export default function LoginPage() {
 
     setSecondFactorLoading(true);
     try {
-      console.log('=== CLERK SIGNIN: Tentando segundo fator ===', { strategy: secondFactorStrategy, code: secondFactorCode.trim() });
-      const attemptResult = await signIn.attemptSecondFactor({
+      await signIn.attemptSecondFactor({
         strategy: secondFactorStrategy,
         code: secondFactorCode.trim(),
       });
-      console.log('attemptSecondFactor result:', attemptResult);
-      console.log('signIn.status after attemptSecondFactor:', signIn?.status);
-      console.log('signIn.secondFactorVerification after attemptSecondFactor:', signIn?.secondFactorVerification);
 
       // Se o segundo fator foi verificado com sucesso, finaliza a sessão
       if (signIn?.status === 'complete') {
-        console.log('=== CLERK SIGNIN: Finalizando após segundo fator ===');
         const finalizeResult = await signIn.finalize();
-        console.log('finalize result:', finalizeResult);
-        console.log('finalizeResult.status:', finalizeResult?.status);
-        console.log('finalizeResult.createdSessionId:', finalizeResult?.createdSessionId);
-
         if (finalizeResult.status === 'complete') {
           await setActive({ session: finalizeResult.createdSessionId });
           navigate(redirectParam, { replace: true });
@@ -282,13 +223,9 @@ export default function LoginPage() {
 
       // Se ainda precisa de segundo fator (ex: código errado, expirou, ou precisa de outro fator)
       if (signIn?.status === 'needs_second_factor' || signIn?.status === 'needs_client_trust') {
-        console.warn('Segundo fator ainda necessário após tentativa:', signIn?.status);
-        console.warn('signIn.secondFactorVerification:', signIn?.secondFactorVerification);
-        
         // Verifica se houve erro específico no segundo fator
         const secondFactorError = signIn?.secondFactorVerification?.error;
         if (secondFactorError) {
-          console.error('Erro no segundo fator:', secondFactorError);
           if (secondFactorError.code === 'form_code_incorrect' || secondFactorError.code === 'form_code_expired') {
             setError('Código incorreto ou expirado. Tente novamente.');
             setSecondFactorCode('');
@@ -296,21 +233,15 @@ export default function LoginPage() {
             return;
           }
         }
-        
+
         setError('Não foi possível verificar o código. Tente novamente.');
         setSecondFactorCode('');
         return;
       }
 
       // Outros status não-completos
-      console.warn('Status não-completo após segundo fator:', signIn?.status);
       setError(`Não foi possível concluir o login (Status: ${signIn?.status || 'desconhecido'}).`);
     } catch (err: any) {
-      console.error('=== ERRO CLERK SEGUNDO FATOR ===');
-      console.error('Erro completo:', err);
-      console.error('Erro stringificado:', JSON.stringify(err, null, 2));
-      console.error('err.errors:', err?.errors);
-
       const clerkError = err?.errors?.[0];
       const errorCode = clerkError?.code;
       const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'Erro ao verificar código.';
@@ -335,13 +266,10 @@ export default function LoginPage() {
     setError(null);
     setSecondFactorLoading(true);
     try {
-      console.log('=== CLERK SIGNIN: Reenviando código do segundo fator ===', { strategy: secondFactorStrategy });
-      const prepareResult = await signIn.prepareSecondFactor({ strategy: secondFactorStrategy });
-      console.log('prepareSecondFactor (resend) result:', prepareResult);
+      await signIn.prepareSecondFactor({ strategy: secondFactorStrategy });
       setCodeSent(true);
       setError(null);
     } catch (err: any) {
-      console.error('Erro ao reenviar código:', err);
       const clerkError = err?.errors?.[0];
       setError(clerkError?.longMessage || clerkError?.message || 'Erro ao reenviar código.');
     } finally {
