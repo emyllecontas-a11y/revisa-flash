@@ -1143,7 +1143,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'decks', 'flashcards', 'disciplines', 'topics', 'errors',
       'revisoes', 'study_records', 'user_settings',
       'listas_pastas', 'listas', 'questoes_lista',
-      'progresso_lista', 'progresso_simulado',
+      'progresso_simulado',
       'simulados_pastas',
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
