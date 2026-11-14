@@ -68,11 +68,11 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // Clerk v6 flow para formulários customizados:
+      // Clerk v6 headless flow para password:
       // 1. create com identifier (inicia o sign-in)
-      // 2. selectFirstFactor('password') para escolher password como fator
-      // 3. password com a senha (fornece o fator)
-      // 4. finalize (completa e cria a sessão)
+      // 2. prepareFirstFactor('password') prepara o fator
+      // 3. attemptFirstFactor({ password }) tenta autenticar
+      // 4. finalize() completa e cria a sessão
       console.log('=== CLERK SIGNIN: Iniciando create ===');
       const createResult = await signIn.create({
         identifier: email.trim(),
@@ -81,19 +81,19 @@ export default function LoginPage() {
       console.log('signIn.status after create:', signIn?.status);
       console.log('signIn.firstFactorVerification after create:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Selecionando fator password ===');
-      const selectFactorResult = await signIn.selectFirstFactor('password');
-      console.log('selectFirstFactor result:', selectFactorResult);
-      console.log('signIn.status after selectFirstFactor:', signIn?.status);
-      console.log('signIn.firstFactorVerification after selectFirstFactor:', signIn?.firstFactorVerification);
+      console.log('=== CLERK SIGNIN: Preparando fator password ===');
+      const prepareFactorResult = await signIn.prepareFirstFactor('password');
+      console.log('prepareFirstFactor result:', prepareFactorResult);
+      console.log('signIn.status after prepareFirstFactor:', signIn?.status);
+      console.log('signIn.firstFactorVerification after prepareFirstFactor:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Fornecendo password ===');
-      const passwordResult = await signIn.password({
+      console.log('=== CLERK SIGNIN: Tentando primeiro fator (password) ===');
+      const attemptFactorResult = await signIn.attemptFirstFactor({
         password,
       });
-      console.log('password result:', passwordResult);
-      console.log('signIn.status after password:', signIn?.status);
-      console.log('signIn.firstFactorVerification after password:', signIn?.firstFactorVerification);
+      console.log('attemptFirstFactor result:', attemptFactorResult);
+      console.log('signIn.status after attemptFirstFactor:', signIn?.status);
+      console.log('signIn.firstFactorVerification after attemptFirstFactor:', signIn?.firstFactorVerification);
 
       console.log('=== CLERK SIGNIN: Finalizando ===');
       const finalizeResult = await signIn.finalize();
@@ -106,7 +106,7 @@ export default function LoginPage() {
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
         navigate(redirectParam, { replace: true });
-      } else if (result.status === 'needs_identifier_verification' || result.status === 'needs_first_factor') {
+      } else if (result.status === 'needs_identifier_verification' || result.status === 'needs_first_factor' || result.status === 'needs_second_factor') {
         setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
       } else {
         console.warn('Status de login não-completo:', result.status);
