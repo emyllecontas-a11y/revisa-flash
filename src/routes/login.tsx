@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useSignIn } from '@clerk/react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useAppUser } from '@/contexts/UserContext';
 import { LogoIcon } from '@/components/LogoIcon';
 import { Eye, EyeOff, Loader2, Mail, ArrowLeft, AlertCircle } from 'lucide-react';
 
@@ -22,7 +23,15 @@ export default function LoginPage() {
   const isDev = import.meta.env.DEV;
 
   const { isLoaded: clerkIsLoaded, signIn, setActive } = useSignIn();
+  const { isSignedIn, isLoaded: userIsLoaded } = useAppUser();
   const [forcedLoaded, setForcedLoaded] = useState(false);
+
+  // Route guard: redirect authenticated users away from login page
+  useEffect(() => {
+    if (userIsLoaded && isSignedIn) {
+      navigate(redirectParam, { replace: true });
+    }
+  }, [userIsLoaded, isSignedIn, navigate, redirectParam]);
 
   useEffect(() => {
     const timer = setTimeout(() => setForcedLoaded(true), 3000);
@@ -37,6 +46,29 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        // Check if there's an existing Clerk session
+        const res = await fetch('/api/auth/session', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isSignedIn) {
+            navigate(redirectParam, { replace: true });
+            return;
+          }
+        }
+      } catch {
+        // Ignore errors, proceed to login form
+      } finally {
+        setCheckingSession(false);
+      }
+    };
+    checkSession();
+  }, [navigate, redirectParam]);
 
   // Estados para segundo fator (Device Trust / MFA)
   const [step, setStep] = useState<'password' | 'second_factor'>('password');
