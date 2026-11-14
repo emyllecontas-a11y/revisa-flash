@@ -1142,7 +1142,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     const collections = [
       'decks', 'flashcards', 'disciplines', 'topics', 'errors',
       'revisoes', 'study_records', 'user_settings',
-      'listas_pastas', 'listas', 'questoes_lista',
+      'listas_pastas', 'listas', 'listas_questoes', 'questoes_lista',
       'progresso_simulado',
       'simulados_pastas',
       'pdf_highlights', 'pdf_notes',
@@ -1181,6 +1181,29 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           .gte('updated_at', pullFrom);
         if (queryError) { console.error(`❌ Pull ${name}:`, queryError); houveErro = true; continue; }
         supabaseData = data || [];
+      } else if (name === 'listas_questoes') {
+        const listasCollection = database.collections.listas;
+        const userListas = await listasCollection.find({
+          selector: { user_id: userIdStr, isdeleted: false }
+        }).exec();
+        const listaIds = userListas.map(d => d.get('id'));
+
+        if (listaIds.length > 0) {
+          const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+            const chunks: T[][] = [];
+            for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+            return chunks;
+          };
+          const chunks = chunkArray(listaIds, 100);
+          for (const chunk of chunks) {
+            const { data, error: queryError } = await supabaseClient
+              .from('listas_questoes')
+              .select('*')
+              .in('lista_id', chunk);
+            if (queryError) { console.error(`❌ Pull ${name} (chunk):`, queryError); houveErro = true; continue; }
+            if (data) supabaseData.push(...data);
+          }
+        }
       } else {
         const { data, error: queryError } = await supabaseClient
           .from(name)
@@ -1223,6 +1246,9 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
             .rpc('salvar_user_settings_batch', { p_records: docsToPush });
           if (rpcError) { console.error(`❌ Push ${name} via RPC:`, rpcError); houveErro = true; }
           else console.log(`✅ Push ${name} via RPC: ${docsToPush.length}`);
+        } else if (name === 'listas_questoes') {
+          // listas_questoes não tem user_id; o push é feito no bloco manual dedicado mais abaixo
+          console.log(`⏭️ Push ${name} pulado no loop principal (feito no bloco dedicado)`);
         } else {
           try {
             const result = await pushWithConflictCheck(supabaseClient, name, collection, docsToPush);
