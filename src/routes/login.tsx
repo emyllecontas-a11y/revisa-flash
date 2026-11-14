@@ -68,32 +68,36 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // Debug: ver quais métodos existem no signIn
-      console.log('=== CLERK SIGNIN METHODS ===');
-      console.log('signIn keys:', Object.keys(signIn || {}));
-      console.log('signIn.prototype keys:', signIn ? Object.getOwnPropertyNames(Object.getPrototypeOf(signIn)) : 'no signIn');
-
-      const result = await signIn.create({
+      // Clerk v6 flow para formulários customizados:
+      // 1. create com identifier (inicia o sign-in)
+      // 2. password com a senha (fornece o fator)
+      // 3. finalize (completa e cria a sessão)
+      console.log('=== CLERK SIGNIN: Iniciando create ===');
+      const createResult = await signIn.create({
         identifier: email.trim(),
+      });
+      console.log('create result:', createResult);
+      console.log('createResult.status:', createResult?.status);
+
+      console.log('=== CLERK SIGNIN: Fornecendo password ===');
+      const passwordResult = await signIn.password({
         password,
       });
+      console.log('password result:', passwordResult);
+      console.log('passwordResult.status:', passwordResult?.status);
 
-      // Log completo do resultado para debug
-      console.log('=== CLERK SIGNIN CREATE RESULT ===');
-      console.log('result:', result);
-      console.log('result.status:', result.status);
-      console.log('result.createdSessionId:', result.createdSessionId);
-      console.log('result.firstFactorVerification:', result.firstFactorVerification);
-      console.log('result.secondFactorVerification:', result.secondFactorVerification);
-      console.log('result.identifierVerification:', result.identifierVerification);
-      console.log('result.supportedFirstFactors:', result.supportedFirstFactors);
-      console.log('result.supportedSecondFactors:', result.supportedSecondFactors);
+      console.log('=== CLERK SIGNIN: Finalizando ===');
+      const finalizeResult = await signIn.finalize();
+      console.log('finalize result:', finalizeResult);
+      console.log('finalizeResult.status:', finalizeResult?.status);
+      console.log('finalizeResult.createdSessionId:', finalizeResult?.createdSessionId);
+
+      const result = finalizeResult;
 
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
         navigate(redirectParam, { replace: true });
       } else if (result.status === 'needs_identifier_verification' || result.status === 'needs_first_factor') {
-        // Caso o Clerk v6 exija alguma verificação adicional configurada no painel
         setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
       } else {
         console.warn('Status de login não-completo:', result.status);
