@@ -68,10 +68,10 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // Clerk v6 flow: prepare first factor (password) then attempt sign in
-      console.log('=== CLERK SIGNIN: Preparando fator password ===');
-      const prepareResult = await signIn.prepareFirstFactor('password');
-      console.log('prepareFirstFactor result:', prepareResult);
+      // Debug: ver quais métodos existem no signIn
+      console.log('=== CLERK SIGNIN METHODS ===');
+      console.log('signIn keys:', Object.keys(signIn || {}));
+      console.log('signIn.prototype keys:', signIn ? Object.getOwnPropertyNames(Object.getPrototypeOf(signIn)) : 'no signIn');
 
       const result = await signIn.create({
         identifier: email.trim(),
