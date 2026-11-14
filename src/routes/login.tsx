@@ -68,11 +68,15 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // Clerk v6 headless flow para password:
-      // 1. create com identifier (inicia o sign-in)
-      // 2. prepareFirstFactor('password') prepara o fator
-      // 3. attemptFirstFactor({ password }) tenta autenticar
-      // 4. finalize() completa e cria a sessão
+      // Clerk v6 headless flow (métodos disponíveis nesta versão):
+      // 1. create({ identifier }) — inicia o sign-in
+      // 2. selectFirstFactor('password') — seleciona password como fator
+      // 3. password({ password }) — verifica a senha
+      // 4. finalize() — completa e cria a sessão (só funciona se status === 'complete')
+      //
+      // Após password(), o status pode ser 'needs_client_trust' (dispositivo novo/desconhecido).
+      // Nesse caso, o Clerk exige verificação de cliente (CAPTCHA/device trust) que não dá pra
+      // resolver no modo headless sem UI. A solução real é configurar o Clerk corretamente.
       console.log('=== CLERK SIGNIN: Iniciando create ===');
       const createResult = await signIn.create({
         identifier: email.trim(),
@@ -81,38 +85,53 @@ export default function LoginPage() {
       console.log('signIn.status after create:', signIn?.status);
       console.log('signIn.firstFactorVerification after create:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Preparando fator password ===');
-      const prepareFactorResult = await signIn.prepareFirstFactor('password');
-      console.log('prepareFirstFactor result:', prepareFactorResult);
-      console.log('signIn.status after prepareFirstFactor:', signIn?.status);
-      console.log('signIn.firstFactorVerification after prepareFirstFactor:', signIn?.firstFactorVerification);
+      console.log('=== CLERK SIGNIN: Selecionando fator password ===');
+      const selectFactorResult = await signIn.selectFirstFactor('password');
+      console.log('selectFirstFactor result:', selectFactorResult);
+      console.log('signIn.status after selectFirstFactor:', signIn?.status);
+      console.log('signIn.firstFactorVerification after selectFirstFactor:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Tentando primeiro fator (password) ===');
-      const attemptFactorResult = await signIn.attemptFirstFactor({
+      console.log('=== CLERK SIGNIN: Verificando password ===');
+      const passwordResult = await signIn.password({
         password,
       });
-      console.log('attemptFirstFactor result:', attemptFactorResult);
-      console.log('signIn.status after attemptFirstFactor:', signIn?.status);
-      console.log('signIn.firstFactorVerification after attemptFirstFactor:', signIn?.firstFactorVerification);
+      console.log('password result:', passwordResult);
+      console.log('signIn.status after password:', signIn?.status);
+      console.log('signIn.firstFactorVerification after password:', signIn?.firstFactorVerification);
 
-      console.log('=== CLERK SIGNIN: Finalizando ===');
-      const finalizeResult = await signIn.finalize();
-      console.log('finalize result:', finalizeResult);
-      console.log('finalizeResult.status:', finalizeResult?.status);
-      console.log('finalizeResult.createdSessionId:', finalizeResult?.createdSessionId);
+      // Se status for 'complete', finaliza direto
+      if (signIn?.status === 'complete') {
+        console.log('=== CLERK SIGNIN: Finalizando (status complete) ===');
+        const finalizeResult = await signIn.finalize();
+        console.log('finalize result:', finalizeResult);
+        console.log('finalizeResult.status:', finalizeResult?.status);
+        console.log('finalizeResult.createdSessionId:', finalizeResult?.createdSessionId);
 
-      const result = finalizeResult;
-
-      if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId });
-        navigate(redirectParam, { replace: true });
-      } else if (result.status === 'needs_identifier_verification' || result.status === 'needs_first_factor' || result.status === 'needs_second_factor') {
-        setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
-      } else {
-        console.warn('Status de login não-completo:', result.status);
-        console.warn('signIn completo para debug:', JSON.stringify(signIn, null, 2));
-        setError(`Não foi possível concluir o login (Status: ${result.status || 'desconhecido'}).`);
+        if (finalizeResult.status === 'complete') {
+          await setActive({ session: finalizeResult.createdSessionId });
+          navigate(redirectParam, { replace: true });
+          return;
+        }
       }
+
+      // Status 'needs_client_trust' = dispositivo não confiável (comum em Development instance)
+      // No modo headless, não dá pra resolver CAPTCHA/device trust sem UI do Clerk.
+      // A causa raiz geralmente é configuração no painel: Email/Password desabilitado ou domínio não autorizado.
+      if (signIn?.status === 'needs_client_trust') {
+        console.warn('Status needs_client_trust — dispositivo não confiável para o Clerk.');
+        console.warn('Verifique no painel do Clerk: User & Authentication → Email, Phone, Username → Email + Password habilitados.');
+        console.warn('Domains → una-vox.vercel.app e localhost autorizados.');
+        setError(
+          'Login bloqueado: o Clerk não reconhece este dispositivo. ' +
+          'Use "Continuar com Google" ou verifique a configuração no painel do Clerk (Email/Password + domínios autorizados).'
+        );
+        return;
+      }
+
+      // Outros status não-completos
+      console.warn('Status de login não-completo:', signIn?.status);
+      console.warn('signIn completo para debug:', JSON.stringify(signIn, null, 2));
+      setError(`Não foi possível concluir o login (Status: ${signIn?.status || 'desconhecido'}).`);
     } catch (err: any) {
       console.error('=== ERRO CLERK LOGIN ===');
       console.error('Erro completo:', err);
