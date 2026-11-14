@@ -1,5 +1,5 @@
 // public/sw.js
-const CACHE_NAME = 'revisaflash-v15';
+const CACHE_NAME = 'revisaflash-v16';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
