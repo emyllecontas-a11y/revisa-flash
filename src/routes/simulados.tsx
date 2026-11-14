@@ -1330,7 +1330,7 @@ function FixacaoTab() {
         // Busca disciplinas do usuário
         const discDocs = await db.disciplines.find({ selector: { user_id: user.id, isDeleted: { $ne: true } } }).exec();
         // Busca pastas
-        const pastaDocs = await db.folders.find({ selector: { user_id: user.id } }).exec();
+        const pastaDocs = await db.listas_pastas.find({ selector: { user_id: user.id, isdeleted: false } }).exec();
         // Busca listas do usuário (que é o que a Fixação usa)
         const listaDocs = await db.listas.find({ selector: { user_id: user.id, isdeleted: false } }).exec();
         // Busca resultados para calcular taxa de acerto
