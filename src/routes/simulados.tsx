@@ -21,7 +21,7 @@ import {
   Layers, Clock, CheckCircle2, ListChecks, Play, RotateCcw, RefreshCcw, Upload, FileText,
   X, Loader2, Trash2, Eye, TrendingUp, Target, Award, AlertCircle,
   BarChart3, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, History, Search, FileStack, Share2,
-  Folder, FolderPlus, FolderInput
+  Folder, FolderPlus, FolderInput, Image
 } from "lucide-react";
 import type { Simulado } from "@/lib/simulados-types";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -48,12 +48,12 @@ export default function SimuladosPage() {
 
   // A aba ativa é lida/escrita na URL (?tab=listas). Sem parâmetro → "simulados".
   const [searchParams, setSearchParams] = useSearchParams();
-  const mainTab: 'simulados' | 'listas' | 'banco' =
+  const mainTab: 'banco' | 'listas' | 'simulados' =
     searchParams.get('tab') === 'listas' ? 'listas'
-    : searchParams.get('tab') === 'banco' ? 'banco'
-    : 'simulados';
-  const trocarTab = (nova: 'simulados' | 'listas' | 'banco') => {
-    if (nova === 'simulados') setSearchParams({}, { replace: true });
+    : searchParams.get('tab') === 'simulados' ? 'simulados'
+    : 'banco';
+  const trocarTab = (nova: 'banco' | 'listas' | 'simulados') => {
+    if (nova === 'banco') setSearchParams({}, { replace: true });
     else setSearchParams({ tab: nova }, { replace: true });
   };
 
@@ -480,14 +480,14 @@ export default function SimuladosPage() {
     <AppShell breadcrumb="Simulados" title="Simulados">
       <div className="mb-6 flex gap-1 border-b border-border">
         <button
-          onClick={() => trocarTab('simulados')}
+          onClick={() => trocarTab('banco')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-            mainTab === 'simulados'
+            mainTab === 'banco'
               ? 'border-primary text-primary'
               : 'border-transparent text-foreground/50 hover:text-foreground'
           }`}
         >
-          Simulados
+          Banco de Questões
         </button>
         <button
           onClick={() => trocarTab('listas')}
@@ -500,18 +500,22 @@ export default function SimuladosPage() {
           Fixação
         </button>
         <button
-          onClick={() => trocarTab('banco')}
+          onClick={() => trocarTab('simulados')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-            mainTab === 'banco'
+            mainTab === 'simulados'
               ? 'border-primary text-primary'
               : 'border-transparent text-foreground/50 hover:text-foreground'
           }`}
         >
-          Banco de Questões
+          Simulados
         </button>
       </div>
 
-      {mainTab === 'simulados' ? (
+      {mainTab === 'banco' ? (
+        <BancoQuestoesTab />
+      ) : mainTab === 'listas' ? (
+        <FixacaoTab />
+      ) : (
         loading ? (
           <div className="flex items-center justify-center min-h-[400px]">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -751,11 +755,7 @@ export default function SimuladosPage() {
             )}
           </>
         )
-) : mainTab === 'listas' ? (
-  <FixacaoTab />
-) : (
-  <BancoQuestoesTab />
-)}
+      )}
 
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
@@ -1302,10 +1302,25 @@ function HistoricoCardMini({ resultado, onVerResultado, onExcluir }: { resultado
 
 function FixacaoTab() {
   const { user } = useAppUser();
+  const toast = useToast();
   const [disciplinas, setDisciplinas] = useState<{ id: string; nome: string; listCount: number; accuracy: number | null }[]>([]);
   const [loading, setLoading] = useState(true);
   // Disciplina escolhida no caderno: ao abrir, mostramos as listas dela (ListasTab já entra nessa disciplina).
   const [disciplinaAbertaId, setDisciplinaAbertaId] = useState<string | null>(null);
+  // Import modal state
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importDisciplineId, setImportDisciplineId] = useState<string>("");
+  const [importFolderId, setImportFolderId] = useState<string | null>(null);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importImages, setImportImages] = useState<File[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importJobs, setImportJobs] = useState<{ file: File; status: "pending" | "importing" | "success" | "error"; error?: string; titulo: string }[]>([]);
+  const [pdfFileParaRevisar, setPdfFileParaRevisar] = useState<File | null>(null);
+
+  // Load disciplinas and folders for import modal
+  const [allDisciplines, setAllDisciplines] = useState<{ id: string; name: string }[]>([]);
+  const [allFolders, setAllFolders] = useState<{ id: string; name: string; discipline_id: string }[]>([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1314,6 +1329,8 @@ function FixacaoTab() {
         const db = await getDb();
         // Busca disciplinas do usuário
         const discDocs = await db.disciplines.find({ selector: { user_id: user.id, isDeleted: { $ne: true } } }).exec();
+        // Busca pastas
+        const pastaDocs = await db.folders.find({ selector: { user_id: user.id } }).exec();
         // Busca listas do usuário (que é o que a Fixação usa)
         const listaDocs = await db.listas.find({ selector: { user_id: user.id, isdeleted: false } }).exec();
         // Busca resultados para calcular taxa de acerto
@@ -1349,6 +1366,8 @@ function FixacaoTab() {
         }).filter(d => d.listCount > 0); // Só mostra quem tem lista
 
         setDisciplinas(result);
+        setAllDisciplines(discDocs.map((d: any) => ({ id: d.get('id'), name: d.get('name') })));
+        setAllFolders(pastaDocs.map((p: any) => ({ id: p.get('id'), name: p.get('name'), discipline_id: p.get('discipline_id') })));
       } catch (e) {
         console.error('Erro ao carregar fixação:', e);
       } finally {
@@ -1356,6 +1375,122 @@ function FixacaoTab() {
       }
     })();
   }, [user?.id]);
+
+  // Reset discipline/folder when discipline changes
+  const handleImportDisciplineChange = (novoId: string) => {
+    setImportDisciplineId(novoId);
+    setImportFolderId(null);
+  };
+
+  const foldersForSelectedDiscipline = allFolders.filter(f => f.discipline_id === importDisciplineId);
+
+  const handleImportFiles = (files: File[]) => {
+    setImportError(null);
+    const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
+    if (pdfs.length > 0) {
+      if (pdfs.length > 1) { setImportError("Selecione apenas um PDF por vez."); return; }
+      if (files.length > 1) { setImportError("Não misture PDF com JSON na mesma importação."); return; }
+      setPdfFileParaRevisar(pdfs[0]);
+      setIsImportModalOpen(false);
+      return;
+    }
+    const novos = files.filter(f => /\.json$/i.test(f.name)).map(f => ({
+      file: f, status: "pending" as const, titulo: f.name.replace(/\.json$/i, "")
+    }));
+    setImportJobs(prev => [...prev, ...novos]);
+    setImportFiles([]);
+  };
+
+  const handleRemoveImportJob = (idx: number) => {
+    if (importing) return;
+    setImportJobs(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleImportLists = async () => {
+    setImportError(null);
+    if (importJobs.length === 0) { setImportError("Selecione pelo menos um arquivo JSON"); return; }
+    if (!importDisciplineId) { setImportError("Selecione uma disciplina"); return; }
+    if (!user?.id) { setImportError("Usuário não autenticado"); return; }
+
+    setImporting(true);
+    let sucessos = 0, falhas = 0;
+
+    // ImportarLista function from listaService
+    const { importarLista } = await import("@/services/listaService");
+
+    for (let i = 0; i < importJobs.length; i++) {
+      const job = importJobs[i];
+      if (job.status === "success") continue;
+
+      setImportJobs(prev => prev.map((j, idx) => idx === i ? { ...j, status: "importing" } : j));
+
+      try {
+        const text = await job.file.text();
+        const json = JSON.parse(text);
+        const result = await importarLista(json, user.id, importDisciplineId, importImages, importFolderId);
+
+        if (result.success) {
+          sucessos++;
+          setImportJobs(prev => prev.map((j, idx) => idx === i ? { ...j, status: "success", titulo: json.titulo || j.titulo } : j));
+        } else {
+          falhas++;
+          setImportJobs(prev => prev.map((j, idx) => idx === i ? { ...j, status: "error", error: result.error } : j));
+        }
+      } catch (err: any) {
+        falhas++;
+        setImportJobs(prev => prev.map((j, idx) => idx === i ? { ...j, status: "error", error: err.message || "Erro ao processar" } : j));
+      }
+    }
+
+    setImporting(false);
+
+    if (sucessos > 0 && falhas === 0) toast.success(`${sucessos} ${sucessos === 1 ? "lista importada" : "listas importadas"}`);
+    else if (sucessos > 0 && falhas > 0) toast.warning(`${sucessos} importadas, ${falhas} com erro`);
+    else toast.error("Nenhuma lista foi importada");
+
+    if (sucessos > 0 && falhas === 0) {
+      setTimeout(async () => {
+        setIsImportModalOpen(false);
+        setImportJobs([]);
+        setImportImages([]);
+        // Recarregar dados
+        const db = await getDb();
+        const discDocs = await db.disciplines.find({ selector: { user_id: user!.id, isDeleted: { $ne: true } } }).exec();
+        const listaDocs = await db.listas.find({ selector: { user_id: user!.id, isdeleted: false } }).exec();
+        const resultadoDocs = await db.resultados_lista.find({ selector: { user_id: user!.id, isdeleted: false } }).exec();
+
+        const resultadoPorLista = new Map<string, any>();
+        resultadoDocs.forEach((d: any) => resultadoPorLista.set(d.get('lista_id'), d.toJSON()));
+
+        const disciplinasMap = new Map<string, { id: string; nome: string; listas: any[] }>();
+        discDocs.forEach((d: any) => {
+          disciplinasMap.set(d.get('id'), { id: d.get('id'), nome: d.get('name'), listas: [] });
+        });
+
+        listaDocs.forEach((l: any) => {
+          const j = l.toJSON();
+          const d = disciplinasMap.get(j.discipline_id);
+          if (d) d.listas.push(j);
+        });
+
+        const result = Array.from(disciplinasMap.values()).map(d => {
+          let totalQ = 0, totalA = 0;
+          d.listas.forEach(l => {
+            const r = resultadoPorLista.get(l.id);
+            if (r) { totalQ += r.total_questoes || 0; totalA += r.acertos || 0; }
+          });
+          return {
+            id: d.id,
+            nome: d.nome,
+            listCount: d.listas.length,
+            accuracy: totalQ > 0 ? Math.round((totalA / totalQ) * 100) : null,
+          };
+        }).filter(d => d.listCount > 0);
+
+        setDisciplinas(result);
+      }, 1200);
+    }
+  };
 
   if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
@@ -1374,22 +1509,209 @@ function FixacaoTab() {
         <div className="text-center">
           <p className="text-sm text-foreground/40">Você ainda não tem listas de fixação.</p>
           <p className="mt-1 text-xs text-foreground/30">Crie listas em Conteúdo → Tópicos para que elas apareçam aqui.</p>
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+          >
+            <Upload className="h-3.5 w-3.5" /> Importar lista
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <BlocoGrid>
-      {disciplinas.map((d) => (
-        <BlocoCard
-          key={d.id}
-          title={d.nome}
-          listCount={d.listCount}
-          accuracy={d.accuracy}
-          onOpen={() => setDisciplinaAbertaId(d.id)}
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-bold">Fixação</h2>
+        <button
+          onClick={() => setIsImportModalOpen(true)}
+          className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+        >
+          <Upload className="h-4 w-4" /> Importar lista
+        </button>
+      </div>
+
+      <BlocoGrid>
+        {disciplinas.map((d) => (
+          <BlocoCard
+            key={d.id}
+            title={d.nome}
+            listCount={d.listCount}
+            accuracy={d.accuracy}
+            onOpen={() => setDisciplinaAbertaId(d.id)}
+          />
+        ))}
+      </BlocoGrid>
+
+      {isImportModalOpen && user?.id && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 max-h-[90vh] overflow-y-auto shadow-elevated">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-foreground">Importar listas</h3>
+              <button onClick={() => { setIsImportModalOpen(false); setImportError(null); setImportJobs([]); setImportImages([]); }} className="text-foreground/50 hover:text-foreground transition-colors">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {importJobs.length > 0 && importJobs.every(j => j.status === "success") ? (
+              <div className="py-6 text-center">
+                <CheckCircle2 className="mx-auto h-12 w-12 text-primary" />
+                <p className="mt-3 text-sm font-medium text-foreground">Todas as listas foram importadas!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-foreground/70">Disciplina *</label>
+                  {allDisciplines.length === 0 ? (
+                    <div className="mt-1 rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent">
+                      Você ainda não tem disciplinas cadastradas. Crie uma antes de importar listas.
+                    </div>
+                  ) : (
+                    <select
+                      value={importDisciplineId}
+                      onChange={(e) => handleImportDisciplineChange(e.target.value)}
+                      disabled={importing}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1 disabled:opacity-60"
+                    >
+                      <option value="">Selecione uma disciplina</option>
+                      {allDisciplines.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground/70">Pasta / Assunto (opcional)</label>
+                  <select
+                    value={importFolderId || ""}
+                    onChange={(e) => setImportFolderId(e.target.value || null)}
+                    disabled={importing}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1 disabled:opacity-60"
+                  >
+                    <option value="">Sem pasta (direto na disciplina)</option>
+                    {foldersForSelectedDiscipline.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-foreground/40">A lista será salva dentro da pasta/assunto escolhida.</p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground/70">
+                    Arquivos (JSON ou PDF) * <span className="text-foreground/40">(pode selecionar vários JSONs)</span>
+                  </label>
+                  <input
+                    type="file"
+                    accept=".json,.pdf"
+                    multiple
+                    onChange={(e) => { handleImportFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
+                    disabled={importing}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
+                  />
+                  <p className="mt-1 text-xs text-foreground/40">
+                    Aceita <b>JSON</b> (lista pronta) ou <b>PDF</b> (para revisar antes de salvar).
+                  </p>
+
+                  {importJobs.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-border bg-surface/40 p-2">
+                      <p className="text-[11px] font-medium text-foreground/60 mb-2">
+                        {importJobs.length} {importJobs.length === 1 ? "arquivo na fila" : "arquivos na fila"}:
+                      </p>
+                      <ul className="space-y-1.5">
+                        {importJobs.map((j, i) => (
+                          <li key={i} className="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5 text-[11px]">
+                            {j.status === "pending" && <Clock className="h-3.5 w-3.5 shrink-0 text-foreground/40" />}
+                            {j.status === "importing" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+                            {j.status === "success" && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                            {j.status === "error" && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-accent" />}
+                            <span className="truncate font-medium text-foreground/80">{j.titulo}</span>
+                            {j.error && <span className="truncate text-accent/80" title={j.error}>— {j.error}</span>}
+                            {j.status === "pending" && !importing && (
+                              <button
+                                onClick={() => handleRemoveImportJob(i)}
+                                className="ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-foreground/40 hover:bg-white/5 hover:text-accent"
+                                title="Remover da fila"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground/70 flex items-center gap-1.5">
+                    <Image className="h-3.5 w-3.5" /> Imagens (opcional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={(e) => { setImportImages(Array.from(e.target.files || [])); setImportError(null); }}
+                    disabled={importing}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary mt-1"
+                  />
+                  <p className="mt-1 text-xs text-foreground/40">
+                    Se algum JSON tiver o campo <code>imagem: "arquivo.jpg"</code>, selecione aqui as imagens correspondentes.
+                  </p>
+
+                  {importImages.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-border bg-surface/40 p-2">
+                      <p className="text-[11px] font-medium text-foreground/60 mb-1">
+                        {importImages.length} {importImages.length === 1 ? "imagem selecionada" : "imagens selecionadas"}:
+                      </p>
+                      <ul className="space-y-0.5">
+                        {importImages.map((f, i) => <li key={i} className="text-[11px] text-foreground/50 truncate">• {f.name}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                {importError && (
+                  <div className="rounded-lg border border-accent/20 bg-accent/10 p-3 text-xs text-accent whitespace-pre-wrap">{importError}</div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => { setIsImportModalOpen(false); setImportError(null); setImportJobs([]); setImportImages([]); }}
+                    disabled={importing}
+                    className="flex-1 rounded-full border border-border bg-background py-2.5 text-sm font-medium text-foreground/65 hover:bg-surface-2 transition-colors disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleImportLists}
+                    disabled={importing || allDisciplines.length === 0 || importJobs.length === 0}
+                    className="flex-1 rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  >
+                    {importing ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Importando…
+                      </span>
+                    ) : (
+                      `Importar ${importJobs.length > 0 ? `(${importJobs.length})` : ""}`
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {pdfFileParaRevisar && user?.id && (
+        <RevisarImportacaoPdfModal
+          file={pdfFileParaRevisar}
+          userId={user.id}
+          modo="lista"
+          disciplinaInicial={importDisciplineId}
+          pastaInicial={importFolderId}
+          pastasDisponiveis={allFolders}
+          onClose={() => setPdfFileParaRevisar(null)}
+          onSuccess={() => { setPdfFileParaRevisar(null); }}
         />
-      ))}
-    </BlocoGrid>
+      )}
+    </>
   );
 }
