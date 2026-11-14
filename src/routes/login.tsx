@@ -50,6 +50,7 @@ export default function LoginPage() {
       });
     } catch (err: any) {
       console.error('Erro ao entrar com Google:', err);
+      console.error('Clerk Google error details:', JSON.stringify(err, null, 2));
       setError(err?.errors?.[0]?.message || 'Não foi possível entrar com Google.');
       setGoogleLoading(false);
     }
@@ -84,6 +85,7 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Erro no login do Clerk:', err);
+      console.error('Clerk error details:', JSON.stringify(err, null, 2));
       const clerkError = err?.errors?.[0];
       setError(clerkError?.longMessage || clerkError?.message || 'E-mail ou senha incorretos.');
     } finally {
