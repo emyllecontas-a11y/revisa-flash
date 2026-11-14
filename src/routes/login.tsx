@@ -104,6 +104,31 @@ export default function LoginPage() {
       if (err?.cause) {
         console.error('Clerk cause:', err.cause);
       }
+
+      // Verifica erros específicos do Clerk v6
+      const clerkErrors = err?.errors;
+      if (Array.isArray(clerkErrors) && clerkErrors.length > 0) {
+        const firstError = clerkErrors[0];
+        console.error('Clerk error code:', firstError?.code);
+        console.error('Clerk error meta:', firstError?.meta);
+        console.error('Clerk error longMessage:', firstError?.longMessage);
+
+        // Códigos comuns que indicam configuração faltando
+        const configCodes = [
+          'form_password_not_enabled',
+          'form_identifier_not_enabled',
+          'form_identifier_verification_required',
+          'form_email_not_verified',
+        ];
+
+        if (configCodes.includes(firstError?.code)) {
+          const msg = `Configuração necessária no painel do Clerk: ${firstError.longMessage || firstError.message}`;
+          console.error('⚠️ PROBLEMA DE CONFIGURAÇÃO:', msg);
+          setError(msg);
+          return;
+        }
+      }
+
       const clerkError = err?.errors?.[0];
       const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'E-mail ou senha incorretos.';
       console.error('Mensagem final para usuário:', errorMsg);
