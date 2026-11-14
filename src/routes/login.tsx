@@ -94,9 +94,12 @@ export default function LoginPage() {
       // Try to get response body if it's a fetch error
       if (err?.response) {
         console.error('Clerk response status:', err.response.status);
-        err.response.text().then(text => {
-          console.error('Clerk response body:', text);
-        }).catch(() => {});
+        try {
+          const responseText = await err.response.text();
+          console.error('Clerk response body:', responseText);
+        } catch (e) {
+          console.error('Falha ao ler response body:', e);
+        }
       }
       if (err?.cause) {
         console.error('Clerk cause:', err.cause);
