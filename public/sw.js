@@ -1,5 +1,5 @@
 // public/sw.js
-const CACHE_NAME = 'revisaflash-v14';
+const CACHE_NAME = 'revisaflash-v15';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -10,6 +10,28 @@ const STATIC_ASSETS = [
 ];
 
 const EXCLUDED_HOSTS = ['clerk', 'supabase', 'chrome-extension'];
+
+// Rotas SPA que devem SEMPRE vir da rede (não são arquivos estáticos)
+const SPA_ROUTES = [
+  '/login',
+  '/cadastro',
+  '/reset-senha',
+  '/sso-callback',
+  '/landing',
+  '/flashcards',
+  '/erros',
+  '/simulados',
+  '/listas',
+  '/conteudo',
+  '/configuracoes',
+  '/calendario',
+  '/sessoes',
+  '/aulas',
+  '/comunidade',
+  '/teste-pdf',
+  '/teste-parser',
+  '/pdf',
+];
 
 function isExcluded(url, request) {
   if (request.method !== 'GET') return true;
@@ -22,11 +44,21 @@ function isExcluded(url, request) {
 // se a rede falhar. Os arquivos em /assets/ têm hash no nome e podem ficar
 // em cache-first, porque o nome muda quando o conteúdo muda.
 function isDocument(request, url) {
-  return (
-    request.mode === 'navigate' ||
-    url.pathname === '/' ||
-    url.pathname === '/index.html'
-  );
+  // Navegação do browser (clicar link, digitar URL)
+  if (request.mode === 'navigate') return true;
+
+  // Página inicial
+  if (url.pathname === '/' || url.pathname === '/index.html') return true;
+
+  // Rotas SPA conhecidas - devem vir da rede para o index.html
+  // (o Vercel faz rewrite para /index.html)
+  for (const route of SPA_ROUTES) {
+    if (url.pathname === route || url.pathname.startsWith(route + '/')) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function networkFirst(request) {

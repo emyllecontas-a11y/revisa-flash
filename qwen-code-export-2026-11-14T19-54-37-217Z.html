@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'nonce-G-Id9DCWaWUD2risqOfz2Q'; style-src-elem 'nonce-G-Id9DCWaWUD2risqOfz2Q'; style-src-attr 'unsafe-inline'; img-src data:; connect-src 'none'; object-src 'none'; frame-src 'none'; media-src 'none'; font-src data:; base-uri 'none'; form-action 'none'"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20141.38%20140%22%3E%0A%20%20%3Cpath%0A%20%20%20%20fill%3D%22%23000000%22%0A%20%20%20%20d%3D%22m140.93%2085-16.35-28.33-1.93-3.34%208.66-15a3.323%203.323%200%200%200%200-3.34l-9.62-16.67c-.3-.51-.72-.93-1.22-1.22s-1.07-.45-1.67-.45H82.23l-8.66-15a3.33%203.33%200%200%200-2.89-1.67H51.43c-.59%200-1.17.16-1.66.45-.5.29-.92.71-1.22%201.22L32.19%2029.98l-1.92%203.33H12.96c-.59%200-1.17.16-1.66.45-.5.29-.93.71-1.22%201.22L.45%2051.66a3.323%203.323%200%200%200%200%203.34l18.28%2031.67-8.66%2015a3.32%203.32%200%200%200%200%203.34l9.62%2016.67c.3.51.72.93%201.22%201.22s1.07.45%201.67.45h36.56l8.66%2015a3.35%203.35%200%200%200%202.89%201.67h19.25a3.34%203.34%200%200%200%202.89-1.67l18.28-31.67h17.32c.6%200%201.17-.16%201.67-.45s.92-.71%201.22-1.22l9.62-16.67a3.323%203.323%200%200%200%200-3.34ZM51.44%203.33%2061.07%2020l-9.63%2016.66h76.98l-9.62%2016.66H45.67l-11.54-20zM57.21%20120H22.58l9.63-16.67h19.25l-38.5-66.67h19.25l9.62%2016.67L68.78%20100l-11.55%2020Zm61.59-33.34-9.62-16.67-38.49%2066.67-9.63-16.67%209.63-16.66%2026.94-46.67h23.1l17.32%2030z%22%0A%20%20%2F%3E%0A%3C%2Fsvg%3E"
+    />
+    <title>Qwen Code Chat Export</title>
+    <style nonce="G-Id9DCWaWUD2risqOfz2Q">
+      :root{color-scheme:light;--document-bg: #ffffff;--document-panel-bg: #f8fafc;--document-text: #111827;--document-muted: #6b7280;--document-border: #d1d5db;--document-button-bg: #ffffff}:root.dark{color-scheme:dark;--document-bg: #09090b;--document-panel-bg: #18181b;--document-text: #f4f4f5;--document-muted: #a1a1aa;--document-border: #3f3f46;--document-button-bg: #27272a}html,body{margin:0;min-height:100%;background:var(--document-bg);color:var(--document-text)}.document-shell{min-height:100vh}.document-header{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:24px;width:min(1320px,100%);margin:0 auto;padding:24px 20px 8px;font-family:ui-sans-serif,system-ui,sans-serif}.document-header h1{margin:0;font-size:20px}.document-header p{margin:6px 0 0;color:var(--document-muted);font-size:12px}.document-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-left:auto}.document-actions button{border:1px solid var(--document-border);border-radius:8px;padding:6px 10px;background:var(--document-button-bg);color:var(--document-text);font:inherit;font-size:12px;cursor:pointer}.document-actions button:disabled{cursor:default;opacity:.45}.document-content{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;width:min(1320px,100%);margin:0 auto;padding:0 20px 24px}.document-transcript{min-width:0}.document-metadata{align-self:start;position:sticky;top:16px;display:flex;flex-direction:column;gap:18px;border:1px solid var(--document-border);border-radius:12px;padding:16px;background:var(--document-panel-bg);font-family:ui-sans-serif,system-ui,sans-serif}.document-metadata section,.document-metadata dl{display:flex;flex-direction:column;gap:8px;margin:0}.document-metadata h2{margin:0;border-bottom:1px solid var(--document-border);padding-bottom:5px;color:var(--document-muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}.document-metadata-item{min-width:0}.document-metadata-item dt{color:var(--document-muted);font-size:10px}.document-metadata-item dd{margin:2px 0 0;overflow-wrap:anywhere;font-size:12px}.document-warning{border:1px solid #f59e0b;border-radius:999px;padding:4px 10px;color:#92400e;font-size:12px;white-space:nowrap}.document-error{box-sizing:border-box;width:min(640px,calc(100% - 40px));margin:80px auto;border:1px solid var(--document-border);border-radius:12px;padding:24px;font-family:ui-sans-serif,system-ui,sans-serif}.document-error h1{margin:0;font-size:20px}.document-error p{margin:8px 0 0;color:var(--document-muted)}@media(max-width:800px){.document-header{align-items:flex-start;flex-wrap:wrap}.document-actions{width:100%;justify-content:flex-start;margin-left:0}.document-content{grid-template-columns:minmax(0,1fr)}.document-metadata{position:static;order:-1}}@media print{.document-header{position:static}.document-actions{display:none}.document-content{display:block}.document-metadata{position:static;margin-bottom:16px;break-inside:avoid}}
+    </style>
+    <!--
+      Latches a stylesheet failure before the <link> is parsed: Chromium
+      parser-blocks the body script on a pending stylesheet, so a CSS failure
+      that settles first would otherwise reach no listener. Records only —
+      document.body does not exist yet here, so the body script acts on it.
+    -->
+    <script nonce="G-Id9DCWaWUD2risqOfz2Q">
+      window.addEventListener(
+        'error',
+        function (event) {
+          if (event.target && event.target.id === 'transcript-stylesheet') {
+            window.__transcriptStyleFailed = true;
+          }
+        },
+        true,
+      );
+    </script>
+    <link
+      rel="stylesheet"
+      nonce="G-Id9DCWaWUD2risqOfz2Q"
+      id="transcript-stylesheet"
+      integrity="sha384-7RXGj9bXNYnNYLUt1fdY2zh8540NMiZuFs2RHmR3iyKtU7jsTqfweA5CKZ5WrlxG"
+      crossorigin="anonymous"
+      href="https://unpkg.com/@qwen-code/qwen-code@0.27.3/export-transcript-document.css"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script
+      nonce="G-Id9DCWaWUD2risqOfz2Q"
+      id="transcript-document"
+      type="application/json"
+    >{"schemaVersion":1,"rendererVersion":"0.27.3+5d54c542e1e245a0","blocks":[{"id":"block-0","kind":"user","clientReceivedAt":0,"createdAt":0,"updatedAt":0,"text":"qwen --resume 05a6cf0d-99ef-4803-8a6d-c0a1c1f1996e","streaming":false},{"id":"block-1","kind":"thought","clientReceivedAt":0,"createdAt":0,"updatedAt":0,"text":"The user is running `qwen --resume` with a session ID. This appears to be resuming a previous Qwen Code session. Let me check what's in the project directory and understand the current state.\n\nThe project directory is `[home]\\revisa-flash` and based on the git log, this is the \"Una Vox\" project. The recent commits show work on:\n1. Fixing listas_questoes sync from Supabase\n2. Fixing folder search in Fixação tab\n3. Reordering tabs (Banco de Questões → Fixação → Simulados)\n4. Removing progresso_lista from auto sync\n5. Fixing questoes_lista sync and navigation in Fixação tab\n\nLet me first explore the project structure to understand what we're working with.","streaming":false,"collapsed":true},{"id":"block-2","kind":"assistant","clientReceivedAt":0,"createdAt":0,"updatedAt":0,"text":"I'll explore the project structure to understand the current state and context.\n","streaming":false,"usage":{"inputTokens":16128,"outputTokens":230,"cachedTokens":13152}},{"id":"block-3","kind":"tool","clientReceivedAt":0,"createdAt":0,"updatedAt":0,"toolCallId":"tool-call-4","title":"glob","status":"completed","preview":{"kind":"search","query":"**/*"},"resultPreview":{"kind":"text","text":"Found 302 file(s) matching \"**/*\" within [home]\\revisa-flash, sorted by modification time (newest first):\n---\n[home]\\revisa-flash\\src\\lib\\db.ts\n[home]\\revisa-flash\\src\\routes\\simulados.tsx\n[home]\\revisa-flash\\qwen-code-export-2026-11-14T17-25-36-323Z.html\n[home]\\revisa-flash\\src\\components\\ListasTab.tsx\n[home]\\revisa-flash\\src\\services\\queueService.ts\n[home]\\revisa-flash\\src\\components\\app-shell.tsx\n[home]\\revisa-flash\\src\\components\\aulas\\AulasPage.tsx\n[home]\\revisa-flash\\src\\routes\\aulas.tsx\n[home]\\revisa-flash\\.gitignore\n[home]\\revisa-flash\\.prettierignore\n[home]\\revisa-flash\\.prettierrc\n[home]\\revisa-flash\\.vscode\\extensions.json\n[home]\\revisa-flash\\}\n[home]\\revisa-flash\\}$secure\n[home]\\revisa-flash\\$bstr\n[home]\\revisa-flash\\$key\n[home]\\revisa-flash\\$resp\n[home]\\revisa-flash\\$secure\n[home]\\revisa-flash\\$url\n[home]\\revisa-flash\\AGENTS.md\n[home]\\revisa-flash\\api\\webhook.ts\n[home]\\revisa-flash\\assets\\index-CTrRgWrh.js\n[home]\\revisa-flash\\assets\\index-CvN2O_ef.js\n[home]\\revisa-flash\\assets\\index-Cyd7IMk_.css\n[home]\\revisa-flash\\assets\\index-Dezn_h7o.js\n[home]\\revisa-flash\\assets\\styles-Cl3eCP1k.css\n[home]\\revisa-flash\\catch\n[home]\\revisa-flash\\components.json\n[home]\\revisa-flash\\displayName\n[home]\\revisa-flash\\e\n[home]\\revisa-flash\\eslint.config.js\n[home]\\revisa-flash\\Format-Table\n[home]\\revisa-flash\\index.html\n[home]\\revisa-flash\\inputTokenLimit\n[home]\\revisa-flash\\n\n[home]\\revisa-flash\\outputTokenLimit\n[home]\\revisa-flash\\package-lock.json\n[home]\\revisa-flash\\package.json\n[home]\\revisa-flash\\public\\icons\\app-icon-1024.png\n[home]\\revisa-flash\\public\\icons\\app-icon-192.png\n[home]\\revisa-flash\\public\\icons\\app-icon-512.png\n[home]\\revisa-flash\\public\\icons\\favicon-32.png\n[home]\\revisa-flash\\public\\icons\\favicon-64.png\n[home]\\revisa-flash\\public\\manifest.json\n[home]\\revisa-flash\\public\\Modelo_Plano_Estudos.xlsx\n[home]\\revisa-flash\\public\\splash\\splash-1284x2778.png\n[home]\\revisa-flash\\public\\sw.js\n[home]\\revisa-flash\\Select-Object\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-01.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-02.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-03.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-04.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-05.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-06.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-07.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-08.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-09.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-10.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-11.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\avatar-12.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-boas-vindas.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-carregando.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-comemorando.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-confusa.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-descanso.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-dica.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-notificacao.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\lumi-triste-vazio.svg\n[home]\\revisa-flash\\src\\assets\\avatars\\mascote-base.svg\n[home]\\revisa-flash\\src\\assets\\unavox-logo-completa.png\n[home]\\revisa-flash\\src\\assets\\unavox-simbolo.png\n[home]\\revisa-flash\\src\\assets\\unavox-wordmark.png\n[home]\\revisa-flash\\src\\client.tsx\n[home]\\revisa-flash\\src\\components\\AccessExpired.tsx\n[home]\\revisa-flash\\src\\components\\aulas\\AulaCard.tsx\n[home]\\revisa-flash\\src\\components\\aulas\\AulaPlayer.tsx\n[home]\\revisa-flash\\src\\components\\aulas\\aulas-data.ts\n[home]\\revisa-flash\\src\\components\\aulas\\AulasStyles.tsx\n[home]\\revisa-flash\\src\\components\\aulas\\PlayerMock.tsx\n[home]\\revisa-flash\\src\\components\\BancoQuestoesTab.tsx\n[home]\\revisa-flash\\src\\components\\BlocoFixacao.tsx\n[home]\\revisa-flash\\src\\components\\CadernoDetalhesModal.tsx\n[home]\\revisa-flash\\src\\components\\ClerkProtectedRoute.tsx\n[home]\\revisa-flash\\src\\components\\ClientOnly.tsx\n[home]\\revisa-flash\\src\\components\\compartilhar-modal.tsx\n[home]\\revisa-flash\\src\\components\\CompartilharCadernoModal.tsx\n[home]\\revisa-flash\\src\\components\\CompartilharPastaModal.tsx\n[home]\\revisa-flash\\src\\components\\ConfirmDialog.tsx\n[home]\\revisa-flash\\src\\components\\copiar-lista-modal.tsx\n[home]\\revisa-flash\\src\\components\\CriarFlashcardAulaModal.tsx\n[home]\\revisa-flash\\src\\components\\DailyChallenge.tsx\n[home]\\revisa-flash\\src\\components\\EditarListaModal.tsx\n[home]\\revisa-flash\\src\\components\\EditarQuestaoModal.tsx\n[home]\\revisa-flash\\src\\components\\EditarQuestaoSimuladoModal.tsx\n[home]\\revisa-flash\\src\\components\\EnviarErrosModal.tsx\n[home]\\revisa-flash\\src\\components\\EscolherDestinoCopiaModal.tsx\n[home]\\revisa-flash\\src\\components\\EstatisticasListasModal.tsx\n[home]\\revisa-flash\\src\\components\\FicharioConteudo.tsx\n[home]\\revisa-flash\\src\\components\\FiltroHierarquiaModal.tsx\n[home]\\revisa-flash\\src\\components\\flashcards\\DeckPile.tsx\n---\n[202 files truncated] ..."},"toolName":"glob","toolKind":"other"}],"diagnostics":[{"code":"record_internal_excluded","severity":"info","count":9}],"metadata":{"startedAt":"2026-11-14T19:53:30.967Z","exportedAt":"2026-11-14T19:54:37.337Z","projectName":"revisa-flash","repository":"revisa-flash","gitBranch":"main","model":"nvidia/nemotron-3-ultra-550b-a55b:free","promptCount":1,"contextUsagePercent":8,"contextWindowSize":200000,"totalTokens":16358,"filesWritten":0,"linesAdded":0,"linesRemoved":0,"complete":true,"truncated":false}}</script>
+    <script nonce="G-Id9DCWaWUD2risqOfz2Q">
+      (function () {
+        var showLoadError = function () {
+          if (document.body.dataset.renderComplete) return;
+          document.body.dataset.renderComplete = 'error';
+          var app = document.getElementById('app');
+          app.setAttribute('role', 'alert');
+          app.textContent =
+            'Unable to load this chat export. This Qwen Code build may not have a published renderer or stylesheet yet; also check your network connection.';
+        };
+        var createElement = document.createElement.bind(document);
+        document.createElement = function (name, options) {
+          var element = createElement(name, options);
+          if (String(name).toLowerCase() === 'style') {
+            element.setAttribute('nonce', 'G-Id9DCWaWUD2risqOfz2Q');
+          }
+          return element;
+        };
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (
+              event.target === window ||
+              (event.target &&
+                (event.target.id === 'transcript-renderer' ||
+                  event.target.id === 'transcript-stylesheet'))
+            ) {
+              showLoadError();
+            }
+          },
+          true,
+        );
+        window.addEventListener('unhandledrejection', showLoadError);
+        // A stylesheet failure that settles while the parser is still blocked on
+        // the <link> is dispatched before the listener above exists, so the
+        // <head> latch is the only record of it.
+        if (window.__transcriptStyleFailed) {
+          showLoadError();
+        }
+      })();
+    </script>
+    <script
+      nonce="G-Id9DCWaWUD2risqOfz2Q"
+      id="transcript-renderer"
+      integrity="sha384-Ok9tVZd9juWdYQaIEXGvV5IQ25xoww60cpHqt+t4WbKzEGRVSncKdpp9lJ/XFdRb"
+      crossorigin="anonymous"
+      src="https://unpkg.com/@qwen-code/qwen-code@0.27.3/export-transcript-document.js"
+    ></script>
+  </body>
+</html>
