@@ -86,6 +86,13 @@ export default function LoginPage() {
     } catch (err: any) {
       console.error('Erro no login do Clerk:', err);
       console.error('Clerk error details:', JSON.stringify(err, null, 2));
+      // Try to get response body if it's a fetch error
+      if (err?.response) {
+        console.error('Clerk response status:', err.response.status);
+        err.response.text().then(text => {
+          console.error('Clerk response body:', text);
+        }).catch(() => {});
+      }
       const clerkError = err?.errors?.[0];
       setError(clerkError?.longMessage || clerkError?.message || 'E-mail ou senha incorretos.');
     } finally {
