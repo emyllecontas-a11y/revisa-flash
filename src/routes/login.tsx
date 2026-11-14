@@ -68,6 +68,11 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
+      // Clerk v6 flow: prepare first factor (password) then attempt sign in
+      console.log('=== CLERK SIGNIN: Preparando fator password ===');
+      const prepareResult = await signIn.prepareFirstFactor('password');
+      console.log('prepareFirstFactor result:', prepareResult);
+
       const result = await signIn.create({
         identifier: email.trim(),
         password,
