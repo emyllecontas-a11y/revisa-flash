@@ -84,8 +84,13 @@ export default function LoginPage() {
         setError(`Não foi possível concluir o login (Status: ${result.status || 'desconhecido'}).`);
       }
     } catch (err: any) {
-      console.error('Erro no login do Clerk:', err);
-      console.error('Clerk error details:', JSON.stringify(err, null, 2));
+      console.error('=== ERRO CLERK LOGIN ===');
+      console.error('Erro completo:', err);
+      console.error('Erro stringificado:', JSON.stringify(err, null, 2));
+      console.error('err.errors:', err?.errors);
+      console.error('err.message:', err?.message);
+      console.error('err.code:', err?.code);
+      console.error('err.status:', err?.status);
       // Try to get response body if it's a fetch error
       if (err?.response) {
         console.error('Clerk response status:', err.response.status);
@@ -93,8 +98,13 @@ export default function LoginPage() {
           console.error('Clerk response body:', text);
         }).catch(() => {});
       }
+      if (err?.cause) {
+        console.error('Clerk cause:', err.cause);
+      }
       const clerkError = err?.errors?.[0];
-      setError(clerkError?.longMessage || clerkError?.message || 'E-mail ou senha incorretos.');
+      const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'E-mail ou senha incorretos.';
+      console.error('Mensagem final para usuário:', errorMsg);
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
