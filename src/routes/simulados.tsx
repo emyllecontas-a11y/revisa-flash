@@ -1302,9 +1302,10 @@ function HistoricoCardMini({ resultado, onVerResultado, onExcluir }: { resultado
 
 function FixacaoTab() {
   const { user } = useAppUser();
-  const navigate = useNavigate();
   const [disciplinas, setDisciplinas] = useState<{ id: string; nome: string; listCount: number; accuracy: number | null }[]>([]);
   const [loading, setLoading] = useState(true);
+  // Disciplina escolhida no caderno: ao abrir, mostramos as listas dela (ListasTab já entra nessa disciplina).
+  const [disciplinaAbertaId, setDisciplinaAbertaId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1358,6 +1359,15 @@ function FixacaoTab() {
 
   if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
+  if (disciplinaAbertaId) {
+    return (
+      <ListasTab
+        disciplinaInicialId={disciplinaAbertaId}
+        onVoltarDisciplinas={() => setDisciplinaAbertaId(null)}
+      />
+    );
+  }
+
   if (disciplinas.length === 0) {
     return (
       <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
@@ -1377,7 +1387,7 @@ function FixacaoTab() {
           title={d.nome}
           listCount={d.listCount}
           accuracy={d.accuracy}
-          onOpen={() => navigate(`/listas/${d.id}`)}
+          onOpen={() => setDisciplinaAbertaId(d.id)}
         />
       ))}
     </BlocoGrid>

@@ -65,7 +65,14 @@ async function getDisciplinesLocal(userId: string): Promise<{ success: boolean; 
   }
 }
 
-export function ListasTab() {
+export interface ListasTabProps {
+  /** Abre a aba já dentro desta disciplina (usada pela aba Fixação, que mostra um caderno por disciplina). */
+  disciplinaInicialId?: string | null;
+  /** Quando informado, o botão "Disciplinas" do breadcrumb chama isto em vez de voltar ao nível 1 interno. */
+  onVoltarDisciplinas?: () => void;
+}
+
+export function ListasTab({ disciplinaInicialId, onVoltarDisciplinas }: ListasTabProps = {}) {
   const navigate = useNavigate();
   const { user } = useAppUser();
   const toast = useToast();
@@ -131,6 +138,17 @@ export function ListasTab() {
   }, [user?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Abre direto na disciplina pedida (aba Fixação) assim que as disciplinas chegam do banco local.
+  const disciplinaInicialAplicada = useRef(false);
+  useEffect(() => {
+    if (disciplinaInicialAplicada.current || !disciplinaInicialId) return;
+    const alvo = disciplinas.find((d) => d.id === disciplinaInicialId);
+    if (!alvo) return;
+    disciplinaInicialAplicada.current = true;
+    setDisciplinaAberta(alvo);
+    setPastaAberta(null);
+  }, [disciplinaInicialId, disciplinas]);
 
   // Escuta mudanças locais no RxDB para atualizar a tela imediatamente (após cópia)
   useEffect(() => {
@@ -429,7 +447,16 @@ export function ListasTab() {
   // ============================================================
   const breadcrumb = (
     <nav className="mb-4 flex items-center gap-1.5 text-xs text-foreground/55 overflow-x-auto">
-      <button onClick={handleVoltarParaDisciplinas} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0">
+      <button
+        onClick={() => {
+          if (onVoltarDisciplinas) {
+            onVoltarDisciplinas();
+            return;
+          }
+          handleVoltarParaDisciplinas();
+        }}
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/5 hover:text-foreground transition-colors shrink-0"
+      >
         <ArrowLeft className="h-3.5 w-3.5" /> Disciplinas
       </button>
       <ChevronRight className="h-3 w-3 shrink-0" />

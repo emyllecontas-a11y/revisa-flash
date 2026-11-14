@@ -1424,6 +1424,54 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     }
 
     {
+      // As questões de uma lista não pertencem necessariamente ao dono dela (lista importada ou
+      // compartilhada aponta para questões de outro user_id) e várias não têm updated_at. Por isso o
+      // pull genérico por user_id + updated_at voltava vazio para sempre e a lista abria sem questões.
+      // Aqui buscamos exatamente as questões referenciadas pelos links que já estão no banco local.
+      const questoesCollection = database.collections.questoes_lista;
+      const linksCollection = database.collections.listas_questoes;
+      if (questoesCollection && linksCollection) {
+        const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+          const chunks: T[][] = [];
+          for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+          return chunks;
+        };
+
+        const linkDocs = await linksCollection.find({ selector: {} }).exec();
+        const questaoIds = Array.from(
+          new Set(linkDocs.map((d: any) => d.get('questao_id')).filter(Boolean))
+        ) as string[];
+
+        let baixadas = 0;
+        for (const chunk of chunkArray(questaoIds, 100)) {
+          const { data, error } = await supabaseClient
+            .from('questoes_lista')
+            .select('*')
+            .in('id', chunk);
+          if (error) {
+            console.error('❌ Pull questoes_lista (por lista):', error);
+            houveErro = true;
+            continue;
+          }
+          if (!data) continue;
+          for (const doc of data) {
+            const existing = await questoesCollection.findOne({ selector: { id: doc.id } }).exec();
+            if (existing) {
+              const localTs = existing.get('updated_at') || '';
+              if (doc.updated_at && doc.updated_at > localTs) {
+                await existing.patch(doc);
+              }
+            } else {
+              await questoesCollection.insert(doc);
+              baixadas++;
+            }
+          }
+        }
+        if (baixadas > 0) console.log(`✅ Pull questoes_lista (por lista): ${baixadas}`);
+      }
+    }
+
+    {
       const chunkArray = <T,>(arr: T[], size: number): T[][] => {
         const chunks: T[][] = [];
         for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
