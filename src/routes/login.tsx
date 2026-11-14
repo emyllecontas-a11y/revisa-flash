@@ -70,21 +70,30 @@ export default function LoginPage() {
     try {
       // Clerk v6 flow para formulários customizados:
       // 1. create com identifier (inicia o sign-in)
-      // 2. password com a senha (fornece o fator)
-      // 3. finalize (completa e cria a sessão)
+      // 2. selectFirstFactor('password') para escolher password como fator
+      // 3. password com a senha (fornece o fator)
+      // 4. finalize (completa e cria a sessão)
       console.log('=== CLERK SIGNIN: Iniciando create ===');
       const createResult = await signIn.create({
         identifier: email.trim(),
       });
       console.log('create result:', createResult);
-      console.log('createResult.status:', createResult?.status);
+      console.log('signIn.status after create:', signIn?.status);
+      console.log('signIn.firstFactorVerification after create:', signIn?.firstFactorVerification);
+
+      console.log('=== CLERK SIGNIN: Selecionando fator password ===');
+      const selectFactorResult = await signIn.selectFirstFactor('password');
+      console.log('selectFirstFactor result:', selectFactorResult);
+      console.log('signIn.status after selectFirstFactor:', signIn?.status);
+      console.log('signIn.firstFactorVerification after selectFirstFactor:', signIn?.firstFactorVerification);
 
       console.log('=== CLERK SIGNIN: Fornecendo password ===');
       const passwordResult = await signIn.password({
         password,
       });
       console.log('password result:', passwordResult);
-      console.log('passwordResult.status:', passwordResult?.status);
+      console.log('signIn.status after password:', signIn?.status);
+      console.log('signIn.firstFactorVerification after password:', signIn?.firstFactorVerification);
 
       console.log('=== CLERK SIGNIN: Finalizando ===');
       const finalizeResult = await signIn.finalize();
@@ -101,7 +110,7 @@ export default function LoginPage() {
         setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
       } else {
         console.warn('Status de login não-completo:', result.status);
-        console.warn('Resultado completo para debug:', JSON.stringify(result, null, 2));
+        console.warn('signIn completo para debug:', JSON.stringify(signIn, null, 2));
         setError(`Não foi possível concluir o login (Status: ${result.status || 'desconhecido'}).`);
       }
     } catch (err: any) {
