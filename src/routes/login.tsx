@@ -73,6 +73,17 @@ export default function LoginPage() {
         password,
       });
 
+      // Log completo do resultado para debug
+      console.log('=== CLERK SIGNIN CREATE RESULT ===');
+      console.log('result:', result);
+      console.log('result.status:', result.status);
+      console.log('result.createdSessionId:', result.createdSessionId);
+      console.log('result.firstFactorVerification:', result.firstFactorVerification);
+      console.log('result.secondFactorVerification:', result.secondFactorVerification);
+      console.log('result.identifierVerification:', result.identifierVerification);
+      console.log('result.supportedFirstFactors:', result.supportedFirstFactors);
+      console.log('result.supportedSecondFactors:', result.supportedSecondFactors);
+
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
         navigate(redirectParam, { replace: true });
@@ -81,6 +92,7 @@ export default function LoginPage() {
         setError('Sua conta exige uma verificação adicional de segurança. Por favor, use "Continuar com Google" ou redefina sua senha.');
       } else {
         console.warn('Status de login não-completo:', result.status);
+        console.warn('Resultado completo para debug:', JSON.stringify(result, null, 2));
         setError(`Não foi possível concluir o login (Status: ${result.status || 'desconhecido'}).`);
       }
     } catch (err: any) {
