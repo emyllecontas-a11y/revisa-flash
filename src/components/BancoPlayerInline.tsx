@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { QuestaoCard } from "@/components/QuestaoCard";
 import { salvarTentativaAvulsa, type QuestaoBanco, buscarComentarioSobDemanda } from "@/services/bancoQuestoesService";
 import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotacao } from "@/services/anotacaoQuestaoService";
@@ -22,6 +22,7 @@ function formatarTempo(segundos: number): string {
 }
 
 export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFiltro, onSair }: Props) {
+  // ===== TODOS OS HOOKS NO TOPO (sem return antecipado) =====
   const toast = useToast();
   const [idx, setIdx] = useState(startIndex);
   const [selecionada, setSelecionada] = useState<string | null>(null);
@@ -37,10 +38,60 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
   const [modalEnviar, setModalEnviar] = useState(false);
   const [vistas, setVistas] = useState<Set<number>>(new Set());
 
+  // Derivados com optional chaining para tolerar undefined
   const questaoAtual = questoes[idx];
-  const respondida = questaoAtual ? !!respostasConfirmadas[questaoAtual.id] : false;
   const total = questoes.length;
+  const respondida = questaoAtual ? !!respostasConfirmadas[questaoAtual.id] : false;
   const respondidas = Object.keys(respostasConfirmadas).length;
+  const correta = questaoAtual ? getCorreta(questaoAtual) : null;
+  const eliminadasAtuais = eliminadas[idx] || [];
+  const respostaConfirmada = questaoAtual ? respostasConfirmadas[questaoAtual.id] : null;
+  const selecionadaAtual = respostaConfirmada || selecionada;
+
+  // alternativasView com useMemo para estabilidade
+  const alternativasView = useMemo(() => {
+    if (!questaoAtual) return [];
+    if (questaoAtual.tipo_questao === 'certo_errado') {
+      return [{ letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' }];
+    }
+    return (questaoAtual.alternativas || []).map(a => ({
+      letra: a.letra.toUpperCase(),
+      texto: a.texto,
+      sublinhados: (a as any).sublinhados,
+      negritos: (a as any).negritos,
+      italicos: (a as any).italicos
+    }));
+  }, [questaoAtual]);
+
+  // errosFormatados com useMemo
+  const errosFormatados = useMemo<QuestaoErrada[]>(() => {
+    return questoesErradas.map((item, index) => {
+      const q = item.q;
+      const altFormatadas = q.tipo_questao === 'multipla_escolha' ? (q.alternativas || []).map(a => ({
+        letra: a.letra,
+        texto: a.texto,
+        correta: a.letra.toUpperCase() === item.respostaCorreta.toUpperCase(),
+        sublinhados: null,
+        negritos: null,
+        italicos: null
+      })) : undefined;
+
+      return {
+        numero: index + 1,
+        enunciado: q.enunciado,
+        suaResposta: item.suaResposta,
+        respostaCorreta: item.respostaCorreta,
+        tipo: q.tipo_questao,
+        questao_origem_id: q.id,
+        alternativas: altFormatadas,
+        gabarito_ce: q.gabarito_ce ?? undefined,
+        imagem_url: q.imagem_url,
+        comentario_geral: q.comentario,
+      };
+    });
+  }, [questoesErradas]);
+
+  // ===== EFEITOS (sempre executam, usam guards internos) =====
 
   // Carregar anotações das questões
   useEffect(() => {
@@ -64,110 +115,7 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     if (questaoAtual) {
       setVistas(prev => new Set([...prev, idx]));
     }
-  }, [idx]);
-
-  const getCorreta = (q: QuestaoBanco): string | null => {
-    if (q.tipo_questao === 'multipla_escolha') return q.gabarito_letra?.toUpperCase() || null;
-    return q.gabarito_ce ? 'C' : 'E';
-  };
-
-  const handleResponder = async () => {
-    if (!selecionada || respondida || !questaoAtual) return;
-
-    setRespostasConfirmadas(prev => ({ ...prev, [questaoAtual.id]: selecionada }));
-
-    const correta = getCorreta(questaoAtual);
-    const acertou = selecionada.toUpperCase() === (correta || '');
-
-    if (acertou) setAcertos(prev => prev + 1);
-    else {
-      setErros(prev => prev + 1);
-      setQuestoesErradas(prev => [...prev, { q: questaoAtual, suaResposta: selecionada.toUpperCase(), respostaCorreta: correta || '' }]);
-    }
-
-    setSalvando(true);
-    await salvarTentativaAvulsa(userId, questaoAtual.id, selecionada, acertou, tempoQuestao);
-    setSalvando(false);
-  };
-
-  const avancar = () => {
-    if (idx === total - 1) {
-      setIdx(0);
-    } else {
-      setIdx(prev => prev + 1);
-    }
-    setSelecionada(null);
-    setTempoQuestao(0);
-  };
-
-  const voltar = () => {
-    if (idx > 0) {
-      setIdx(prev => prev - 1);
-      setSelecionada(null);
-      setTempoQuestao(0);
-    }
-  };
-
-  const proximaAleatoria = () => {
-    const naoVistas = Array.from({ length: total }, (_, i) => i).filter(i => !vistas.has(i));
-    if (naoVistas.length === 0) {
-      // Todas vistas, reiniciar ciclo
-      setVistas(new Set());
-      const proximo = Math.floor(Math.random() * total);
-      setIdx(proximo);
-    } else {
-      const proximo = naoVistas[Math.floor(Math.random() * naoVistas.length)];
-      setIdx(proximo);
-    }
-    setSelecionada(null);
-    setTempoQuestao(0);
-  };
-
-  const toggleEliminada = (letra: string) => {
-    if (respondida) return;
-    setEliminadas(prev => {
-      const atual = prev[idx] || [];
-      const nova = atual.includes(letra) ? atual.filter(l => l !== letra) : [...atual, letra];
-      return { ...prev, [idx]: nova };
-    });
-    if (selecionada === letra) setSelecionada(null);
-  };
-
-  const handleGrifar = async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
-    const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
-    if (!nova) return;
-    setAnotacoes(prev => {
-      const next = new Map(prev);
-      const atual = next.get(questaoId) ?? [];
-      next.set(questaoId, [...atual, nova]);
-      return next;
-    });
-  };
-
-  const handleRemoverGrifo = async (anotacaoId: string) => {
-    const ok = await removerAnotacao(anotacaoId);
-    if (!ok) return;
-    setAnotacoes(prev => {
-      const next = new Map(prev);
-      for (const [qid, lista] of next.entries()) {
-        const filtrados = lista.filter(a => a.id !== anotacaoId);
-        if (filtrados.length !== lista.length) next.set(qid, filtrados);
-      }
-      return next;
-    });
-  };
-
-  const handleTrocarCorGrifo = async (anotacaoId: string, cor: CorGrifo) => {
-    const ok = await trocarCorAnotacao(anotacaoId, cor);
-    if (!ok) return;
-    setAnotacoes(prev => {
-      const next = new Map(prev);
-      for (const [qid, lista] of next.entries()) {
-        next.set(qid, lista.map(a => a.id === anotacaoId ? { ...a, cor } : a));
-      }
-      return next;
-    });
-  };
+  }, [idx, questaoAtual]);
 
   // Buscar comentário sob demanda quando a questão é revelada
   useEffect(() => {
@@ -175,40 +123,13 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
       buscarComentarioSobDemanda(questaoAtual.id).then(res => {
         if (res.success && res.comentario) {
           // O QuestaoCard já usa useComentarioQuestao que faz isso automaticamente
-          // quando revelar=true, então não precisamos fazer nada extra aqui
         }
       }).catch(() => {});
     }
   }, [respondida, questaoAtual]);
 
-  const errosFormatados: QuestaoErrada[] = questoesErradas.map((item, index) => {
-    const q = item.q;
-    const altFormatadas = q.tipo_questao === 'multipla_escolha' ? (q.alternativas || []).map(a => ({
-      letra: a.letra,
-      texto: a.texto,
-      correta: a.letra.toUpperCase() === item.respostaCorreta.toUpperCase(),
-      sublinhados: null,
-      negritos: null,
-      italicos: null
-    })) : undefined;
-
-    return {
-      numero: index + 1,
-      enunciado: q.enunciado,
-      suaResposta: item.suaResposta,
-      respostaCorreta: item.respostaCorreta,
-      tipo: q.tipo_questao,
-      questao_origem_id: q.id,
-      alternativas: altFormatadas,
-      gabarito_ce: q.gabarito_ce ?? undefined,
-      imagem_url: q.imagem_url,
-      comentario_geral: q.comentario,
-    };
-  });
-
   // Atalhos de teclado
   useEffect(() => {
-    if (!questaoAtual) return;
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
@@ -217,14 +138,14 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
       const numeros = ["1", "2", "3", "4", "5"];
       const letras = ["A", "B", "C", "D", "E"];
 
-      if (!respondida && questaoAtual.tipo_questao === 'multipla_escolha' && questaoAtual.alternativas) {
+      if (!respondida && questaoAtual?.tipo_questao === 'multipla_escolha' && questaoAtual?.alternativas) {
         let letraAlvo = null;
         const idxNum = numeros.indexOf(tecla);
         if (idxNum >= 0) letraAlvo = letras[idxNum];
         else if (letras.includes(tecla)) letraAlvo = tecla;
 
         if (letraAlvo) {
-          const existe = questaoAtual.alternativas.some(a => a.letra === letraAlvo);
+          const existe = questaoAtual!.alternativas.some(a => a.letra === letraAlvo);
           const elims = eliminadas[idx] || [];
           if (existe && !elims.includes(letraAlvo)) {
             e.preventDefault();
@@ -232,7 +153,7 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
             return;
           }
         }
-      } else if (!respondida && questaoAtual.tipo_questao === 'certo_errado') {
+      } else if (!respondida && questaoAtual?.tipo_questao === 'certo_errado') {
         if (tecla === "1" || tecla === "C") { e.preventDefault(); setSelecionada("C"); return; }
         if (tecla === "2" || tecla === "E") { e.preventDefault(); setSelecionada("E"); return; }
       }
@@ -254,27 +175,110 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     return () => window.removeEventListener("keydown", handler);
   }, [idx, respondida, selecionada, questaoAtual, eliminadas, handleResponder, avancar, voltar]);
 
-  // Preparar alternativasView igual ao PlayerLivreModal
-  const correta = getCorreta(questaoAtual!);
-  const eliminadasAtuais = eliminadas[idx] || [];
-  const respostaConfirmada = questaoAtual ? respostasConfirmadas[questaoAtual.id] : null;
-  const selecionadaAtual = respostaConfirmada || selecionada;
+  // ===== FUNÇÕES AUXILIARES =====
+  const getCorreta = useCallback((q: QuestaoBanco): string | null => {
+    if (q.tipo_questao === 'multipla_escolha') return q.gabarito_letra?.toUpperCase() || null;
+    return q.gabarito_ce ? 'C' : 'E';
+  }, []);
 
-  let alternativasView: { letra: string; texto: string; sublinhados?: any; negritos?: any; italicos?: any }[] = [];
-  if (questaoAtual) {
-    if (questaoAtual.tipo_questao === 'certo_errado') {
-      alternativasView = [ { letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' } ];
-    } else {
-      alternativasView = (questaoAtual.alternativas || []).map(a => ({
-        letra: a.letra.toUpperCase(),
-        texto: a.texto,
-        sublinhados: (a as any).sublinhados,
-        negritos: (a as any).negritos,
-        italicos: (a as any).italicos
-      }));
+  const handleResponder = useCallback(async () => {
+    if (!selecionada || respondida || !questaoAtual) return;
+
+    setRespostasConfirmadas(prev => ({ ...prev, [questaoAtual.id]: selecionada }));
+
+    const corretaLocal = getCorreta(questaoAtual);
+    const acertou = selecionada.toUpperCase() === (corretaLocal || '');
+
+    if (acertou) setAcertos(prev => prev + 1);
+    else {
+      setErros(prev => prev + 1);
+      setQuestoesErradas(prev => [...prev, { q: questaoAtual, suaResposta: selecionada.toUpperCase(), respostaCorreta: corretaLocal || '' }]);
     }
-  }
 
+    setSalvando(true);
+    await salvarTentativaAvulsa(userId, questaoAtual.id, selecionada, acertou, tempoQuestao);
+    setSalvando(false);
+  }, [selecionada, respondida, questaoAtual, getCorreta, userId, tempoQuestao]);
+
+  const avancar = useCallback(() => {
+    if (idx === total - 1) {
+      setIdx(0);
+    } else {
+      setIdx(prev => prev + 1);
+    }
+    setSelecionada(null);
+    setTempoQuestao(0);
+  }, [idx, total]);
+
+  const voltar = useCallback(() => {
+    if (idx > 0) {
+      setIdx(prev => prev - 1);
+      setSelecionada(null);
+      setTempoQuestao(0);
+    }
+  }, [idx]);
+
+  const proximaAleatoria = useCallback(() => {
+    const naoVistas = Array.from({ length: total }, (_, i) => i).filter(i => !vistas.has(i));
+    if (naoVistas.length === 0) {
+      setVistas(new Set());
+      const proximo = Math.floor(Math.random() * total);
+      setIdx(proximo);
+    } else {
+      const proximo = naoVistas[Math.floor(Math.random() * naoVistas.length)];
+      setIdx(proximo);
+    }
+    setSelecionada(null);
+    setTempoQuestao(0);
+  }, [total, vistas, setIdx]);
+
+  const toggleEliminada = useCallback((letra: string) => {
+    if (respondida) return;
+    setEliminadas(prev => {
+      const atual = prev[idx] || [];
+      const nova = atual.includes(letra) ? atual.filter(l => l !== letra) : [...atual, letra];
+      return { ...prev, [idx]: nova };
+    });
+    if (selecionada === letra) setSelecionada(null);
+  }, [respondida, idx, selecionada]);
+
+  const handleGrifar = useCallback(async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
+    const nova = await criarAnotacao(userId, 'banco' as any, questaoId, campo, cor, texto, rects);
+    if (!nova) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      const atual = next.get(questaoId) ?? [];
+      next.set(questaoId, [...atual, nova]);
+      return next;
+    });
+  }, [userId]);
+
+  const handleRemoverGrifo = useCallback(async (anotacaoId: string) => {
+    const ok = await removerAnotacao(anotacaoId);
+    if (!ok) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        const filtrados = lista.filter(a => a.id !== anotacaoId);
+        if (filtrados.length !== lista.length) next.set(qid, filtrados);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTrocarCorGrifo = useCallback(async (anotacaoId: string, cor: CorGrifo) => {
+    const ok = await trocarCorAnotacao(anotacaoId, cor);
+    if (!ok) return;
+    setAnotacoes(prev => {
+      const next = new Map(prev);
+      for (const [qid, lista] of next.entries()) {
+        next.set(qid, lista.map(a => a.id === anotacaoId ? { ...a, cor } : a));
+      }
+      return next;
+    });
+  }, []);
+
+  // ===== RENDER =====
   return (
     <div className="flex flex-col h-full min-h-[calc(100vh-200px)] bg-background">
       {/* Cabeçalho do player */}

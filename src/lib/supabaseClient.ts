@@ -7,18 +7,20 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://driayoaxyrpfda
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyaWF5b2F4eXJwZmRhcXVndm14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MzE3MjIsImV4cCI6MjA5NzQwNzcyMn0.iAZZ2J7sXthYj8UQYEAwuJGbbLt2cudDpp0D2HaxHPI';
 
 // ============================================================
-// CLIENTE SUPABASE BASE
+// CLIENTE SUPABASE BASE (ANON) — SINGLETON OK
 // ============================================================
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export const supabaseReady = true;
 
-console.log('✅ Supabase client inicializado!');
+console.log('✅ Supabase client (anon) inicializado!');
 
 // ============================================================
-// CACHE DO CLIENTE SUPABASE COM TOKEN
+// CACHE DO CLIENTE SUPABASE COM TOKEN (AUTHENTICATED)
 // ============================================================
 let cachedSupabaseClient: any = null;
 let cachedToken: string | null = null;
+let cachedTokenExp: number | null = null;
+let _clientCreateCount = 0;
 
 // ============================================================
 // FUNÇÃO PARA OBTER O TOKEN DO CLERK (via window.Clerk)
@@ -43,21 +45,22 @@ export const getClerkToken = async (): Promise<string | null> => {
     }
 
     // Obtém o token (usando o template "supabase" se existir)
-  try {
-  const token = await session.getToken({ template: 'supabase1', skipCache: true });
-  if (token) {
-    console.log('🔑 Token do Clerk obtido com sucesso!');
-    return token;
-  }
-} catch (e) {
-  console.warn('⚠️ Falha ao obter token com template supabase, tentando sem template...');
-}
+    // SEM skipCache — o Clerk devolve o mesmo token por ~60s
+    try {
+      const token = await session.getToken({ template: 'supabase1' });
+      if (token) {
+        console.log('🔑 Token do Clerk obtido com sucesso!');
+        return token;
+      }
+    } catch (e) {
+      console.warn('⚠️ Falha ao obter token com template supabase, tentando sem template...');
+    }
 
-const fallbackToken = await session.getToken({ skipCache: true });
-if (fallbackToken) {
-  console.log('🔑 Token do Clerk obtido (fallback) com sucesso!');
-  return fallbackToken;
-}
+    const fallbackToken = await session.getToken();
+    if (fallbackToken) {
+      console.log('🔑 Token do Clerk obtido (fallback) com sucesso!');
+      return fallbackToken;
+    }
 
     console.warn('⚠️ Nenhum token disponível.');
     return null;
@@ -76,15 +79,43 @@ export const getSupabaseWithToken = async () => {
     // Limpa o cache
     cachedSupabaseClient = null;
     cachedToken = null;
+    cachedTokenExp = null;
     // LANÇA O ERRO - quem chamar precisa tratar
     throw new Error('Usuário não autenticado');
   }
 
-  // Se o token mudou, recria o cliente
-  if (cachedToken !== token || !cachedSupabaseClient) {
-    console.log('✅ Criando novo cliente Supabase com token do Clerk');
+  // Decodifica o JWT para obter o tempo de expiração (exp)
+  let tokenExp = 0;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    tokenExp = (payload.exp || 0) * 1000; // exp está em segundos
+  } catch {
+    // Se falhar ao decodificar, assume expiração longa
+    tokenExp = Date.now() + 3600_000;
+  }
+
+  const agora = Date.now();
+  const tokenExpirouOuProximo = agora > (tokenExp - 30_000); // 30s antes de expirar
+
+  // Se o token mudou OU expirou OU não temos cliente, recria/atualiza
+  if (cachedToken !== token || tokenExpirouOuProximo || !cachedSupabaseClient) {
+    if (cachedToken !== token) {
+      _clientCreateCount++;
+      console.log('[Supabase] clientes criados:', _clientCreateCount);
+    } else {
+      console.log('[Supabase] token expirou/próximo — atualizando header');
+    }
+
     cachedToken = token;
+    cachedTokenExp = tokenExp;
+
+    // Auth DESLIGADO no cliente autenticado — evitamos GoTrueClient duplicados
     cachedSupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
       global: {
         headers: {
           Authorization: `Bearer ${token}`,
