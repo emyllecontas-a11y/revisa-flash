@@ -3,6 +3,32 @@ import { getDb } from '@/lib/db';
 import { enqueueOperation } from '@/services/queueService';
 import type { QuestaoBanco } from '@/services/bancoQuestoesService';
 
+export interface CadernoResultado {
+  id: string;
+  user_id: string;
+  caderno_id: string;
+  acertos: number;
+  erros: number;
+  nao_respondidas: number;
+  tempo_segundos: number;
+  porcentagem: number;
+  respostas: Record<string, string>;
+  created_at: string;
+}
+
+export interface CadernoTentativa {
+  id: string;
+  user_id: string;
+  caderno_id: string;
+  acertos: number;
+  erros: number;
+  nao_respondidas: number;
+  tempo_segundos: number;
+  porcentagem: number;
+  respostas: Record<string, string>;
+  created_at: string;
+}
+
 export interface PastaCaderno {
   id: string;
   user_id: string;
@@ -224,5 +250,35 @@ export async function adicionarQuestoesAoCaderno(cadernoId: string, questoesIds:
   } catch (e: any) {
     console.error('[cadernoService] Erro ao adicionar questões:', e);
     return { success: false, error: e?.message || 'Erro ao adicionar questões.' };
+  }
+}
+
+export async function getUltimoResultadoCaderno(cadernoId: string, userId: string): Promise<{ success: boolean; data?: CadernoResultado; error?: string }> {
+  try {
+    const db = await getDb();
+    const docs = await db.caderno_resultados.find({
+      selector: { caderno_id: cadernoId, user_id: userId },
+      sort: [{ created_at: 'desc' }],
+      limit: 1
+    }).exec();
+    if (docs.length === 0) return { success: true, data: undefined };
+    const data = docs[0].toJSON() as CadernoResultado;
+    return { success: true, data };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao buscar resultado.' };
+  }
+}
+
+export async function getTentativasDoCaderno(cadernoId: string, userId: string): Promise<{ success: boolean; data?: CadernoTentativa[]; error?: string }> {
+  try {
+    const db = await getDb();
+    const docs = await db.caderno_resultados.find({
+      selector: { caderno_id: cadernoId, user_id: userId },
+      sort: [{ created_at: 'desc' }]
+    }).exec();
+    const data = docs.map((d: any) => d.toJSON() as CadernoTentativa);
+    return { success: true, data };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Erro ao buscar tentativas.' };
   }
 }

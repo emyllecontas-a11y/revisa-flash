@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
+import { CadernoRevisao } from "@/components/CadernoRevisao";
 import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
 import { RelatorioDesempenhoModal } from "@/components/RelatorioDesempenhoModal";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -75,6 +76,7 @@ export function BancoQuestoesTab() {
   const [modalEditarCaderno, setModalEditarCaderno] = useState<Caderno | null>(null);
   const [modalPraticar, setModalPraticar] = useState(false);
   const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
+  const [cadernoRevisando, setCadernoRevisando] = useState<Caderno | null>(null);
   
   const [modalFiltro, setModalFiltro] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
@@ -308,8 +310,8 @@ export function BancoQuestoesTab() {
                     title={c.nome}
                     questionCount={c.questoes_count || 0}
                     folderName={pasta?.name}
-                    onOpen={() => setCadernoAberto(c)}
-                    onEdit={() => setModalEditarCaderno(c)}
+                    onOpen={() => setCadernoRevisando(c)}
+                    onEdit={() => setCadernoAberto(c)}
                     onDelete={() => handleExcluirCaderno(c)}
                   />
                 );
@@ -487,6 +489,15 @@ export function BancoQuestoesTab() {
 
       {modalRelatorio && user?.id && (
         <RelatorioDesempenhoModal userId={user.id} onClose={() => setModalRelatorio(false)} />
+      )}
+
+      {cadernoRevisando && user?.id && (
+        <CadernoRevisao
+          caderno={cadernoRevisando}
+          userId={user.id}
+          onClose={() => setCadernoRevisando(null)}
+          onUpdate={load}
+        />
       )}
     </>
   );

@@ -324,7 +324,8 @@ export default function LoginPage() {
         <div className="relative z-10 flex flex-col items-center justify-center h-full w-full max-w-lg">
           {/* Logo Una Vox pequena no topo */}
           <div className="mb-10 flex items-center gap-2">
-            <UnaVoxLogo variant="wordmark" className="h-9 w-auto text-foreground" />
+            <UnaVoxLogo variant="wordmark" className="h-9 w-auto" />
+            <span className="font-display text-lg font-bold text-foreground">Una Vox</span>
           </div>
 
           {/* Círculo grande com logo Una Vox */}

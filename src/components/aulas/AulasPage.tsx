@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ListVideo, X, Loader2, Folder, BookOpen, CheckCircle, Heart, PlusSquare } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ListVideo, X, Loader2, Folder, BookOpen, CheckCircle, Heart, PlusSquare, ChevronUp, ChevronDown } from "lucide-react";
 import { AulaCard } from "./AulaCard";
 import { AulasStyles } from "./AulasStyles";
 import { PlayerEmpty } from "./PlayerMock";
 import { AulaPlayer } from "./AulaPlayer";
 import { useAppUser } from "@/contexts/UserContext";
-import { getAulasDoUsuario } from "@/services/aulaService";
+import { getAulasDoUsuario, atualizarOrdemAula } from "@/services/aulaService";
 import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
 
 export function AulasPage() {
@@ -59,12 +59,54 @@ export function AulasPage() {
     });
   };
 
+  const handleMoveUp = useCallback(async (aulaId: string, currentOrdem: number) => {
+    if (!user?.id || currentOrdem <= 1) return;
+    const novaOrdem = currentOrdem - 1;
+    await atualizarOrdemAula(aulaId, novaOrdem);
+    // Refresh the list
+    const data = await getAulasDoUsuario(user.id);
+    const aulasFormatadas = data.map((aula, index) => ({
+      id: aula.id,
+      numero: aula.ordem ?? (index + 1),
+      modulo: aula.disciplina || "Geral",
+      titulo: aula.titulo,
+      descricao: aula.descricao || "Aula em vídeo",
+      duracao: "--:--",
+      tone: index % 2 === 0 ? "laranja" : "rosa",
+      terabox_url: aula.terabox_url,
+      disciplina: aula.disciplina || "Outras Disciplinas",
+      assunto: aula.assunto || "Geral"
+    }));
+    setAulasRaw(aulasFormatadas);
+  }, [user?.id]);
+
+  const handleMoveDown = useCallback(async (aulaId: string, currentOrdem: number, maxOrdem: number) => {
+    if (!user?.id || currentOrdem >= maxOrdem) return;
+    const novaOrdem = currentOrdem + 1;
+    await atualizarOrdemAula(aulaId, novaOrdem);
+    // Refresh the list
+    const data = await getAulasDoUsuario(user.id);
+    const aulasFormatadas = data.map((aula, index) => ({
+      id: aula.id,
+      numero: aula.ordem ?? (index + 1),
+      modulo: aula.disciplina || "Geral",
+      titulo: aula.titulo,
+      descricao: aula.descricao || "Aula em vídeo",
+      duracao: "--:--",
+      tone: index % 2 === 0 ? "laranja" : "rosa",
+      terabox_url: aula.terabox_url,
+      disciplina: aula.disciplina || "Outras Disciplinas",
+      assunto: aula.assunto || "Geral"
+    }));
+    setAulasRaw(aulasFormatadas);
+  }, [user?.id]);
+
   useEffect(() => {
     if (user?.id) {
       getAulasDoUsuario(user.id).then((data) => {
         const aulasFormatadas = data.map((aula, index) => ({
           id: aula.id,
-          numero: index + 1,
+          numero: aula.ordem ?? (index + 1),
           modulo: aula.disciplina || "Geral",
           titulo: aula.titulo,
           descricao: aula.descricao || "Aula em vídeo",
@@ -157,9 +199,17 @@ export function AulasPage() {
                         </summary>
 
                         <ul className="mt-2 flex flex-col gap-2">
-                          {aulasDoAssunto.map((a) => (
+                          {aulasDoAssunto.map((a, i) => (
                             <li key={a.id} className="rf-fade-in">
-                              <AulaCard aula={a} active={a.id === selectedId} onSelect={select} />
+                              <AulaCard
+                                aula={a}
+                                active={a.id === selectedId}
+                                onSelect={select}
+                                onMoveUp={() => handleMoveUp(a.id, a.numero)}
+                                onMoveDown={() => handleMoveDown(a.id, a.numero, aulasDoAssunto.length)}
+                                isFirst={i === 0}
+                                isLast={i === aulasDoAssunto.length - 1}
+                              />
                             </li>
                           ))}
                         </ul>

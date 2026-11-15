@@ -1,13 +1,17 @@
-import { CheckCircle2, Clock, Play } from "lucide-react";
+import { CheckCircle2, Clock, Play, ChevronUp, ChevronDown } from "lucide-react";
 import type { Aula } from "./aulas-data";
 
 interface AulaCardProps {
   aula: Aula;
   active: boolean;
   onSelect: (id: string) => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
-export function AulaCard({ aula, active, onSelect }: AulaCardProps) {
+export function AulaCard({ aula, active, onSelect, onMoveUp, onMoveDown, isFirst, isLast }: AulaCardProps) {
   const concluida = aula.progresso >= 100;
   return (
     <button
@@ -41,6 +45,32 @@ export function AulaCard({ aula, active, onSelect }: AulaCardProps) {
           </span>
         </span>
       </span>
+      {(onMoveUp || onMoveDown) && (
+        <div className="flex flex-col gap-1 ml-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {onMoveUp && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onMoveUp(); }}
+              disabled={isFirst}
+              className="grid h-6 w-6 place-items-center rounded-lg text-foreground/50 hover:text-foreground hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Mover para cima"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onMoveDown && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onMoveDown(); }}
+              disabled={isLast}
+              className="grid h-6 w-6 place-items-center rounded-lg text-foreground/50 hover:text-foreground hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Mover para baixo"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
     </button>
   );
 }
