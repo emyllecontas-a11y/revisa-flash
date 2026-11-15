@@ -44,52 +44,89 @@ function getPeriodos() {
 }
 
 export async function calcularRanking(userIdLogado: string, periodo: 'semanal' | 'mensal'): Promise<ResultadoRanking> {
-  const db = await getDb();
   const supabase = await getSupabaseWithToken();
-  const { semanaIso, mesIso, dataRefIso } = getPeriodos();
-  const isoInicio = periodo === 'semanal' ? semanaIso : mesIso;
+  const { dataRefIso } = getPeriodos();
 
-  const todosRecords = await db.study_records.find().exec();
-  const userIds = new Set<string>();
-  todosRecords.forEach(r => { if (r.get('user_id')) userIds.add(r.get('user_id')); });
-  if (userIdLogado) userIds.add(userIdLogado);
+  // ═══════════════════════════════════════════════════════════════
+  // 1) Chama a RPC que já agrega TUDO no servidor (inclui amigas)
+  // ═══════════════════════════════════════════════════════════════
+  let rankingRows: any[] = [];
+  let rpcError: Error | null = null;
 
+  try {
+    const { data, error } = await supabase.rpc('calcular_ranking_comunidade', {
+      p_user_id: userIdLogado,
+      p_periodo: periodo,
+    });
+
+    if (error) {
+      rpcError = new Error(error.message);
+      console.error('[RANKING] RPC erro:', error);
+    } else {
+      rankingRows = data || [];
+    }
+  } catch (e) {
+    rpcError = e instanceof Error ? e : new Error(String(e));
+    console.error('[RANKING] RPC falhou (rede/offline):', rpcError);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2) Fallback offline: se não tem rede e já temos lista cacheada no estado,
+  //    o componente deve reusar a última lista boa. Aqui retornamos estado 'erro'
+  //    (array vazio) para o componente tratar.
+  // ═══════════════════════════════════════════════════════════════
+  if (rpcError && rankingRows.length === 0) {
+    console.warn('[RANKING] Offline sem cache — retornando erro');
+    return { lista: [], subiuDePosicao: false, posicaoAtual: 0 };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 3) Montar rankingMap a partir do retorno da RPC
+  //    (uma linha por usuária, pontos já prontos)
+  // ═══════════════════════════════════════════════════════════════
   const rankingMap = new Map<string, RankingUser>();
-  userIds.forEach(uid => {
-    rankingMap.set(uid, {
-      id: uid, name: `Estudante`, avatar_url: null, avatar_tipo: null, avatar_id: null, pontos: 0, variacao: 0,
-      horasEstudadas: 0, questoesResolvidas: 0, simuladosRealizados: 0, coroa: null
+
+  rankingRows.forEach((row: any) => {
+    rankingMap.set(row.user_id, {
+      id: row.user_id,
+      name: 'Estudante', // será sobrescrito pelo profiles
+      avatar_url: null,
+      avatar_tipo: null,
+      avatar_id: null,
+      pontos: Number(row.pontos_totais) || 0,
+      variacao: 0,
+      horasEstudadas: Number(row.horas_estudadas) || 0,
+      questoesResolvidas: Number(row.questoes_resolvidas) || 0,
+      simuladosRealizados: Number(row.simulados_realizados) || 0,
+      coroa: null,
     });
   });
 
-  const sessoes = await db.study_records.find({ selector: { date: { $gte: isoInicio } } }).exec();
-  sessoes.forEach(s => {
-    const uid = s.get('user_id');
-    if (rankingMap.has(uid)) {
-      const u = rankingMap.get(uid)!;
-      const min = s.get('duration') || 0;
-      u.horasEstudadas += min / 60;
-      u.pontos += min * 1;
-    }
-  });
+  // Garantir que a usuária logada SEMPRE apareça (mesmo com 0 pontos)
+  if (!rankingMap.has(userIdLogado)) {
+    rankingMap.set(userIdLogado, {
+      id: userIdLogado,
+      name: 'Estudante',
+      avatar_url: null,
+      avatar_tipo: null,
+      avatar_id: null,
+      pontos: 0,
+      variacao: 0,
+      horasEstudadas: 0,
+      questoesResolvidas: 0,
+      simuladosRealizados: 0,
+      coroa: null,
+    });
+  }
 
-  const tentativas = await db.banco_tentativas.find({ selector: { created_at: { $gte: isoInicio } } }).exec();
-  tentativas.forEach(t => {
-    const uid = t.get('user_id');
-    if (rankingMap.has(uid)) { rankingMap.get(uid)!.questoesResolvidas += 1; rankingMap.get(uid)!.pontos += 2; }
-  });
-
-  const simulados = await db.resultados_simulado.find({ selector: { created_at: { $gte: isoInicio } } }).exec();
-  simulados.forEach(s => {
-    const uid = s.get('user_id');
-    if (rankingMap.has(uid)) { rankingMap.get(uid)!.simuladosRealizados += 1; rankingMap.get(uid)!.pontos += 20; }
-  });
-
+  // ═══════════════════════════════════════════════════════════════
+  // 4) Buscar perfis (name, avatar_url, avatar_tipo, avatar_id)
+  //    e medalhas (coroa) — MANTIDO IGUAL AO ORIGINAL
+  // ═══════════════════════════════════════════════════════════════
   const medalhasCountMap = new Map<string, number>();
   try {
     const ids = Array.from(rankingMap.keys());
-    
-    // 🔥 CORREÇÃO: Buscando também o avatar_tipo e avatar_id
+
     const { data: profiles } = await supabase
       .from('profiles')
       .select('id, name, avatar_url, avatar_tipo, avatar_id')
@@ -98,7 +135,7 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
     if (profiles) {
       profiles.forEach((p: any) => {
         if (rankingMap.has(p.id)) {
-          rankingMap.get(p.id)!.name = p.name || "Estudante";
+          rankingMap.get(p.id)!.name = p.name || 'Estudante';
           rankingMap.get(p.id)!.avatar_url = p.avatar_url || null;
           rankingMap.get(p.id)!.avatar_tipo = p.avatar_tipo || 'foto';
           rankingMap.get(p.id)!.avatar_id = p.avatar_id || null;
@@ -106,16 +143,28 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
       });
     }
 
-    const { data: medalhas } = await supabase.from('ranking_conquistas').select('user_id').eq('tipo', 'medalha').in('user_id', ids);
+    const { data: medalhas } = await supabase
+      .from('ranking_conquistas')
+      .select('user_id')
+      .eq('tipo', 'medalha')
+      .in('user_id', ids);
+
     medalhas?.forEach((m: any) => {
       medalhasCountMap.set(m.user_id, (medalhasCountMap.get(m.user_id) || 0) + 1);
     });
-  } catch (e) { console.warn("Erro ao buscar perfis/medalhas", e); }
+  } catch (e) {
+    console.warn('[RANKING] Erro ao buscar perfis/medalhas:', e);
+  }
 
+  // ═══════════════════════════════════════════════════════════════
+  // 5) Filtrar (pontos > 0 OU é a usuária logada) e ordenar por pontos DESC
+  //    — MANTIDO IGUAL AO ORIGINAL
+  // ═══════════════════════════════════════════════════════════════
   const listaFinal = Array.from(rankingMap.values())
     .filter(u => u.pontos > 0 || u.id === userIdLogado)
     .sort((a, b) => b.pontos - a.pontos);
 
+  // Coroa baseada no número de medalhas
   listaFinal.forEach(u => {
     const count = medalhasCountMap.get(u.id) || 0;
     if (count >= 7) u.coroa = 'diamante';
@@ -124,13 +173,17 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
     else if (count >= 1) u.coroa = 'bronze';
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // 6) Lógica de ranking_snapshots (variacao, subiuDePosicao, posicaoAtual,
+  //    insert do snapshot do dia) — MANTIDO IGUAL AO ORIGINAL
+  // ═══════════════════════════════════════════════════════════════
   let subiuDePosicao = false;
   let posicaoAtual = 0;
 
   const indexLogado = listaFinal.findIndex(u => u.id === userIdLogado);
   if (indexLogado !== -1) {
     posicaoAtual = indexLogado + 1;
-    
+
     const { data: snapshotAnterior } = await supabase
       .from('ranking_snapshots')
       .select('posicao')
@@ -156,10 +209,20 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
 
     if (!snapHoje) {
       await supabase.from('ranking_snapshots').insert({
-        user_id: userIdLogado, periodo_tipo: periodo, data_referencia: dataRefIso, posicao: posicaoAtual, pontos: listaFinal[indexLogado].pontos
+        user_id: userIdLogado,
+        periodo_tipo: periodo,
+        data_referencia: dataRefIso,
+        posicao: posicaoAtual,
+        pontos: listaFinal[indexLogado].pontos,
       });
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 7) Log de debug
+  // ═══════════════════════════════════════════════════════════════
+  const meusPontos = listaFinal[indexLogado]?.pontos ?? 0;
+  console.log(`[RANKING] membros=${listaFinal.length} minha_posicao=${posicaoAtual} meus_pontos=${meusPontos}`);
 
   return { lista: listaFinal, subiuDePosicao, posicaoAtual };
 }
