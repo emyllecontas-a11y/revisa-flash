@@ -271,10 +271,7 @@ export function BancoQuestoesTab() {
   const toggleSelecionada = (id: string) => { setSelecionadas(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); };
   const cadernosFiltrados = useMemo(() => { if (!pastaSelecionada) return cadernos; if (pastaSelecionada === "sem-pasta") return cadernos.filter(c => !c.pasta_id); return cadernos.filter(c => c.pasta_id === pastaSelecionada); }, [cadernos, pastaSelecionada]);
 
-  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (error) return <div className="rf-card p-6 text-center"><p className="text-accent">{error}</p><button onClick={load} className="mt-4 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground">Tentar novamente</button></div>;
-
-  // Texto do filtro atual para o player inline
+  // Texto do filtro atual para o player inline (antes dos early returns para evitar erro #310)
   const textoDoFiltroAtual = useMemo(() => {
     const partes: string[] = [];
     if (fDisciplina) partes.push(fDisciplina);
@@ -286,6 +283,9 @@ export function BancoQuestoesTab() {
     if (busca) partes.push(`Busca: "${busca}"`);
     return partes.join(" · ") || "Todas as questões";
   }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
+
+  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (error) return <div className="rf-card p-6 text-center"><p className="text-accent">{error}</p><button onClick={load} className="mt-4 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground">Tentar novamente</button></div>;
 
   return (
     <>
