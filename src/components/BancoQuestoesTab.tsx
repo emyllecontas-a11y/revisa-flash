@@ -24,9 +24,10 @@ import {
 } from "@/services/cadernoService";
 import {
   BookOpen, Search, Loader2, Play, Plus, Folder, X, CheckCircle2,
-  ArrowLeft, FolderOpen, FileText, Pencil, Trash2, Filter, BarChart3, Shuffle
+  ArrowLeft, FolderOpen, FileText, Pencil, Trash2, Filter, BarChart3, Shuffle, Grid
 } from "lucide-react";
 import { PlayerLivreModal } from "@/components/PlayerLivreModal";
+import { BancoPlayerInline } from "@/components/BancoPlayerInline";
 import { CadernoDetalhesModal } from "@/components/CadernoDetalhesModal";
 import { CadernoRevisao } from "@/components/CadernoRevisao";
 import { FiltroHierarquiaModal } from "@/components/FiltroHierarquiaModal";
@@ -62,10 +63,10 @@ export function BancoQuestoesTab() {
   const [viewMode, setViewMode] = useState<ViewMode>("questoes");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [todasQuestoes, setTodasQuestoes] = useState<QuestaoBanco[]>([]);
   const [stats, setStats] = useState<any>(null);
-  
+
   const [pastas, setPastas] = useState<PastaCaderno[]>([]);
   const [cadernos, setCadernos] = useState<Caderno[]>([]);
   const [pastaSelecionada, setPastaSelecionada] = useState<string | null>(null);
@@ -77,7 +78,10 @@ export function BancoQuestoesTab() {
   const [modalPraticar, setModalPraticar] = useState(false);
   const [cadernoAberto, setCadernoAberto] = useState<Caderno | null>(null);
   const [cadernoRevisando, setCadernoRevisando] = useState<Caderno | null>(null);
-  
+
+  // Inline practice mode
+  const [praticando, setPraticando] = useState<{ on: boolean; start: number }>({ on: false, start: 0 });
+
   const [modalFiltro, setModalFiltro] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
 
@@ -226,7 +230,7 @@ export function BancoQuestoesTab() {
     });
     todasQuestoes.forEach((q) => {
       const disc = q.disciplina || "Sem disciplina";
-      const materia = q.assunto || "Geral"; 
+      const materia = q.assunto || "Geral";
       const assunto = q.subassunto || "Geral";
       if (!tree[disc]) tree[disc] = {};
       if (!tree[disc][materia]) tree[disc][materia] = new Set();
@@ -269,6 +273,19 @@ export function BancoQuestoesTab() {
 
   if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (error) return <div className="rf-card p-6 text-center"><p className="text-accent">{error}</p><button onClick={load} className="mt-4 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground">Tentar novamente</button></div>;
+
+  // Texto do filtro atual para o player inline
+  const textoDoFiltroAtual = useMemo(() => {
+    const partes: string[] = [];
+    if (fDisciplina) partes.push(fDisciplina);
+    if (fMateria) partes.push(fMateria);
+    if (fAssunto) partes.push(fAssunto);
+    if (fBanca) partes.push(fBanca);
+    if (fAno) partes.push(fAno);
+    if (fTipo) partes.push(fTipo === "multipla_escolha" ? "Múltipla escolha" : "Certo/Errado");
+    if (busca) partes.push(`Busca: "${busca}"`);
+    return partes.join(" · ") || "Todas as questões";
+  }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
 
   return (
     <>
@@ -331,7 +348,6 @@ export function BancoQuestoesTab() {
                 <BarChart3 className="h-4 w-4" /> Relatório
               </button>
               <button onClick={() => setViewMode("cadernos")} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 transition-colors"><Folder className="h-4 w-4" /> Meus Cadernos</button>
-              {filtradas.length > 0 && (<button onClick={() => setModalPraticar(true)} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"><Play className="h-4 w-4" /> Responder</button>)}
             </div>
           </div>
 
@@ -369,6 +385,42 @@ export function BancoQuestoesTab() {
                 {temFiltroAtivo && (<button onClick={limparFiltros} className="inline-flex items-center gap-1 text-foreground/55 hover:text-foreground"><X className="h-3 w-3" /> Limpar filtros</button>)}
               </div>
             </div>
+          </div>
+
+          {/* Segmented control: Lista / Praticar */}
+          <div className="mb-4 flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-border bg-surface p-1">
+              <button
+                type="button"
+                onClick={() => setPraticando({ on: false, start: 0 })}
+                className={[
+                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  !praticando.on
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-foreground/70 hover:text-foreground hover:bg-surface-2"
+                ].join(" ")}
+              >
+                <FileText className="h-4 w-4" />
+                <span className="hidden sm:inline">Lista</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => filtradas.length > 0 && setPraticando({ on: true, start: 0 })}
+                disabled={filtradas.length === 0}
+                className={[
+                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  praticando.on
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-foreground/70 hover:text-foreground hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                ].join(" ")}
+              >
+                <Play className="h-4 w-4" />
+                <span className="hidden sm:inline">Praticar</span>
+              </button>
+            </div>
+            {filtradas.length === 0 && (
+              <span className="text-xs text-foreground/45">Nenhuma questão no filtro para praticar</span>
+            )}
           </div>
 
           {filtradas.length > 0 && cadernos.length > 0 && (
@@ -423,14 +475,30 @@ export function BancoQuestoesTab() {
               <p className="text-xs text-foreground/45">Nenhuma questão encontrada com esses filtros.</p>
               {temFiltroAtivo && (<button onClick={limparFiltros} className="mt-3 text-xs text-primary hover:underline">Limpar filtros</button>)}
             </div>
+          ) : praticando.on ? (
+            <BancoPlayerInline
+              userId={user!.id}
+              questoes={filtradas}
+              startIndex={praticando.start}
+              resumoFiltro={textoDoFiltroAtual}
+              onSair={() => setPraticando({ on: false, start: 0 })}
+            />
           ) : (
             <>
               <div className="rf-card p-2 sm:p-3">
                 <ul className="divide-y divide-border">
                   {filtradasPaginadas.map((q) => (
                     <li key={q.id}>
-                      <div className="flex gap-3 py-3">
-                        <input type="checkbox" checked={selecionadas.has(q.id)} onChange={() => toggleSelecionada(q.id)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]" />
+                      <div
+                        className="flex gap-3 py-3 cursor-pointer hover:bg-surface/30 transition-colors"
+                        onClick={() => setPraticando({ on: true, start: filtradas.indexOf(q) })}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selecionadas.has(q.id)}
+                          onChange={(e) => { e.stopPropagation(); toggleSelecionada(q.id); }}
+                          className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]"
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="mb-1 flex flex-wrap items-center gap-1.5">
                             <Badge>{q.banca}</Badge>
@@ -442,6 +510,7 @@ export function BancoQuestoesTab() {
                           </div>
                           <p className="line-clamp-2 text-sm text-foreground/85">{stripHtml(q.enunciado)}</p>
                         </div>
+                        <Play className="h-4 w-4 text-foreground/30 shrink-0 self-center" aria-hidden="true" />
                       </div>
                     </li>
                   ))}
@@ -462,19 +531,16 @@ export function BancoQuestoesTab() {
 
       {modalNovaPasta && user?.id && (<PastaModal userId={user.id} onClose={() => setModalNovaPasta(false)} onSuccess={() => { setModalNovaPasta(false); load(); }} />)}
       {modalEditarPasta && user?.id && (<PastaModal userId={user.id} pasta={modalEditarPasta} onClose={() => setModalEditarPasta(null)} onSuccess={() => { setModalEditarPasta(null); load(); }} />)}
-      
       {modalNovoCaderno && user?.id && (
-        <CadernoModal 
-          userId={user.id} pastas={pastas} questoesIds={Array.from(selecionadas)} questoesCompletas={todasQuestoes.filter(q => selecionadas.has(q.id))} 
-          onClose={() => setModalNovoCaderno(false)} 
-          onSuccess={() => { setModalNovoCaderno(false); setSelecionadas(new Set()); load(); toast.success("Caderno(s) criado(s)!"); }} 
+        <CadernoModal
+          userId={user.id} pastas={pastas} questoesIds={Array.from(selecionadas)} questoesCompletas={todasQuestoes.filter(q => selecionadas.has(q.id))}
+          onClose={() => setModalNovoCaderno(false)}
+          onSuccess={() => { setModalNovoCaderno(false); setSelecionadas(new Set()); load(); toast.success("Caderno(s) criado(s)!"); }}
         />
       )}
-      
       {modalEditarCaderno && user?.id && (<CadernoModal userId={user.id} pastas={pastas} caderno={modalEditarCaderno} onClose={() => setModalEditarCaderno(null)} onSuccess={() => { setModalEditarCaderno(null); load(); toast.success("Caderno atualizado!"); }} />)}
       {modalPraticar && user?.id && (<PlayerLivreModal userId={user.id} questoes={filtradas} onClose={() => { setModalPraticar(false); load(); }} />)}
       {cadernoAberto && user?.id && (<CadernoDetalhesModal caderno={cadernoAberto} userId={user.id} onClose={() => setCadernoAberto(null)} onUpdate={load} />)}
-      
       {modalFiltro && (
         <FiltroHierarquiaModal
           hierarquia={hierarquia}
@@ -486,11 +552,9 @@ export function BancoQuestoesTab() {
           onClose={() => setModalFiltro(false)}
         />
       )}
-
       {modalRelatorio && user?.id && (
         <RelatorioDesempenhoModal userId={user.id} onClose={() => setModalRelatorio(false)} />
       )}
-
       {cadernoRevisando && user?.id && (
         <CadernoRevisao
           caderno={cadernoRevisando}
