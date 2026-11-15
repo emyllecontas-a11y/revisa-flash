@@ -314,7 +314,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid lg:grid-cols-2 bg-background">
       {/* COLUNA ESQUERDA — Painel de marca (hidden lg:flex) */}
-      <div className="hidden lg:flex flex-col items-center justify-center bg-surface p-8 relative overflow-hidden">
+      <div className="hidden lg:flex flex-col items-center justify-center bg-gradient-to-b from-white via-surface/95 to-surface p-8 relative overflow-hidden">
         {/* Fundo decorativo */}
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
@@ -324,15 +324,14 @@ export default function LoginPage() {
         <div className="relative z-10 flex flex-col items-center justify-center h-full w-full max-w-lg">
           {/* Logo Una Vox pequena no topo */}
           <div className="mb-10 flex items-center gap-2">
-            <UnaVoxLogo variant="wordmark" className="h-9 w-auto" />
+            <UnaVoxLogo variant="wordmark" className="h-9 w-auto text-foreground" />
           </div>
 
-          {/* Círculo grande com mascote Lumi */}
+          {/* Círculo grande com logo Una Vox */}
           <div className="relative mb-10">
-            <div className="relative flex h-72 w-72 items-center justify-center rounded-full border-4 border-primary/40 bg-surface p-6 shadow-elevated">
-              <img
-                src={lumiBoasVindas}
-                alt="Lumi, a mascote da Una Vox"
+            <div className="relative flex h-72 w-72 items-center justify-center rounded-full border-4 border-primary/40 bg-white/60 p-6 shadow-elevated">
+              <UnaVoxLogo
+                variant="simbolo"
                 className="h-full w-full max-h-[240px] max-w-[240px] object-contain"
               />
             </div>
