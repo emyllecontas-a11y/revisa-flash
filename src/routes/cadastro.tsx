@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useSignUp } from '@clerk/react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { LogoIcon } from '@/components/LogoIcon';
+import { UnaVoxLogo } from '@/components/UnaVoxLogo';
 import { Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 
 function GoogleIcon({ className }: { className?: string }) {
@@ -125,7 +125,7 @@ export default function CadastroPage() {
 
         {/* Logo + Nome */}
         <div className="mb-6 flex flex-col items-center gap-3">
-          <LogoIcon size={56} />
+          <UnaVoxLogo variant="completa" className="h-14 w-auto" />
           <h1 className="font-display text-2xl font-bold text-white">Una Vox</h1>
         </div>
 

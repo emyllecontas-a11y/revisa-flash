@@ -20,7 +20,7 @@ import { MiniMusicPlayer } from './components/MiniMusicPlayer';
 import { getDb, syncWithSupabase } from './lib/db';
 import { supabase } from './lib/supabaseClient';
 import { processPendingOperations } from '@/services/queueService';
-import { LogoIcon } from '@/components/LogoIcon';
+import { UnaVoxLogo } from '@/components/UnaVoxLogo';
 import './styles.css';
 import './styles/pdf.css';
 import { addRxPlugin } from 'rxdb';
@@ -205,9 +205,9 @@ function Root() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <LogoIcon size={56} className="animate-pulse" />
+          <UnaVoxLogo variant="completa" className="h-14 w-auto animate-pulse" />
           <p className="text-sm text-foreground/55">
-            {!isLoaded ? 'Autenticando...' : 'Carregando dados...'}
+            {!isLoaded ? 'Autenticando...' : 'Carregando Una Vox...'}
           </p>
         </div>
       </div>

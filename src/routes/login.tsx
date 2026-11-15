@@ -2,7 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { useSignIn, useUser } from "@clerk/react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
-import { LogoIcon } from "@/components/LogoIcon";
+import { UnaVoxLogo } from "@/components/UnaVoxLogo";
 import { Eye, EyeOff, Loader2, Mail, ArrowLeft, AlertCircle } from "lucide-react";
 
 function GoogleIcon({ className }: { className?: string }) {
@@ -315,7 +315,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md flex flex-col items-center">
         {/* Logo + Nome */}
         <div className="mb-6 flex flex-col items-center gap-3">
-          <LogoIcon size={56} />
+          <UnaVoxLogo variant="completa" className="h-14 w-auto" />
           <h1 className="font-display text-2xl font-bold text-white">Una Vox</h1>
         </div>
 

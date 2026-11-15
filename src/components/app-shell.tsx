@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Home, BookOpen, Calendar, AlertTriangle, Layers, FileText, Settings,
-  Flame, LogOut, ChevronRight, User, Zap, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Video,
+  Flame, LogOut, ChevronRight, User, RefreshCw, Loader2, Timer, MoreHorizontal, X, Users, Video,
   PanelLeftClose, PanelLeftOpen
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -12,7 +12,7 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useClerk } from "@clerk/react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
 import { useStudy } from "@/contexts/StudyContext";
-import { LogoIcon } from "@/components/LogoIcon";
+import { UnaVoxLogo } from "@/components/UnaVoxLogo";
 import { syncWithSupabase, readLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
 import { useErrors } from '@/contexts/ErrorContext';
@@ -29,13 +29,8 @@ function LoadingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="text-center">
-        <div className="relative mx-auto h-16 w-16">
-          <div className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
-          <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <Zap className="h-8 w-8 text-primary" />
-          </div>
-        </div>
-        <p className="mt-4 text-sm font-medium text-foreground/70">Carregando...</p>
+        <UnaVoxLogo variant="completa" className="h-16 w-auto mx-auto animate-pulse" />
+        <p className="mt-4 text-sm font-medium text-foreground/70">Carregando Una Vox...</p>
         <p className="mt-1 text-xs text-foreground/40">Preparando seus dados</p>
       </div>
     </div>
@@ -349,12 +344,10 @@ function AppShellInner({
       >
         <div className={`flex items-center ${isSidebarMinimized ? "justify-center px-2 py-5" : "gap-2.5 px-5 py-5 justify-between"}`}>
           <div className="flex items-center gap-2.5 min-w-0">
-            <LogoIcon size={40} />
+            <UnaVoxLogo variant="simbolo" className="h-8 w-auto" />
             {!isSidebarMinimized && (
               <div className="truncate">
-                <div className="font-display text-base font-bold tracking-tight text-white">
-                  Revisa<span className="text-primary">Flash</span>
-                </div>
+                <div className="font-display text-base font-bold tracking-tight text-white">Una Vox</div>
                 <div className="text-[10px] uppercase tracking-widest text-white/50">ENARE 2026</div>
               </div>
             )}
@@ -451,7 +444,7 @@ function AppShellInner({
             <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
               <div className="flex min-w-0 items-center gap-3">
                 <Link to="/" className="flex items-center gap-2 lg:hidden">
-                  <LogoIcon size={32} />
+                  <UnaVoxLogo variant="simbolo" className="h-7 w-auto" />
                   <span className="font-display text-sm font-semibold">Una Vox</span>
                 </Link>
                 <div className="hidden items-center gap-2 text-xs lg:flex">
