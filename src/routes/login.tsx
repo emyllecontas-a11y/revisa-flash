@@ -325,7 +325,6 @@ export default function LoginPage() {
           {/* Logo Una Vox pequena no topo */}
           <div className="mb-10 flex items-center gap-2">
             <UnaVoxLogo variant="wordmark" className="h-9 w-auto" />
-            <span className="font-display text-lg font-bold text-foreground">Una Vox</span>
           </div>
 
           {/* Círculo grande com logo Una Vox */}
@@ -356,10 +355,11 @@ export default function LoginPage() {
       </div>
 
       {/* COLUNA DIREITA — Formulário */}
-      <div className="flex items-center justify-center bg-white lg:bg-background px-4 py-10 lg:p-8">
+      <div className="flex items-center justify-center bg-gradient-to-b from-white via-background/95 to-background lg:bg-background px-4 py-10 lg:p-8">
         <div className="w-full max-w-md">
-          {/* Logo pequena no mobile (hidden lg:hidden) */}
-          <div className="lg:hidden mb-8 flex flex-col items-center">
+          {/* Logo no mobile (hidden lg:hidden) */}
+          <div className="lg:hidden mb-8 flex flex-col items-center gap-4">
+            <UnaVoxLogo variant="wordmark" className="h-8 w-auto text-foreground" />
             <UnaVoxLogo variant="simbolo" className="h-28 w-auto" />
           </div>
 

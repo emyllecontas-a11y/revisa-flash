@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, CheckCircle2, XCircle, MinusCircle, RotateCcw, BarChart3, Pencil, Trash2, Play } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, Loader2, CheckCircle2, XCircle, MinusCircle, RotateCcw, BarChart3, Pencil, Trash2, Play, Share2 } from "lucide-react";
 import { QuestaoCard, type AlternativaView } from "@/components/QuestaoCard";
-import { getQuestoesDoCaderno } from "@/services/cadernoService";
+import { getQuestoesDoCaderno, getUltimoResultadoCaderno, getTentativasDoCaderno } from "@/services/cadernoService";
 import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotacao } from "@/services/anotacaoQuestaoService";
 import type { AnotacaoQuestao, CampoAlvo, CorGrifo, RectGrifo } from "@/lib/anotacoes-types";
 import { useToast } from "@/hooks/useToast";
