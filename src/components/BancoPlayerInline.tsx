@@ -5,7 +5,7 @@ import { getAnotacoesDeQuestoes, criarAnotacao, removerAnotacao, trocarCorAnotac
 import type { AnotacaoQuestao, CampoAlvo, CorGrifo, RectGrifo } from "@/lib/anotacoes-types";
 import { EnviarErrosModal, type QuestaoErrada } from "@/components/EnviarErrosModal";
 import { useToast } from "@/hooks/useToast";
-import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, ArrowLeft, ArrowRight, X, Send, Clock, Shuffle, Grid, Check, X as XIcon } from "lucide-react";
+import { Loader2, Play, CheckCircle2, XCircle, ChevronLeft, ArrowLeft, ArrowRight, X, Send, Clock, Shuffle, Grid } from "lucide-react";
 
 interface Props {
   userId: string;
@@ -21,8 +21,14 @@ function formatarTempo(segundos: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+// getCorreta FORA do componente — evita TDZ e recriação a cada render
+function getCorreta(q: QuestaoBanco): string | null {
+  if (q.tipo_questao === 'multipla_escolha') return q.gabarito_letra?.toUpperCase() || null;
+  return q.gabarito_ce ? 'C' : 'E';
+}
+
 export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFiltro, onSair }: Props) {
-  // ===== TODOS OS HOOKS NO TOPO (sem return antecipado) =====
+  // ===== 1. useState =====
   const toast = useToast();
   const [idx, setIdx] = useState(startIndex);
   const [selecionada, setSelecionada] = useState<string | null>(null);
@@ -32,15 +38,17 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
   const [erros, setErros] = useState(0);
   const [questoesErradas, setQuestoesErradas] = useState<{ q: QuestaoBanco, suaResposta: string, respostaCorreta: string }[]>([]);
   const [tempoQuestao, setTempoQuestao] = useState(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [eliminadas, setEliminadas] = useState<Record<number, string[]>>({});
   const [anotacoes, setAnotacoes] = useState<Map<string, AnotacaoQuestao[]>>(new Map());
   const [modalEnviar, setModalEnviar] = useState(false);
   const [vistas, setVistas] = useState<Set<number>>(new Set());
 
-  // Derivados com optional chaining para tolerar undefined
-  const questaoAtual = questoes[idx];
+  // ===== 2. useRef =====
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ===== 3. Variáveis derivadas SIMPLES (sem hooks) — ANTES de useMemo/useCallback/useEffect =====
   const total = questoes.length;
+  const questaoAtual = idx < total ? questoes[idx] : undefined;
   const respondida = questaoAtual ? !!respostasConfirmadas[questaoAtual.id] : false;
   const respondidas = Object.keys(respostasConfirmadas).length;
   const correta = questaoAtual ? getCorreta(questaoAtual) : null;
@@ -48,7 +56,7 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
   const respostaConfirmada = questaoAtual ? respostasConfirmadas[questaoAtual.id] : null;
   const selecionadaAtual = respostaConfirmada || selecionada;
 
-  // alternativasView com useMemo para estabilidade
+  // ===== 4. useMemo =====
   const alternativasView = useMemo(() => {
     if (!questaoAtual) return [];
     if (questaoAtual.tipo_questao === 'certo_errado') {
@@ -63,7 +71,6 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     }));
   }, [questaoAtual]);
 
-  // errosFormatados com useMemo
   const errosFormatados = useMemo<QuestaoErrada[]>(() => {
     return questoesErradas.map((item, index) => {
       const q = item.q;
@@ -91,96 +98,7 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     });
   }, [questoesErradas]);
 
-  // ===== EFEITOS (sempre executam, usam guards internos) =====
-
-  // Carregar anotações das questões
-  useEffect(() => {
-    if (!userId || questoes.length === 0) return;
-    const ids = questoes.map(q => q.id);
-    getAnotacoesDeQuestoes(userId, 'banco' as any, ids).then(setAnotacoes).catch(() => {});
-  }, [userId, questoes]);
-
-  // Timer
-  useEffect(() => {
-    if (!respondida && questaoAtual) {
-      timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [respondida, questaoAtual]);
-
-  // Marcar questão atual como vista
-  useEffect(() => {
-    if (questaoAtual) {
-      setVistas(prev => new Set([...prev, idx]));
-    }
-  }, [idx, questaoAtual]);
-
-  // Buscar comentário sob demanda quando a questão é revelada
-  useEffect(() => {
-    if (respondida && questaoAtual && !questaoAtual.comentario) {
-      buscarComentarioSobDemanda(questaoAtual.id).then(res => {
-        if (res.success && res.comentario) {
-          // O QuestaoCard já usa useComentarioQuestao que faz isso automaticamente
-        }
-      }).catch(() => {});
-    }
-  }, [respondida, questaoAtual]);
-
-  // Atalhos de teclado
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
-
-      const tecla = e.key.toUpperCase();
-      const numeros = ["1", "2", "3", "4", "5"];
-      const letras = ["A", "B", "C", "D", "E"];
-
-      if (!respondida && questaoAtual?.tipo_questao === 'multipla_escolha' && questaoAtual?.alternativas) {
-        let letraAlvo = null;
-        const idxNum = numeros.indexOf(tecla);
-        if (idxNum >= 0) letraAlvo = letras[idxNum];
-        else if (letras.includes(tecla)) letraAlvo = tecla;
-
-        if (letraAlvo) {
-          const existe = questaoAtual!.alternativas.some(a => a.letra === letraAlvo);
-          const elims = eliminadas[idx] || [];
-          if (existe && !elims.includes(letraAlvo)) {
-            e.preventDefault();
-            setSelecionada(letraAlvo);
-            return;
-          }
-        }
-      } else if (!respondida && questaoAtual?.tipo_questao === 'certo_errado') {
-        if (tecla === "1" || tecla === "C") { e.preventDefault(); setSelecionada("C"); return; }
-        if (tecla === "2" || tecla === "E") { e.preventDefault(); setSelecionada("E"); return; }
-      }
-
-      if (e.key === "Enter" && selecionada && !respondida) {
-        e.preventDefault();
-        handleResponder();
-        return;
-      }
-
-      if (e.key === "ArrowLeft") { e.preventDefault(); voltar(); return; }
-      if (e.key === "ArrowRight" || e.key === " ") {
-        e.preventDefault();
-        if (respondida) avancar();
-        return;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [idx, respondida, selecionada, questaoAtual, eliminadas, handleResponder, avancar, voltar]);
-
-  // ===== FUNÇÕES AUXILIARES =====
-  const getCorreta = useCallback((q: QuestaoBanco): string | null => {
-    if (q.tipo_questao === 'multipla_escolha') return q.gabarito_letra?.toUpperCase() || null;
-    return q.gabarito_ce ? 'C' : 'E';
-  }, []);
-
+  // ===== 5. useCallback =====
   const handleResponder = useCallback(async () => {
     if (!selecionada || respondida || !questaoAtual) return;
 
@@ -198,39 +116,31 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     setSalvando(true);
     await salvarTentativaAvulsa(userId, questaoAtual.id, selecionada, acertou, tempoQuestao);
     setSalvando(false);
-  }, [selecionada, respondida, questaoAtual, getCorreta, userId, tempoQuestao]);
+  }, [selecionada, respondida, questaoAtual, userId, tempoQuestao]);
 
   const avancar = useCallback(() => {
-    if (idx === total - 1) {
-      setIdx(0);
-    } else {
-      setIdx(prev => prev + 1);
-    }
+    setIdx(prev => (prev === total - 1 ? 0 : prev + 1));
     setSelecionada(null);
     setTempoQuestao(0);
-  }, [idx, total]);
+  }, [total]);
 
   const voltar = useCallback(() => {
-    if (idx > 0) {
-      setIdx(prev => prev - 1);
-      setSelecionada(null);
-      setTempoQuestao(0);
-    }
-  }, [idx]);
+    setIdx(prev => (prev > 0 ? prev - 1 : 0));
+    setSelecionada(null);
+    setTempoQuestao(0);
+  }, []);
 
   const proximaAleatoria = useCallback(() => {
     const naoVistas = Array.from({ length: total }, (_, i) => i).filter(i => !vistas.has(i));
     if (naoVistas.length === 0) {
       setVistas(new Set());
-      const proximo = Math.floor(Math.random() * total);
-      setIdx(proximo);
+      setIdx(Math.floor(Math.random() * total));
     } else {
-      const proximo = naoVistas[Math.floor(Math.random() * naoVistas.length)];
-      setIdx(proximo);
+      setIdx(naoVistas[Math.floor(Math.random() * naoVistas.length)]);
     }
     setSelecionada(null);
     setTempoQuestao(0);
-  }, [total, vistas, setIdx]);
+  }, [total, vistas]);
 
   const toggleEliminada = useCallback((letra: string) => {
     if (respondida) return;
@@ -278,7 +188,81 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
     });
   }, []);
 
-  // ===== RENDER =====
+  // ===== 6. useEffect =====
+  useEffect(() => {
+    if (!userId || questoes.length === 0) return;
+    const ids = questoes.map(q => q.id);
+    getAnotacoesDeQuestoes(userId, 'banco' as any, ids).then(setAnotacoes).catch(() => {});
+  }, [userId, questoes]);
+
+  useEffect(() => {
+    if (!respondida && questaoAtual) {
+      timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [respondida, questaoAtual]);
+
+  useEffect(() => {
+    if (questaoAtual) {
+      setVistas(prev => new Set([...prev, idx]));
+    }
+  }, [idx, questaoAtual]);
+
+  useEffect(() => {
+    if (respondida && questaoAtual && !questaoAtual.comentario) {
+      buscarComentarioSobDemanda(questaoAtual.id).catch(() => {});
+    }
+  }, [respondida, questaoAtual]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      const tecla = e.key.toUpperCase();
+      const numeros = ["1", "2", "3", "4", "5"];
+      const letras = ["A", "B", "C", "D", "E"];
+
+      if (!respondida && questaoAtual?.tipo_questao === 'multipla_escolha' && questaoAtual?.alternativas) {
+        let letraAlvo: string | null = null;
+        const idxNum = numeros.indexOf(tecla);
+        if (idxNum >= 0) letraAlvo = letras[idxNum];
+        else if (letras.includes(tecla)) letraAlvo = tecla;
+
+        if (letraAlvo) {
+          const existe = questaoAtual!.alternativas.some(a => a.letra === letraAlvo);
+          const elims = eliminadas[idx] || [];
+          if (existe && !elims.includes(letraAlvo)) {
+            e.preventDefault();
+            setSelecionada(letraAlvo);
+            return;
+          }
+        }
+      } else if (!respondida && questaoAtual?.tipo_questao === 'certo_errado') {
+        if (tecla === "1" || tecla === "C") { e.preventDefault(); setSelecionada("C"); return; }
+        if (tecla === "2" || tecla === "E") { e.preventDefault(); setSelecionada("E"); return; }
+      }
+
+      if (e.key === "Enter" && selecionada && !respondida) {
+        e.preventDefault();
+        handleResponder();
+        return;
+      }
+
+      if (e.key === "ArrowLeft") { e.preventDefault(); voltar(); return; }
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        if (respondida) avancar();
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [idx, respondida, selecionada, questaoAtual, eliminadas, handleResponder, avancar, voltar]);
+
+  // ===== 7. RENDER =====
   return (
     <div className="flex flex-col h-full min-h-[calc(100vh-200px)] bg-background">
       {/* Cabeçalho do player */}
