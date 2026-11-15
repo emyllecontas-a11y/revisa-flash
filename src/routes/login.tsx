@@ -1,17 +1,29 @@
-import { useState, useEffect, FormEvent } from 'react';
-import { useSignIn, useUser } from '@clerk/react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { useAppUser } from '@/contexts/UserContext';
-import { LogoIcon } from '@/components/LogoIcon';
-import { Eye, EyeOff, Loader2, Mail, ArrowLeft, AlertCircle } from 'lucide-react';
+import { useState, useEffect, FormEvent } from "react";
+import { useSignIn, useUser } from "@clerk/react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useAppUser } from "@/contexts/UserContext";
+import { LogoIcon } from "@/components/LogoIcon";
+import { Eye, EyeOff, Loader2, Mail, ArrowLeft, AlertCircle } from "lucide-react";
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+      />
     </svg>
   );
 }
@@ -19,7 +31,7 @@ function GoogleIcon({ className }: { className?: string }) {
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const redirectParam = searchParams.get('redirect') || '/';
+  const redirectParam = searchParams.get("redirect") || "/";
   const isDev = import.meta.env.DEV;
 
   const { isLoaded: clerkIsLoaded, signIn, setActive } = useSignIn();
@@ -49,17 +61,17 @@ export default function LoginPage() {
 
   const isLoaded = clerkIsLoaded || forcedLoaded;
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Estados para segundo fator (Device Trust / MFA)
-  const [step, setStep] = useState<'password' | 'second_factor'>('password');
-  const [secondFactorCode, setSecondFactorCode] = useState('');
-  const [secondFactorStrategy, setSecondFactorStrategy] = useState<'email_code'>('email_code');
+  const [step, setStep] = useState<"password" | "second_factor">("password");
+  const [secondFactorCode, setSecondFactorCode] = useState("");
+  const [secondFactorStrategy, setSecondFactorStrategy] = useState<"email_code">("email_code");
   const [codeSent, setCodeSent] = useState(false);
   const [secondFactorLoading, setSecondFactorLoading] = useState(false);
 
@@ -69,12 +81,12 @@ export default function LoginPage() {
     setGoogleLoading(true);
     try {
       await signIn.authenticateWithRedirect({
-        strategy: 'oauth_google',
-        redirectUrl: '/sso-callback',
+        strategy: "oauth_google",
+        redirectUrl: "/sso-callback",
         redirectUrlComplete: redirectParam,
       });
     } catch (err: any) {
-      setError(err?.errors?.[0]?.message || 'Não foi possível entrar com Google.');
+      setError(err?.errors?.[0]?.message || "Não foi possível entrar com Google.");
       setGoogleLoading(false);
     }
   };
@@ -86,7 +98,7 @@ export default function LoginPage() {
     setError(null);
 
     if (!email.trim() || !password) {
-      setError('Preencha o e-mail e a senha.');
+      setError("Preencha o e-mail e a senha.");
       return;
     }
 
@@ -108,16 +120,16 @@ export default function LoginPage() {
         identifier: email.trim(),
       });
 
-      await signIn.selectFirstFactor('password');
+      await signIn.selectFirstFactor("password");
 
       await signIn.password({
         password,
       });
 
       // Se status for 'complete', finaliza direto
-      if (signIn?.status === 'complete') {
+      if (signIn?.status === "complete") {
         const finalizeResult = await signIn.finalize();
-        if (finalizeResult.status === 'complete') {
+        if (finalizeResult.status === "complete") {
           await setActive({ session: finalizeResult.createdSessionId });
           navigate(redirectParam, { replace: true });
           return;
@@ -127,19 +139,19 @@ export default function LoginPage() {
       // Status 'needs_client_trust' = Device Trust (dispositivo novo/desconhecido)
       // Status 'needs_second_factor' = MFA do usuário (2FA habilitado)
       // Ambos exigem segundo fator. O Clerk v6 expõe supportedSecondFactors no secondFactorVerification.
-      if (signIn?.status === 'needs_client_trust' || signIn?.status === 'needs_second_factor') {
+      if (signIn?.status === "needs_client_trust" || signIn?.status === "needs_second_factor") {
         // Verifica quais fatores de segundo fator estão disponíveis
         const supportedFactors = signIn?.secondFactorVerification?.supportedSecondFactors || [];
 
         // Preferir email_code se disponível (Device Trust usa email_code por padrão)
-        const hasEmailCode = supportedFactors.includes('email_code');
-        const hasPhoneCode = supportedFactors.includes('phone_code');
-        const hasAuthenticator = supportedFactors.includes('totp');
+        const hasEmailCode = supportedFactors.includes("email_code");
+        const hasPhoneCode = supportedFactors.includes("phone_code");
+        const hasAuthenticator = supportedFactors.includes("totp");
 
-        let chosenStrategy: 'email_code' | 'phone_code' | 'totp' = 'email_code';
-        if (hasEmailCode) chosenStrategy = 'email_code';
-        else if (hasPhoneCode) chosenStrategy = 'phone_code';
-        else if (hasAuthenticator) chosenStrategy = 'totp';
+        let chosenStrategy: "email_code" | "phone_code" | "totp" = "email_code";
+        if (hasEmailCode) chosenStrategy = "email_code";
+        else if (hasPhoneCode) chosenStrategy = "phone_code";
+        else if (hasAuthenticator) chosenStrategy = "totp";
 
         setSecondFactorStrategy(chosenStrategy);
 
@@ -147,35 +159,37 @@ export default function LoginPage() {
         await signIn.prepareSecondFactor({ strategy: chosenStrategy });
 
         setCodeSent(true);
-        setStep('second_factor');
+        setStep("second_factor");
         return;
       }
 
       // Outros status não-completos
-      setError(`Não foi possível concluir o login (Status: ${signIn?.status || 'desconhecido'}).`);
+      setError(`Não foi possível concluir o login (Status: ${signIn?.status || "desconhecido"}).`);
     } catch (err: any) {
       // Tratamento específico: "You're already signed in" — usuário já tem sessão ativa
       const clerkErrors = err?.errors;
       if (Array.isArray(clerkErrors) && clerkErrors.length > 0) {
         const firstError = clerkErrors[0];
         const errorCode = firstError?.code;
-        const errorMessage = firstError?.longMessage || firstError?.message || '';
+        const errorMessage = firstError?.longMessage || firstError?.message || "";
 
         // Se o erro indica que o usuário já está logado, redireciona silenciosamente
-        if (errorCode === 'form_identifier_exists' ||
-            errorCode === 'already_signed_in' ||
-            errorMessage.toLowerCase().includes('already signed in') ||
-            errorMessage.toLowerCase().includes('já está logado')) {
+        if (
+          errorCode === "form_identifier_exists" ||
+          errorCode === "already_signed_in" ||
+          errorMessage.toLowerCase().includes("already signed in") ||
+          errorMessage.toLowerCase().includes("já está logado")
+        ) {
           navigate(redirectParam, { replace: true });
           return;
         }
 
         // Códigos comuns que indicam configuração faltando no painel do Clerk
         const configCodes = [
-          'form_password_not_enabled',
-          'form_identifier_not_enabled',
-          'form_identifier_verification_required',
-          'form_email_not_verified',
+          "form_password_not_enabled",
+          "form_identifier_not_enabled",
+          "form_identifier_verification_required",
+          "form_email_not_verified",
         ];
 
         if (configCodes.includes(errorCode)) {
@@ -186,7 +200,11 @@ export default function LoginPage() {
       }
 
       const clerkError = err?.errors?.[0];
-      const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'E-mail ou senha incorretos.';
+      const errorMsg =
+        clerkError?.longMessage ||
+        clerkError?.message ||
+        err?.message ||
+        "E-mail ou senha incorretos.";
       setError(errorMsg);
     } finally {
       setLoading(false);
@@ -200,7 +218,7 @@ export default function LoginPage() {
     setError(null);
 
     if (!secondFactorCode.trim()) {
-      setError('Digite o código recebido.');
+      setError("Digite o código recebido.");
       return;
     }
 
@@ -212,9 +230,9 @@ export default function LoginPage() {
       });
 
       // Se o segundo fator foi verificado com sucesso, finaliza a sessão
-      if (signIn?.status === 'complete') {
+      if (signIn?.status === "complete") {
         const finalizeResult = await signIn.finalize();
-        if (finalizeResult.status === 'complete') {
+        if (finalizeResult.status === "complete") {
           await setActive({ session: finalizeResult.createdSessionId });
           navigate(redirectParam, { replace: true });
           return;
@@ -222,35 +240,42 @@ export default function LoginPage() {
       }
 
       // Se ainda precisa de segundo fator (ex: código errado, expirou, ou precisa de outro fator)
-      if (signIn?.status === 'needs_second_factor' || signIn?.status === 'needs_client_trust') {
+      if (signIn?.status === "needs_second_factor" || signIn?.status === "needs_client_trust") {
         // Verifica se houve erro específico no segundo fator
         const secondFactorError = signIn?.secondFactorVerification?.error;
         if (secondFactorError) {
-          if (secondFactorError.code === 'form_code_incorrect' || secondFactorError.code === 'form_code_expired') {
-            setError('Código incorreto ou expirado. Tente novamente.');
-            setSecondFactorCode('');
+          if (
+            secondFactorError.code === "form_code_incorrect" ||
+            secondFactorError.code === "form_code_expired"
+          ) {
+            setError("Código incorreto ou expirado. Tente novamente.");
+            setSecondFactorCode("");
             setSecondFactorLoading(false);
             return;
           }
         }
 
-        setError('Não foi possível verificar o código. Tente novamente.');
-        setSecondFactorCode('');
+        setError("Não foi possível verificar o código. Tente novamente.");
+        setSecondFactorCode("");
         return;
       }
 
       // Outros status não-completos
-      setError(`Não foi possível concluir o login (Status: ${signIn?.status || 'desconhecido'}).`);
+      setError(`Não foi possível concluir o login (Status: ${signIn?.status || "desconhecido"}).`);
     } catch (err: any) {
       const clerkError = err?.errors?.[0];
       const errorCode = clerkError?.code;
-      const errorMsg = clerkError?.longMessage || clerkError?.message || err?.message || 'Erro ao verificar código.';
+      const errorMsg =
+        clerkError?.longMessage ||
+        clerkError?.message ||
+        err?.message ||
+        "Erro ao verificar código.";
 
       // Tratamento específico de erros de código
-      if (errorCode === 'form_code_incorrect' || errorCode === 'form_code_expired') {
-        setError('Código incorreto ou expirado. Verifique seu e-mail e tente novamente.');
-      } else if (errorCode === 'form_code_not_found') {
-        setError('Código não encontrado. Solicite um novo código.');
+      if (errorCode === "form_code_incorrect" || errorCode === "form_code_expired") {
+        setError("Código incorreto ou expirado. Verifique seu e-mail e tente novamente.");
+      } else if (errorCode === "form_code_not_found") {
+        setError("Código não encontrado. Solicite um novo código.");
         setCodeSent(false);
       } else {
         setError(errorMsg);
@@ -271,7 +296,7 @@ export default function LoginPage() {
       setError(null);
     } catch (err: any) {
       const clerkError = err?.errors?.[0];
-      setError(clerkError?.longMessage || clerkError?.message || 'Erro ao reenviar código.');
+      setError(clerkError?.longMessage || clerkError?.message || "Erro ao reenviar código.");
     } finally {
       setSecondFactorLoading(false);
     }
@@ -279,8 +304,8 @@ export default function LoginPage() {
 
   // Voltar para etapa de senha
   const handleBackToPassword = () => {
-    setStep('password');
-    setSecondFactorCode('');
+    setStep("password");
+    setSecondFactorCode("");
     setCodeSent(false);
     setError(null);
   };
@@ -288,7 +313,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-md flex flex-col items-center">
-
         {/* Logo + Nome */}
         <div className="mb-6 flex flex-col items-center gap-3">
           <LogoIcon size={56} />
@@ -298,7 +322,9 @@ export default function LoginPage() {
         {/* Card */}
         <div className="w-full rounded-3xl border border-border bg-surface p-7 shadow-elevated">
           <header className="mb-6">
-            <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Bem-vinda de volta</h2>
+            <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
+              Bem-vinda de volta
+            </h2>
             <p className="text-sm text-foreground/55 mt-1">Entre para continuar seus estudos.</p>
           </header>
 
@@ -309,11 +335,7 @@ export default function LoginPage() {
             disabled={googleLoading || loading}
             className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-surface-2 px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-2/70 transition-colors disabled:opacity-50"
           >
-            {googleLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <GoogleIcon />
-            )}
+            {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
             Continuar com Google
           </button>
 
@@ -323,15 +345,22 @@ export default function LoginPage() {
               <div className="w-full border-t border-border"></div>
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-surface px-3 text-xs uppercase tracking-widest text-foreground/40">ou</span>
+              <span className="bg-surface px-3 text-xs uppercase tracking-widest text-foreground/40">
+                ou
+              </span>
             </div>
           </div>
 
           {/* Form - Etapa 1: Senha */}
-          {step === 'password' && (
+          {step === "password" && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-foreground/80 mb-1.5">E-mail</label>
+                <label
+                  htmlFor="email"
+                  className="block text-sm font-medium text-foreground/80 mb-1.5"
+                >
+                  E-mail
+                </label>
                 <input
                   id="email"
                   type="email"
@@ -346,7 +375,12 @@ export default function LoginPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label htmlFor="password" className="block text-sm font-medium text-foreground/80">Senha</label>
+                  <label
+                    htmlFor="password"
+                    className="block text-sm font-medium text-foreground/80"
+                  >
+                    Senha
+                  </label>
                   <Link
                     to="/reset-senha"
                     className="text-xs font-medium text-primary hover:underline"
@@ -357,7 +391,7 @@ export default function LoginPage() {
                 <div className="relative">
                   <input
                     id="password"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     autoComplete="current-password"
                     placeholder="••••••••"
                     value={password}
@@ -369,7 +403,7 @@ export default function LoginPage() {
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 grid h-8 w-8 place-items-center text-foreground/50 hover:text-foreground transition-colors"
-                    aria-label={showPassword ? 'Esconder senha' : 'Mostrar senha'}
+                    aria-label={showPassword ? "Esconder senha" : "Mostrar senha"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -393,14 +427,14 @@ export default function LoginPage() {
                     Entrando...
                   </>
                 ) : (
-                  'Entrar'
+                  "Entrar"
                 )}
               </button>
             </form>
           )}
 
           {/* Form - Etapa 2: Segundo Fator (Device Trust / MFA) */}
-          {step === 'second_factor' && (
+          {step === "second_factor" && (
             <div className="space-y-4">
               {/* Botão voltar */}
               <button
@@ -412,39 +446,45 @@ export default function LoginPage() {
               </button>
 
               <header className="mb-4">
-                <h3 className="font-display text-xl font-bold tracking-tight text-foreground">Verificação de segurança</h3>
+                <h3 className="font-display text-xl font-bold tracking-tight text-foreground">
+                  Verificação de segurança
+                </h3>
                 <p className="text-sm text-foreground/55 mt-1">
-                  {secondFactorStrategy === 'email_code' && (
+                  {secondFactorStrategy === "email_code" && (
                     <>
-                      Enviamos um código de verificação para <strong className="text-foreground">{email}</strong>.
+                      Enviamos um código de verificação para{" "}
+                      <strong className="text-foreground">{email}</strong>.
                     </>
                   )}
-                  {secondFactorStrategy === 'phone_code' && (
-                    <>
-                      Enviamos um código de verificação por SMS.
-                    </>
+                  {secondFactorStrategy === "phone_code" && (
+                    <>Enviamos um código de verificação por SMS.</>
                   )}
-                  {secondFactorStrategy === 'totp' && (
-                    <>
-                      Digite o código do seu aplicativo autenticador.
-                    </>
+                  {secondFactorStrategy === "totp" && (
+                    <>Digite o código do seu aplicativo autenticador.</>
                   )}
                 </p>
               </header>
 
               <form onSubmit={handleSecondFactorSubmit} className="space-y-4">
                 <div>
-                  <label htmlFor="secondFactorCode" className="block text-sm font-medium text-foreground/80 mb-1.5">
-                    {secondFactorStrategy === 'totp' ? 'Código do autenticador' : 'Código de verificação'}
+                  <label
+                    htmlFor="secondFactorCode"
+                    className="block text-sm font-medium text-foreground/80 mb-1.5"
+                  >
+                    {secondFactorStrategy === "totp"
+                      ? "Código do autenticador"
+                      : "Código de verificação"}
                   </label>
                   <input
                     id="secondFactorCode"
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    placeholder={secondFactorStrategy === 'totp' ? '000000' : '000000'}
+                    placeholder={secondFactorStrategy === "totp" ? "000000" : "000000"}
                     value={secondFactorCode}
-                    onChange={(e) => setSecondFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onChange={(e) =>
+                      setSecondFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
                     disabled={secondFactorLoading}
                     autoFocus
                     className="w-full rounded-full border border-border bg-background px-4 py-3 text-center text-lg font-mono tracking-[0.4em] text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
@@ -469,13 +509,13 @@ export default function LoginPage() {
                       Verificando...
                     </>
                   ) : (
-                    'Verificar e entrar'
+                    "Verificar e entrar"
                   )}
                 </button>
               </form>
 
               <p className="mt-4 text-center text-xs text-foreground/45">
-                Não recebeu o código?{' '}
+                Não recebeu o código?{" "}
                 <button
                   type="button"
                   onClick={handleResendCode}
@@ -490,7 +530,7 @@ export default function LoginPage() {
 
           {/* Rodapé */}
           <p className="mt-6 text-center text-sm text-foreground/55">
-            Não tem conta?{' '}
+            Não tem conta?{" "}
             <Link to="/cadastro" className="font-semibold text-primary hover:underline">
               Criar conta
             </Link>

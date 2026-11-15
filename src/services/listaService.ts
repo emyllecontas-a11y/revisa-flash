@@ -1399,3 +1399,228 @@ export async function copiarListaParaMinhaConta(
     return { success: false, error: error.message };
   }
 }
+
+// ============================================================
+// 🔧 FUNÇÃO DE REPARO: Envia TODAS as linhas locais de questoes_lista
+// e listas_questoes ao Supabase em lotes de 100 (upsert onConflict id).
+// Retorna resumo com contagens.
+// ============================================================
+export async function repararVinculosListas(userId: string): Promise<{
+  success: boolean;
+  summary?: {
+    questoesEnviadas: number;
+    vinculosEnviados: number;
+    listasProcessadas: number;
+  };
+  error?: string;
+}> {
+  try {
+    if (!userId) return { success: false, error: 'Usuário não autenticado' };
+
+    const db = await getDb();
+    const supabaseClient = await getSupabaseWithToken();
+    const userIdStr = String(userId);
+
+    console.log('🔧 [Reparar] Iniciando reparo de vínculos de listas...');
+
+    // 1. Enviar TODAS as questoes_lista do usuário
+    const questoesCollection = db.questoes_lista;
+    const localQuestoes = await questoesCollection.find({
+      selector: { user_id: userIdStr, isdeleted: false }
+    }).exec();
+
+    let questoesEnviadas = 0;
+    if (localQuestoes.length > 0) {
+      const qToPush = localQuestoes.map(d => d.toJSON());
+      console.log(`🔧 [Reparar] Enviando ${qToPush.length} questões de questoes_lista em lotes de 100...`);
+
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < qToPush.length; i += CHUNK_SIZE) {
+        const chunk = qToPush.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabaseClient
+          .from('questoes_lista')
+          .upsert(chunk, { onConflict: 'id' });
+        if (error) {
+          console.error(`❌ [Reparar] Falha lote questoes_lista ${i / CHUNK_SIZE + 1}:`, error);
+        } else {
+          questoesEnviadas += chunk.length;
+        }
+      }
+      console.log(`✅ [Reparar] ${questoesEnviadas} questões enviadas.`);
+    }
+
+    // 2. Enviar TODOS os vínculos listas_questoes das listas do usuário
+    const listasCollection = db.listas;
+    const linksCollection = db.listas_questoes;
+
+    const userListas = await listasCollection.find({
+      selector: { user_id: userIdStr, isdeleted: false }
+    }).exec();
+
+    let vinculosEnviados = 0;
+    let listasProcessadas = 0;
+
+    if (userListas.length > 0 && linksCollection) {
+      const listaIds = userListas.map(d => d.get('id'));
+
+      // Buscar todos os vínculos locais dessas listas
+      const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+        const chunks: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+        return chunks;
+      };
+      const chunks = chunkArray(listaIds, 100);
+
+      let allLocalLinks: any[] = [];
+      for (const chunk of chunks) {
+        const localLinks = await linksCollection.find({
+          selector: { lista_id: { $in: chunk } }
+        }).exec();
+        allLocalLinks.push(...localLinks.map(d => d.toJSON()));
+      }
+
+      if (allLocalLinks.length > 0) {
+        console.log(`🔧 [Reparar] Enviando ${allLocalLinks.length} vínculos de listas_questoes em lotes de 100...`);
+        listasProcessadas = userListas.length;
+
+        for (let i = 0; i < allLocalLinks.length; i += CHUNK_SIZE) {
+          const chunk = allLocalLinks.slice(i, i + CHUNK_SIZE);
+          const { error } = await supabaseClient
+            .from('listas_questoes')
+            .upsert(chunk, { onConflict: 'id' });
+          if (error) {
+            console.error(`❌ [Reparar] Falha lote listas_questoes ${i / CHUNK_SIZE + 1}:`, error);
+          } else {
+            vinculosEnviados += chunk.length;
+          }
+        }
+        console.log(`✅ [Reparar] ${vinculosEnviados} vínculos enviados.`);
+      }
+    }
+
+    const summary = {
+      questoesEnviadas,
+      vinculosEnviados,
+      listasProcessadas,
+    };
+
+    console.log('🔧 [Reparar] Concluído:', summary);
+    return { success: true, summary };
+  } catch (error: any) {
+    console.error('❌ [Reparar] Erro:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================================
+// 🔍 VERIFICAÇÃO DE INTEGRIDADE: compara contagem local vs remoto
+// para as listas do usuário. Retorna detalhes e alerta se remoto < local.
+// ============================================================
+export async function verificarIntegridadeListas(userId: string): Promise<{
+  success: boolean;
+  detalhes?: {
+    listas: number;
+    questoesLocal: number;
+    questoesRemoto: number;
+    vinculosLocal: number;
+    vinculosRemoto: number;
+    alerta: boolean;
+    mensagem: string;
+  };
+  error?: string;
+}> {
+  try {
+    if (!userId) return { success: false, error: 'Usuário não autenticado' };
+
+    const db = await getDb();
+    const supabaseClient = await getSupabaseWithToken();
+    const userIdStr = String(userId);
+
+    const listasCollection = db.listas;
+    const linksCollection = db.listas_questoes;
+    const questoesCollection = db.questoes_lista;
+
+    if (!listasCollection || !linksCollection || !questoesCollection) {
+      return { success: false, error: 'Coleções não disponíveis' };
+    }
+
+    const userListas = await listasCollection.find({
+      selector: { user_id: userIdStr, isdeleted: false }
+    }).exec();
+
+    let totalListas = userListas.length;
+    let totalQuestoesLocal = 0;
+    let totalVinculosLocal = 0;
+
+    for (const listaDoc of userListas) {
+      const lista = listaDoc.toJSON();
+      const listaId = lista.id;
+
+      const localLinks = await linksCollection.find({ selector: { lista_id: listaId } }).exec();
+      totalVinculosLocal += localLinks.length;
+
+      const questaoIds = localLinks.map(l => l.get('questao_id')).filter(Boolean);
+      if (questaoIds.length > 0) {
+        const qDocs = await questoesCollection.find({
+          selector: { id: { $in: questaoIds } }
+        }).exec();
+        totalQuestoesLocal += qDocs.length;
+      }
+    }
+
+    // Contagens remotas
+    let totalQuestoesRemoto = 0;
+    let totalVinculosRemoto = 0;
+
+    const { count: qCount } = await supabaseClient
+      .from('questoes_lista')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userIdStr)
+      .eq('isdeleted', false);
+    totalQuestoesRemoto = qCount || 0;
+
+    const listaIds = userListas.map(d => d.get('id'));
+    if (listaIds.length > 0) {
+      const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+        const chunks: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+        return chunks;
+      };
+      const chunks = chunkArray(listaIds, 100);
+      for (const chunk of chunks) {
+        const { count } = await supabaseClient
+          .from('listas_questoes')
+          .select('*', { count: 'exact', head: true })
+          .in('lista_id', chunk);
+        totalVinculosRemoto += count || 0;
+      }
+    }
+
+    const alerta = totalVinculosRemoto < totalVinculosLocal || totalQuestoesRemoto < totalQuestoesLocal;
+    const mensagem = alerta
+      ? `Vínculos dessincronizados: local=${totalVinculosLocal} vínculos/${totalQuestoesLocal} questões, remoto=${totalVinculosRemoto}/${totalQuestoesRemoto}. Use "Reparar listas".`
+      : 'Tudo sincronizado.';
+
+    if (alerta) {
+      console.warn('⚠️ [Integrity] ' + mensagem);
+    } else {
+      console.log('✅ [Integrity] ' + mensagem);
+    }
+
+    return {
+      success: true,
+      detalhes: {
+        listas: totalListas,
+        questoesLocal: totalQuestoesLocal,
+        questoesRemoto: totalQuestoesRemoto,
+        vinculosLocal: totalVinculosLocal,
+        vinculosRemoto: totalVinculosRemoto,
+        alerta,
+        mensagem,
+      },
+    };
+  } catch (error: any) {
+    console.error('❌ [Integrity] Erro:', error);
+    return { success: false, error: error.message };
+  }
+}

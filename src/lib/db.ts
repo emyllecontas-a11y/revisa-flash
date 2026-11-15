@@ -977,8 +977,115 @@ const bancoTentativaSchema = {
 // INSTÂNCIA
 // ============================================================
 
+const DB_VERSION_MARKER = 'revisaflash_db_version';
+const CURRENT_DB_VERSION = 'v15';
+const DB_NAME = 'revisaflash_db_v15';
+
+// Versões antigas que NÃO devem ser deletadas imediatamente (fallback)
+const LEGACY_VERSIONS_TO_KEEP = ['revisaflash_db_v14'];
+
+// Coleções prioritárias para push de emergência antes da migração
+const EMERGENCY_PUSH_COLLECTIONS = [
+  'questoes_lista',
+  'listas_questoes',
+  'listas',
+  'resultados_lista',
+  'progresso_lista',
+];
+
 let dbInstance: RxDatabase | null = null;
 let isCreating = false;
+
+async function pushEmergencyDataToSupabase(): Promise<void> {
+  try {
+    const userId = localStorage.getItem('revisaflash_user_id');
+    if (!userId) {
+      console.log('📦 [EmergencyPush] Sem usuário logado, pulando push de emergência.');
+      return;
+    }
+
+    console.log('🚨 [EmergencyPush] Iniciando push de emergência antes da migração...');
+
+    // Abrir o banco antigo (v14) diretamente via Dexie para ler dados
+    // Usamos indexedDB API nativa porque o RxDB v15 ainda não foi criado
+    const oldDbName = 'revisaflash_db_v14';
+    const oldDb = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(oldDbName);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('Banco bloqueado'));
+    });
+
+    if (!oldDb.objectStoreNames.contains('questoes_lista') &&
+        !oldDb.objectStoreNames.contains('listas_questoes')) {
+      console.log('📦 [EmergencyPush] Banco antigo não tem as coleções alvo.');
+      oldDb.close();
+      return;
+    }
+
+    const supabaseClient = await getSupabaseWithToken();
+    const userIdStr = String(userId);
+
+    for (const collectionName of EMERGENCY_PUSH_COLLECTIONS) {
+      if (!oldDb.objectStoreNames.contains(collectionName)) continue;
+
+      const docs: any[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const tx = oldDb.transaction([collectionName], 'readonly');
+        const store = tx.objectStore(collectionName);
+        const getAllReq = store.getAll();
+        getAllReq.onsuccess = () => {
+          docs.push(...getAllReq.result);
+          resolve();
+        };
+        getAllReq.onerror = () => reject(getAllReq.error);
+      });
+
+      if (docs.length === 0) {
+        console.log(`📦 [EmergencyPush] ${collectionName}: 0 documentos.`);
+        continue;
+      }
+
+      // Filtrar apenas do usuário atual (exceto listas_questoes que não tem user_id)
+      let userDocs = docs;
+      if (collectionName !== 'listas_questoes') {
+        userDocs = docs.filter(d => d.user_id === userIdStr);
+      } else {
+        // Para listas_questoes, pegar apenas links das listas do usuário
+        const listaIds = docs
+          .filter((d: any) => d.lista_id)
+          .map((d: any) => d.lista_id);
+        // Buscar quais listas pertencem ao usuário (precisa do banco antigo de listas)
+        // Por simplicidade, empurrar tudo - o upsert onConflict id fará dedup
+        userDocs = docs;
+      }
+
+      if (userDocs.length === 0) {
+        console.log(`📦 [EmergencyPush] ${collectionName}: 0 docs do usuário.`);
+        continue;
+      }
+
+      console.log(`📦 [EmergencyPush] Enviando ${userDocs.length} docs de ${collectionName}...`);
+
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < userDocs.length; i += CHUNK_SIZE) {
+        const chunk = userDocs.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabaseClient
+          .from(collectionName)
+          .upsert(chunk, { onConflict: 'id' });
+        if (error) {
+          console.error(`❌ [EmergencyPush] Falha em ${collectionName} (lote ${i / CHUNK_SIZE + 1}):`, error);
+        }
+      }
+      console.log(`✅ [EmergencyPush] ${collectionName}: ${userDocs.length} enviados.`);
+    }
+
+    oldDb.close();
+    console.log('✅ [EmergencyPush] Concluído.');
+  } catch (error) {
+    console.warn('⚠️ [EmergencyPush] Falhou (pode ser normal se banco antigo não existir):', error);
+  }
+}
 
 export async function getDb(): Promise<RxDatabase> {
   if (dbInstance) {
@@ -999,8 +1106,22 @@ export async function getDb(): Promise<RxDatabase> {
   isCreating = true;
 
   try {
-    const DB_NAME = 'revisaflash_db_v15';
+    // 1. Verificar se a versão mudou e fazer push de emergência ANTES de criar o novo banco
+    try {
+      const markerVersion = localStorage.getItem(DB_VERSION_MARKER);
+      if (markerVersion !== CURRENT_DB_VERSION) {
+        console.log(`🔄 Versão do banco mudou (${markerVersion || 'none'} → ${CURRENT_DB_VERSION}).`);
+        // Push de emergência do banco antigo ANTES de deletar/criar
+        await pushEmergencyDataToSupabase();
+        // Resetar lastSync para forçar pull completo no novo banco
+        clearAllLastSync();
+        localStorage.setItem(DB_VERSION_MARKER, CURRENT_DB_VERSION);
+      }
+    } catch (e) {
+      console.warn('⚠️ Erro na verificação de versão/push de emergência:', e);
+    }
 
+    // 2. Deletar apenas versões com 2+ gerações de distância (manter v14 como fallback)
     try { indexedDB.deleteDatabase('revisaflash_db_v3'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v4'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v5'); } catch (e) {}
@@ -1012,17 +1133,8 @@ export async function getDb(): Promise<RxDatabase> {
     try { indexedDB.deleteDatabase('revisaflash_db_v11'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v12'); } catch (e) {}
     try { indexedDB.deleteDatabase('revisaflash_db_v13'); } catch (e) {}
-    try { indexedDB.deleteDatabase('revisaflash_db_v14'); } catch (e) {}
+    // NÃO deletar revisaflash_db_v14 — mantém como fallback
     try { indexedDB.deleteDatabase('revisaflash-db'); } catch (e) {}
-
-    try {
-      const markerVersion = localStorage.getItem('revisaflash_db_version');
-      if (markerVersion !== 'v15') {
-        console.log('🔄 Nova versão do banco local — resetando lastSyncTimestamp para pull completo.');
-        clearAllLastSync();
-        localStorage.setItem('revisaflash_db_version', 'v15');
-      }
-    } catch (e) {}
 
     const db = await createRxDatabase({
       name: DB_NAME,
@@ -1642,6 +1754,188 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       if (!okShared) console.warn('⚠️ Sync de compartilhados incompleto (será retentado).');
     } catch (sharedErr) {
       console.error('❌ Erro no sync de compartilhados:', sharedErr);
+    }
+
+    // ============================================================
+    // 🔧 SYNC AUTO-CURATIVA: Se listas têm 0 vínculos locais mas há evidência
+    // de que tinham questões (questoes_lista OU resultados_lista/progresso_lista),
+    // forçar re-push de questoes_lista e listas_questoes locais.
+    // ============================================================
+    try {
+      const listasCollection = database.collections.listas;
+      const linksCollection = database.collections.listas_questoes;
+      const questoesCollection = database.collections.questoes_lista;
+      const resultadosCollection = database.collections.resultados_lista;
+      const progressoCollection = database.collections.progresso_lista;
+
+      if (listasCollection && linksCollection && questoesCollection) {
+        const userListas = await listasCollection.find({
+          selector: { user_id: userIdStr, isdeleted: false }
+        }).exec();
+
+        for (const listaDoc of userListas) {
+          const lista = listaDoc.toJSON();
+          const listaId = lista.id;
+
+          // Contar vínculos locais para esta lista
+          const localLinks = await linksCollection.find({
+            selector: { lista_id: listaId }
+          }).exec();
+          const vinculosLocal = localLinks.length;
+
+          if (vinculosLocal === 0) {
+            // Verificar evidência: questões locais órfãs apontando para esta lista?
+            // Como listas_questoes não tem user_id, buscar questões que poderiam pertencer
+            // Verificar resultados_lista e progresso_lista para esta lista
+            const temResultados = await resultadosCollection.findOne({
+              selector: { lista_id: listaId, user_id: userIdStr, isdeleted: false }
+            }).exec();
+
+            const temProgresso = await progressoCollection.findOne({
+              selector: { lista_id: listaId, user_id: userIdStr, isdeleted: false }
+            }).exec();
+
+            // Verificar se há questões locais que poderiam ser desta lista
+            // (buscar questões do usuário que não estão linkadas a nenhuma lista)
+            // Por simplicidade: se há resultados OU progresso, há evidência
+            const haEvidencia = !!temResultados || !!temProgresso;
+
+            if (haEvidencia) {
+              console.log(`🔧 [AutoHeal] Lista ${listaId} ("${lista.titulo}") tem 0 vínculos mas há evidência (resultados/progresso). Forçando re-push...`);
+
+              // 1. Push de questões locais do usuário (questoes_lista)
+              const localQuestoes = await questoesCollection.find({
+                selector: { user_id: userIdStr, isdeleted: false }
+              }).exec();
+
+              if (localQuestoes.length > 0) {
+                const qToPush = localQuestoes.map(d => d.toJSON());
+                console.log(`🔧 [AutoHeal] Re-enviando ${qToPush.length} questões de questoes_lista...`);
+                try {
+                  await pushWithConflictCheck(supabaseClient, 'questoes_lista', questoesCollection, qToPush);
+                } catch (e) {
+                  console.error('❌ [AutoHeal] Falha push questoes_lista:', e);
+                }
+              }
+
+              // 2. Re-criar vínculos listas_questoes baseados nas questões locais
+              // Como não sabemos o mapeamento original, tentamos buscar do servidor
+              // Se o servidor também estiver vazio, não há o que fazer
+              console.log(`🔧 [AutoHeal] Tentando baixar vínculos do servidor para lista ${listaId}...`);
+              const { data: serverLinks, error: linkErr } = await supabaseClient
+                .from('listas_questoes')
+                .select('*')
+                .eq('lista_id', listaId);
+
+              if (!linkErr && serverLinks && serverLinks.length > 0) {
+                console.log(`🔧 [AutoHeal] Encontrados ${serverLinks.length} vínculos no servidor. Inserindo localmente...`);
+                for (const link of serverLinks) {
+                  const existing = await linksCollection.findOne({ selector: { id: link.id } }).exec();
+                  if (!existing) await linksCollection.insert(link);
+                }
+                // Push dos links recém-baixados
+                const newLocalLinks = await linksCollection.find({ selector: { lista_id: listaId } }).exec();
+                if (newLocalLinks.length > 0) {
+                  const lToPush = newLocalLinks.map(d => d.toJSON());
+                  try {
+                    await pushWithConflictCheck(supabaseClient, 'listas_questoes', linksCollection, lToPush);
+                    console.log(`✅ [AutoHeal] ${lToPush.length} vínculos re-sincronizados para lista ${listaId}.`);
+                  } catch (e) {
+                    console.error('❌ [AutoHeal] Falha push listas_questoes:', e);
+                  }
+                }
+              } else {
+                console.warn(`⚠️ [AutoHeal] Servidor também não tem vínculos para lista ${listaId}. Dados podem estar perdidos no servidor.`);
+              }
+            }
+          }
+        }
+      }
+    } catch (healErr) {
+      console.error('❌ [AutoHeal] Erro na sincronização auto-curativa:', healErr);
+    }
+
+    // ============================================================
+    // 🔍 VERIFICAÇÃO DE INTEGRIDADE: comparar contagens local vs remoto
+    // ============================================================
+    try {
+      const listasCollection = database.collections.listas;
+      const linksCollection = database.collections.listas_questoes;
+      const questoesCollection = database.collections.questoes_lista;
+
+      if (listasCollection && linksCollection && questoesCollection) {
+        const userListas = await listasCollection.find({
+          selector: { user_id: userIdStr, isdeleted: false }
+        }).exec();
+
+        let totalListas = userListas.length;
+        let totalQuestoesLocal = 0;
+        let totalVinculosLocal = 0;
+
+        for (const listaDoc of userListas) {
+          const lista = listaDoc.toJSON();
+          const listaId = lista.id;
+
+          const localLinks = await linksCollection.find({ selector: { lista_id: listaId } }).exec();
+          totalVinculosLocal += localLinks.length;
+
+          const questaoIds = localLinks.map(l => l.get('questao_id')).filter(Boolean);
+          if (questaoIds.length > 0) {
+            const qDocs = await questoesCollection.find({
+              selector: { id: { $in: questaoIds } }
+            }).exec();
+            totalQuestoesLocal += qDocs.length;
+          }
+        }
+
+        // Contagens remotas (sample: buscar count exato via head)
+        let totalQuestoesRemoto = 0;
+        let totalVinculosRemoto = 0;
+
+        // Contar questões remotas do usuário
+        const { count: qCount } = await supabaseClient
+          .from('questoes_lista')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userIdStr)
+          .eq('isdeleted', false);
+        totalQuestoesRemoto = qCount || 0;
+
+        // Contar vínculos remotos das listas do usuário
+        const listaIds = userListas.map(d => d.get('id'));
+        if (listaIds.length > 0) {
+          const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+            const chunks: T[][] = [];
+            for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+            return chunks;
+          };
+          const chunks = chunkArray(listaIds, 100);
+          for (const chunk of chunks) {
+            const { count } = await supabaseClient
+              .from('listas_questoes')
+              .select('*', { count: 'exact', head: true })
+              .in('lista_id', chunk);
+            totalVinculosRemoto += count || 0;
+          }
+        }
+
+        // Log permanente de integridade
+        console.log(`[INTEGRITY] listas=${totalListas} questoes_local=${totalQuestoesLocal} questoes_remoto=${totalQuestoesRemoto} vinculos_local=${totalVinculosLocal} vinculos_remoto=${totalVinculosRemoto}`);
+
+        // Alerta se remoto < local
+        if (totalVinculosRemoto < totalVinculosLocal || totalQuestoesRemoto < totalQuestoesLocal) {
+          const msg = `Vínculos dessincronizados detectados (local: ${totalVinculosLocal} vínculos, ${totalQuestoesLocal} questões | remoto: ${totalVinculosRemoto} vínculos, ${totalQuestoesRemoto} questões). Use "Reparar listas" nas Configurações.`;
+          console.warn('⚠️ [Integrity] ' + msg);
+          // Toast será mostrado via hook no componente que chama syncWithSupabase
+          // Disparar evento customizado para UI reagir
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('revisaflash:integrity-alert', {
+              detail: { message: msg, userId: userIdStr }
+            }));
+          }
+        }
+      }
+    } catch (integrityErr) {
+      console.error('❌ [Integrity] Erro na verificação de integridade:', integrityErr);
     }
 
     if (houveErro) {

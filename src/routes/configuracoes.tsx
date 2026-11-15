@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AppShell } from "@/components/app-shell";
-import { 
-  Moon, Sun, Download, Trash2, LogOut, 
-  Upload, ChevronDown, Save, Loader2, 
-  Camera, HelpCircle
+import {
+  Moon, Sun, Download, Trash2, LogOut,
+  Upload, ChevronDown, Save, Loader2,
+  Camera, HelpCircle, AlertTriangle, RefreshCw, Wrench
 } from "lucide-react";
 import { useAppUser } from "@/contexts/UserContext";
 import { useClerk } from "@clerk/react";
@@ -14,6 +14,9 @@ import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { SeletorAvatar } from "@/components/perfil/SeletorAvatar";
+import { useToast } from "@/hooks/useToast";
+import { countFailedOperations, retryFailedOperations } from "@/services/queueService";
+import { repararVinculosListas, verificarIntegridadeListas } from "@/services/listaService";
 
 const CARD_COLORS = [
   '#E8A87C',
@@ -78,6 +81,14 @@ export default function ConfigPage() {
     show_next_review_time: false,
   });
   const [salvandoFlashcards, setSalvandoFlashcards] = useState(false);
+
+  const toast = useToast();
+
+  // Estado para operações com falha e reparo de listas
+  const [failedOpsCount, setFailedOpsCount] = useState(0);
+  const [reparando, setReparando] = useState(false);
+  const [verificandoIntegridade, setVerificandoIntegridade] = useState(false);
+  const [ultimaVerificacao, setUltimaVerificacao] = useState<string | null>(null);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -150,6 +161,41 @@ export default function ConfigPage() {
     };
     if (userId) loadFlashcardSettings();
   }, [userId]);
+
+  // Verificar operações com falha ao carregar e a cada 30s
+  useEffect(() => {
+    if (!userId) return;
+
+    const checkFailedOps = async () => {
+      try {
+        const count = await countFailedOperations();
+        setFailedOpsCount(count);
+      } catch (e) {
+        console.warn('Erro ao verificar operações com falha:', e);
+      }
+    };
+
+    checkFailedOps();
+    const interval = setInterval(checkFailedOps, 30000);
+    return () => clearInterval(interval);
+  }, [userId]);
+
+  // Listener para alerta de integridade vindo do sync
+  useEffect(() => {
+    const handleIntegrityAlert = (event: CustomEvent) => {
+      if (event.detail?.userId === userId) {
+        toast.warning('⚠️ Vínculos dessincronizados detectados', {
+          description: event.detail.message,
+          duration: 8000,
+        });
+        // Atualizar contagem de falhas também
+        countFailedOperations().then(setFailedOpsCount);
+      }
+    };
+
+    window.addEventListener('revisaflash:integrity-alert', handleIntegrityAlert as EventListener);
+    return () => window.removeEventListener('revisaflash:integrity-alert', handleIntegrityAlert as EventListener);
+  }, [userId, toast]);
 
   useEffect(() => {
     const temaSalvo = localStorage.getItem('tema');
@@ -559,6 +605,106 @@ export default function ConfigPage() {
     }
   }, [flashcardSettings, updateUserSettings]);
 
+  // 🔧 Reparar vínculos de listas
+  const handleRepararListas = useCallback(async () => {
+    if (!userId) { toast.error('Usuário não autenticado'); return; }
+    if (reparando) return;
+
+    setReparando(true);
+    try {
+      toast.info('🔧 Reparando vínculos de listas...', { duration: 5000 });
+      const result = await repararVinculosListas(userId);
+
+      if (result.success && result.summary) {
+        const { questoesEnviadas, vinculosEnviados, listasProcessadas } = result.summary;
+        toast.success('✅ Reparo concluído', {
+          description: `${listasProcessadas} listas, ${questoesEnviadas} questões, ${vinculosEnviados} vínculos enviados.`,
+          duration: 6000,
+        });
+        // Verificar integridade após reparo
+        const integrity = await verificarIntegridadeListas(userId);
+        if (integrity.success && integrity.detalhes) {
+          setUltimaVerificacao(new Date().toLocaleTimeString('pt-BR'));
+        }
+      } else {
+        toast.error('❌ Falha no reparo', {
+          description: result.error || 'Erro desconhecido',
+          duration: 6000,
+        });
+      }
+    } catch (error: any) {
+      console.error('Erro ao reparar listas:', error);
+      toast.error('❌ Erro ao reparar', { description: error.message });
+    } finally {
+      setReparando(false);
+    }
+  }, [userId, toast]);
+
+  // 🔁 Tentar novamente operações com falha
+  const handleRetryFailedOps = useCallback(async () => {
+    if (!userId) { toast.error('Usuário não autenticado'); return; }
+
+    try {
+      toast.info('🔁 Tentando novamente operações com falha...', { duration: 5000 });
+      const reativadas = await retryFailedOperations();
+
+      if (reativadas > 0) {
+        toast.success(`✅ ${reativadas} operação(ões) reativada(s)`, {
+          description: 'A sincronização tentará enviá-las novamente.',
+          duration: 5000,
+        });
+        // Forçar processamento da fila
+        import('@/services/queueService').then(({ processPendingOperations }) => {
+          processPendingOperations().catch(console.error);
+        });
+      } else {
+        toast.info('ℹ️ Nenhuma operação com falha para reativar', { duration: 4000 });
+      }
+
+      // Atualizar contagem
+      const count = await countFailedOperations();
+      setFailedOpsCount(count);
+    } catch (error: any) {
+      console.error('Erro ao reativar operações:', error);
+      toast.error('❌ Erro ao reativar', { description: error.message });
+    }
+  }, [userId, toast]);
+
+  // 🔍 Verificar integridade manual
+  const handleVerificarIntegridade = useCallback(async () => {
+    if (!userId) { toast.error('Usuário não autenticado'); return; }
+    if (verificandoIntegridade) return;
+
+    setVerificandoIntegridade(true);
+    try {
+      toast.info('🔍 Verificando integridade...', { duration: 4000 });
+      const result = await verificarIntegridadeListas(userId);
+
+      if (result.success && result.detalhes) {
+        const d = result.detalhes;
+        setUltimaVerificacao(new Date().toLocaleTimeString('pt-BR'));
+        if (d.alerta) {
+          toast.warning('⚠️ Dessincronização detectada', {
+            description: d.mensagem,
+            duration: 8000,
+          });
+        } else {
+          toast.success('✅ Tudo sincronizado', {
+            description: `${d.listas} listas, ${d.vinculosLocal} vínculos, ${d.questoesLocal} questões.`,
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('❌ Falha na verificação', { description: result.error });
+      }
+    } catch (error: any) {
+      console.error('Erro ao verificar integridade:', error);
+      toast.error('❌ Erro na verificação', { description: error.message });
+    } finally {
+      setVerificandoIntegridade(false);
+    }
+  }, [userId, toast]);
+
   const arrayToString = (arr: number[]) => arr.join(', ');
   const stringToArray = (str: string): number[] => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
 
@@ -914,6 +1060,66 @@ export default function ConfigPage() {
               </label>
             </div>
             <p className="mt-3 text-[11px] text-foreground/40">Exporta todos os seus dados (disciplinas, flashcards, erros, revisões, estudos)</p>
+          </div>
+
+          {/* 🔧 Sincronização e Reparo de Listas */}
+          <div className="pt-5 border-t border-border/40">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/45 mb-3">Sincronização e Reparo de Listas</h3>
+
+            {/* Badge de operações com falha */}
+            {failedOpsCount > 0 && (
+              <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                    <div>
+                      <p className="text-sm font-medium text-destructive">
+                        {failedOpsCount} operação(ões) com falha na fila
+                      </p>
+                      <p className="text-xs text-foreground/50">
+                        Dados não sincronizados. Clique em "Tentar novamente" para reenviar.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRetryFailedOps}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Tentar novamente
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleRepararListas}
+                disabled={reparando}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                {reparando ? '⏳ Reparando...' : 'Reparar listas'}
+              </button>
+              <button
+                onClick={handleVerificarIntegridade}
+                disabled={verificandoIntegridade}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-xs font-medium text-foreground/70 hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {verificandoIntegridade ? '⏳ Verificando...' : 'Verificar integridade'}
+              </button>
+            </div>
+
+            {ultimaVerificacao && (
+              <p className="mt-2 text-[11px] text-foreground/40">
+                Última verificação: {ultimaVerificacao}
+              </p>
+            )}
+
+            <p className="mt-3 text-[11px] text-foreground/40">
+              Reenvia todas as questões e vínculos locais ao servidor (upsert). Útil se listas abrirem vazias
+              após migração de banco ou problemas de sync.
+            </p>
           </div>
         </Section>
 

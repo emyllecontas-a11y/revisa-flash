@@ -253,7 +253,21 @@ export async function processPendingOperations(): Promise<void> {
         if (fresh) await fresh.remove();
         console.log(`✅ Operação concluída: ${op.id}`);
       } catch (error: any) {
-        console.error(`❌ Erro ao processar operação ${op.id}:`, error.message);
+        // Log do objeto de erro COMPLETO (não só message) para debugging
+        console.error(`❌ Erro ao processar operação ${op.id} (${op.op_type} ${op.table_name}):`, {
+          message: error?.message,
+          status: error?.status,
+          code: error?.code,
+          details: error?.details,
+          hint: error?.hint,
+          name: error?.name,
+          stack: error?.stack,
+          // Incluir dados da operação para contexto
+          operationId: op.id,
+          tableName: op.table_name,
+          opType: op.op_type,
+          dataKeys: op.data ? Object.keys(op.data) : [],
+        });
 
         // 409 Conflict em create significa que a linha já existe no servidor.
         const status = error?.status || error?.code;
@@ -297,8 +311,17 @@ export async function processPendingOperations(): Promise<void> {
     } else {
       console.log('✅ Todas as operações pendentes foram processadas.');
     }
-  } catch (error) {
-    console.error('❌ Erro ao processar fila de operações:', error);
+  } catch (error: any) {
+    // Log do objeto de erro COMPLETO
+    console.error('❌ Erro ao processar fila de operações:', {
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      name: error?.name,
+      stack: error?.stack,
+    });
   } finally {
     isProcessing = false;
   }
