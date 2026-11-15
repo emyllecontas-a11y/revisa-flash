@@ -3,7 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { AuthenticateWithRedirectCallback, SignIn } from '@clerk/react';
 
 // Importa as páginas
-import Cadastro from './routes/cadastro';
+// import Cadastro from './routes/cadastro'; // Temporariamente comentado (Parte C)
 import Login from './routes/login';
 import Index from './routes/index';
 import Flashcards from './routes/flashcards';
@@ -44,10 +44,10 @@ export const router = createBrowserRouter([
     path: '/login/*',
     element: <Login />,
   },
-  {
-    path: '/cadastro/*',
-    element: <Cadastro />,
-  },
+  // {
+  //   path: '/cadastro/*',
+  //   element: <Cadastro />,
+  // }, // Temporariamente comentado (Parte C)
   {
     path: '/sso-callback',
     element: <AuthenticateWithRedirectCallback />,
@@ -60,7 +60,7 @@ export const router = createBrowserRouter([
           <SignIn
             routing="path"
             path="/reset-senha"
-            signUpUrl="/cadastro"
+            signUpUrl="/login"
             appearance={{
               variables: {
                 colorPrimary: '#FE7802',

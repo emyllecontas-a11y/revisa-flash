@@ -242,7 +242,7 @@ function AppWithAuth() {
       publishableKey={PUBLISHABLE_KEY}
       localization={ptBR}
       signInUrl="/login"
-      signUpUrl="/cadastro"
+      signUpUrl="/login"
       fallbackRedirectUrl="/"
       __experimental_billing={{ enabled: true }}
       appearance={{}}

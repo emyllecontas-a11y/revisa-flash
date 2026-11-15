@@ -37,9 +37,7 @@ export default function LandingPage() {
             <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/15 ring-1 ring-primary/30">
               <Zap className="h-5 w-5 text-primary" />
             </span>
-            <span className="font-display text-lg font-semibold tracking-tight">
-              Revisa<span className="text-primary">Flash</span>
-            </span>
+            <span className="font-display text-lg font-semibold tracking-tight">Una Vox</span>
           </a>
 
           <nav className="hidden items-center gap-8 md:flex">
@@ -61,10 +59,10 @@ export default function LandingPage() {
               </Link>
             )}
             <Link
-              to="/cadastro"
+              to="/login"
               className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_10px_30px_-10px_rgba(20,184,166,0.6)] hover:bg-primary/90 transition"
             >
-              Começar teste grátis
+              Entrar
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -101,8 +99,8 @@ export default function LandingPage() {
                   <Link to="/login" className="flex-1 rounded-md border border-border px-3 py-2 text-center text-sm">
                     Entrar
                   </Link>
-                  <Link to="/cadastro" className="flex-1 rounded-full bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
-                    Testar grátis
+                  <Link to="/login" className="flex-1 rounded-full bg-primary px-3 py-2 text-center text-sm text-primary-foreground">
+                    Entrar
                   </Link>
                 </>
               )}
@@ -131,16 +129,16 @@ export default function LandingPage() {
 
               <p className="mt-6 max-w-xl text-base text-muted-foreground md:text-lg">
                 O Una Vox combina flashcards com repetição espaçada (FSRS), banco de erros
-                automático e estatísticas para você dominar o conteúdo da residência com o menor
+                automático e estatísticas para você dominar o conteúdo da sua prova com o menor
                 esforço possível.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link
-                  to="/cadastro"
+                  to="/login"
                   className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
                 >
-                  Teste grátis por 30 dias
+                  Entrar
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <a
@@ -331,10 +329,10 @@ export default function LandingPage() {
                 ))}
               </ul>
               <Link
-                to="/cadastro"
+                to="/login"
                 className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
               >
-                Começar teste grátis
+                Entrar
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
@@ -395,10 +393,10 @@ export default function LandingPage() {
             </p>
             <div className="relative mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                to="/cadastro"
+                to="/login"
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_20px_50px_-16px_rgba(20,184,166,0.7)] hover:bg-primary/90 transition"
               >
-                Começar teste grátis
+                Entrar
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <a
@@ -419,9 +417,7 @@ export default function LandingPage() {
             <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/15 ring-1 ring-primary/30">
               <Zap className="h-4 w-4 text-primary" />
             </span>
-            <span className="font-display text-sm">
-              Revisa<span className="text-primary">Flash</span>
-            </span>
+            <span className="font-display text-sm">Una Vox</span>
             <span className="text-xs text-muted-foreground">© {new Date().getFullYear()}</span>
           </div>
           <div className="flex items-center gap-6 text-xs text-muted-foreground">

@@ -49,7 +49,7 @@ export const DISCIPLINAS = [
 
 export const CHECKLIST_HOJE = [
   { id: 1, titulo: "Revisar Patologia Oral — lesões brancas", feito: true },
-  { id: 2, titulo: "Resolver 20 questões ENARE 2024", feito: true },
+  { id: 2, titulo: "Resolver 20 questões da prova 2024", feito: true },
   { id: 3, titulo: "Leitura: Cirurgia Bucomaxilofacial cap. 4", feito: false },
   { id: 4, titulo: "Flashcards — Periodontia (45 due)", feito: false },
   { id: 5, titulo: "Refazer erros da semana", feito: false },

@@ -3,7 +3,8 @@ import { useSignIn, useUser } from "@clerk/react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAppUser } from "@/contexts/UserContext";
 import { UnaVoxLogo } from "@/components/UnaVoxLogo";
-import { Eye, EyeOff, Loader2, Mail, ArrowLeft, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Loader2, ArrowLeft, AlertCircle } from "lucide-react";
+import lumiBoasVindas from "@/assets/avatars/lumi-boas-vindas.svg";
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -311,237 +312,279 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-md flex flex-col items-center">
-        {/* Logo + Nome */}
-        <div className="mb-6 flex flex-col items-center gap-3">
-          <UnaVoxLogo variant="completa" className="h-14 w-auto" />
-          <h1 className="font-display text-2xl font-bold text-white">Una Vox</h1>
+    <div className="min-h-screen grid lg:grid-cols-2 bg-background">
+      {/* COLUNA ESQUERDA — Painel de marca (hidden lg:flex) */}
+      <div className="hidden lg:flex flex-col items-center justify-center bg-surface p-8 relative overflow-hidden">
+        {/* Fundo decorativo */}
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
+          <div className="absolute top-1/3 right-[-10%] h-[420px] w-[420px] rounded-full bg-accent/10 blur-[120px]" />
         </div>
 
-        {/* Card */}
-        <div className="w-full rounded-3xl border border-border bg-surface p-7 shadow-elevated">
-          <header className="mb-6">
-            <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-              Bem-vinda de volta
-            </h2>
-            <p className="text-sm text-foreground/55 mt-1">Entre para continuar seus estudos.</p>
-          </header>
+        <div className="relative z-10 flex flex-col items-center justify-center h-full w-full max-w-lg">
+          {/* Logo Una Vox pequena no topo */}
+          <div className="mb-10 flex items-center gap-2">
+            <UnaVoxLogo variant="wordmark" className="h-9 w-auto" />
+          </div>
 
-          {/* Botão Google */}
-          <button
-            type="button"
-            onClick={handleGoogleLogin}
-            disabled={googleLoading || loading}
-            className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-surface-2 px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-2/70 transition-colors disabled:opacity-50"
-          >
-            {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
-            Continuar com Google
-          </button>
-
-          {/* Divisor */}
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-border"></div>
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-surface px-3 text-xs uppercase tracking-widest text-foreground/40">
-                ou
-              </span>
+          {/* Círculo grande com mascote Lumi */}
+          <div className="relative mb-10">
+            <div className="relative flex h-72 w-72 items-center justify-center rounded-full border-4 border-primary/40 bg-surface p-6 shadow-elevated">
+              <img
+                src={lumiBoasVindas}
+                alt="Lumi, a mascote da Una Vox"
+                className="h-full w-full max-h-[240px] max-w-[240px] object-contain"
+              />
             </div>
           </div>
 
-          {/* Form - Etapa 1: Senha */}
-          {step === "password" && (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label
-                  htmlFor="email"
-                  className="block text-sm font-medium text-foreground/80 mb-1.5"
-                >
-                  E-mail
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="voce@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={loading}
-                  className="w-full rounded-full border border-border bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
-                />
+          {/* Slogan em 2 linhas */}
+          <div className="text-center mb-4">
+            <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-foreground leading-tight">
+              Uma nova voz.
+            </h1>
+            <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-primary leading-tight">
+              Mais conhecimento.
+            </h1>
+          </div>
+
+          {/* Subtítulo pequeno */}
+          <p className="text-center text-sm text-foreground/50 max-w-xs">
+            Seu próximo passo começa aqui.
+          </p>
+        </div>
+      </div>
+
+      {/* COLUNA DIREITA — Formulário */}
+      <div className="flex items-center justify-center bg-background px-4 py-10 lg:p-8">
+        <div className="w-full max-w-md">
+          {/* Logo pequena no mobile (hidden lg:hidden) */}
+          <div className="lg:hidden mb-8 flex flex-col items-center gap-3">
+            <UnaVoxLogo variant="completa" className="h-12 w-auto" />
+            <h1 className="font-display text-xl font-bold text-foreground">Una Vox</h1>
+          </div>
+
+          {/* Card */}
+          <div className="rounded-3xl border border-border bg-surface p-7 shadow-elevated">
+            <header className="mb-6">
+              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
+                Bem-vinda de volta
+              </h2>
+              <p className="text-sm text-foreground/55 mt-1">Entre para continuar seus estudos.</p>
+            </header>
+
+            {/* Botão Google */}
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading || loading}
+              className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-surface-2 px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-2/70 transition-colors disabled:opacity-50"
+            >
+              {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
+              Continuar com Google
+            </button>
+
+            {/* Divisor */}
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border"></div>
               </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label
-                    htmlFor="password"
-                    className="block text-sm font-medium text-foreground/80"
-                  >
-                    Senha
-                  </label>
-                  <Link
-                    to="/reset-senha"
-                    className="text-xs font-medium text-primary hover:underline"
-                  >
-                    Esqueci minha senha
-                  </Link>
-                </div>
-                <div className="relative">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    className="w-full rounded-full border border-border bg-background px-4 py-3 pr-12 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 grid h-8 w-8 place-items-center text-foreground/50 hover:text-foreground transition-colors"
-                    aria-label={showPassword ? "Esconder senha" : "Mostrar senha"}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
+              <div className="relative flex justify-center">
+                <span className="bg-surface px-3 text-xs uppercase tracking-widest text-foreground/40">
+                  ou
+                </span>
               </div>
+            </div>
 
-              {error && (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading || !isLoaded}
-                className="w-full rounded-full bg-primary py-3 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 inline-flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Entrando...
-                  </>
-                ) : (
-                  "Entrar"
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* Form - Etapa 2: Segundo Fator (Device Trust / MFA) */}
-          {step === "second_factor" && (
-            <div className="space-y-4">
-              {/* Botão voltar */}
-              <button
-                type="button"
-                onClick={handleBackToPassword}
-                className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-foreground/55 hover:text-foreground transition-colors"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" /> Voltar
-              </button>
-
-              <header className="mb-4">
-                <h3 className="font-display text-xl font-bold tracking-tight text-foreground">
-                  Verificação de segurança
-                </h3>
-                <p className="text-sm text-foreground/55 mt-1">
-                  {secondFactorStrategy === "email_code" && (
-                    <>
-                      Enviamos um código de verificação para{" "}
-                      <strong className="text-foreground">{email}</strong>.
-                    </>
-                  )}
-                  {secondFactorStrategy === "phone_code" && (
-                    <>Enviamos um código de verificação por SMS.</>
-                  )}
-                  {secondFactorStrategy === "totp" && (
-                    <>Digite o código do seu aplicativo autenticador.</>
-                  )}
-                </p>
-              </header>
-
-              <form onSubmit={handleSecondFactorSubmit} className="space-y-4">
+            {/* Form - Etapa 1: Senha */}
+            {step === "password" && (
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label
-                    htmlFor="secondFactorCode"
+                    htmlFor="email"
                     className="block text-sm font-medium text-foreground/80 mb-1.5"
                   >
-                    {secondFactorStrategy === "totp"
-                      ? "Código do autenticador"
-                      : "Código de verificação"}
+                    E-mail
                   </label>
                   <input
-                    id="secondFactorCode"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder={secondFactorStrategy === "totp" ? "000000" : "000000"}
-                    value={secondFactorCode}
-                    onChange={(e) =>
-                      setSecondFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-                    }
-                    disabled={secondFactorLoading}
-                    autoFocus
-                    className="w-full rounded-full border border-border bg-background px-4 py-3 text-center text-lg font-mono tracking-[0.4em] text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="voce@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                    className="w-full rounded-full border border-border bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
                   />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label
+                      htmlFor="password"
+                      className="block text-sm font-medium text-foreground/80"
+                    >
+                      Senha
+                    </label>
+                    <Link
+                      to="/reset-senha"
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Esqueci minha senha
+                    </Link>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={loading}
+                      className="w-full rounded-full border border-border bg-background px-4 py-3 pr-12 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 grid h-8 w-8 place-items-center text-foreground/50 hover:text-foreground transition-colors"
+                      aria-label={showPassword ? "Esconder senha" : "Mostrar senha"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {error && (
-                  <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                     {error}
                   </div>
                 )}
 
                 <button
                   type="submit"
-                  disabled={secondFactorLoading || !isLoaded}
+                  disabled={loading || !isLoaded}
                   className="w-full rounded-full bg-primary py-3 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 inline-flex items-center justify-center gap-2"
                 >
-                  {secondFactorLoading ? (
+                  {loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Verificando...
+                      Entrando...
                     </>
                   ) : (
-                    "Verificar e entrar"
+                    "Entrar"
                   )}
                 </button>
               </form>
+            )}
 
-              <p className="mt-4 text-center text-xs text-foreground/45">
-                Não recebeu o código?{" "}
+            {/* Form - Etapa 2: Segundo Fator (Device Trust / MFA) */}
+            {step === "second_factor" && (
+              <div className="space-y-4">
+                {/* Botão voltar */}
                 <button
                   type="button"
-                  onClick={handleResendCode}
-                  disabled={secondFactorLoading}
-                  className="font-medium text-primary hover:underline disabled:opacity-50"
+                  onClick={handleBackToPassword}
+                  className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-foreground/55 hover:text-foreground transition-colors"
                 >
-                  Reenviar código
+                  <ArrowLeft className="h-3.5 w-3.5" /> Voltar
                 </button>
-              </p>
-            </div>
+
+                <header className="mb-4">
+                  <h3 className="font-display text-xl font-bold tracking-tight text-foreground">
+                    Verificação de segurança
+                  </h3>
+                  <p className="text-sm text-foreground/55 mt-1">
+                    {secondFactorStrategy === "email_code" && (
+                      <>
+                        Enviamos um código de verificação para{" "}
+                        <strong className="text-foreground">{email}</strong>.
+                      </>
+                    )}
+                    {secondFactorStrategy === "phone_code" && (
+                      <>Enviamos um código de verificação por SMS.</>
+                    )}
+                    {secondFactorStrategy === "totp" && (
+                      <>Digite o código do seu aplicativo autenticador.</>
+                    )}
+                  </p>
+                </header>
+
+                <form onSubmit={handleSecondFactorSubmit} className="space-y-4">
+                  <div>
+                    <label
+                      htmlFor="secondFactorCode"
+                      className="block text-sm font-medium text-foreground/80 mb-1.5"
+                    >
+                      {secondFactorStrategy === "totp"
+                        ? "Código do autenticador"
+                        : "Código de verificação"}
+                    </label>
+                    <input
+                      id="secondFactorCode"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder={secondFactorStrategy === "totp" ? "000000" : "000000"}
+                      value={secondFactorCode}
+                      onChange={(e) =>
+                        setSecondFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                      }
+                      disabled={secondFactorLoading}
+                      autoFocus
+                      className="w-full rounded-full border border-border bg-background px-4 py-3 text-center text-lg font-mono tracking-[0.4em] text-foreground outline-none focus:border-primary placeholder:text-foreground/35"
+                    />
+                  </div>
+
+                  {error && (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                      {error}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={secondFactorLoading || !isLoaded}
+                    className="w-full rounded-full bg-primary py-3 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                  >
+                    {secondFactorLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Verificando...
+                      </>
+                    ) : (
+                      "Verificar e entrar"
+                    )}
+                  </button>
+                </form>
+
+                <p className="mt-4 text-center text-xs text-foreground/45">
+                  Não recebeu o código?{" "}
+                  <button
+                    type="button"
+                    onClick={handleResendCode}
+                    disabled={secondFactorLoading}
+                    className="font-medium text-primary hover:underline disabled:opacity-50"
+                  >
+                    Reenviar código
+                  </button>
+                </p>
+              </div>
+            )}
+
+            {/* Rodapé — sem link de cadastro (PARTE C) */}
+            <p className="mt-6 text-center text-sm text-foreground/40">
+              Acesso exclusivo para convidados
+            </p>
+          </div>
+
+          {isDev && (
+            <span className="mt-6 rounded-full border border-border bg-surface px-3 py-1 text-[10px] uppercase tracking-widest text-foreground/40">
+              dev
+            </span>
           )}
-
-          {/* Rodapé */}
-          <p className="mt-6 text-center text-sm text-foreground/55">
-            Não tem conta?{" "}
-            <Link to="/cadastro" className="font-semibold text-primary hover:underline">
-              Criar conta
-            </Link>
-          </p>
         </div>
-
-        {isDev && (
-          <span className="mt-6 rounded-full border border-border bg-surface px-3 py-1 text-[10px] uppercase tracking-widest text-foreground/40">
-            dev
-          </span>
-        )}
       </div>
     </div>
   );

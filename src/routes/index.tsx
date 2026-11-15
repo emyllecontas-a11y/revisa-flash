@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const [proximasRevisoes, setProximasRevisoes] = useState<ProximaRevisao[]>([]);
   const [revisoesAtrasadas, setRevisoesAtrasadas] = useState<ProximaRevisao[]>([]);
 
-  const [provaNome, setProvaNome] = useState<string>("ENARE 2026");
+  const [provaNome, setProvaNome] = useState<string>("Sua prova 2026");
   const [provaData, setProvaData] = useState<Date | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -76,7 +76,7 @@ export default function DashboardPage() {
         localStorage.setItem('revisaflash_user_id', clerkUserId);
 
         let profileName = "Usuário";
-        let provaNomeTemp = "ENARE 2026";
+        let provaNomeTemp = "Sua prova 2026";
         let provaDataTemp: Date | null = null;
 
         try {

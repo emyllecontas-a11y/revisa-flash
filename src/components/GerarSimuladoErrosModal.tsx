@@ -372,7 +372,7 @@ export function GerarSimuladoErrosModal({
                     value={banca}
                     onChange={(e) => setBanca(e.target.value)}
                     disabled={gerando}
-                    placeholder="Ex.: ENARE"
+                    placeholder="Ex.: Sua prova"
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary placeholder:text-foreground/35"
                   />
                 </label>

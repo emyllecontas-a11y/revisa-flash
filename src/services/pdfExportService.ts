@@ -342,7 +342,7 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(255, 255, 255);
-    doc.text('RevisaFlash', margin, 7);
+    doc.text('Una Vox', margin, 7);
 
     if (modo === 'corrigida') {
       doc.text('CORRIGIDO', pageW - margin, 7, { align: 'right' });
@@ -381,7 +381,7 @@ export async function exportarPdf(opcoes: OpcoesExportacaoPdf): Promise<void> {
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
     doc.setFont('helvetica', 'normal');
-    doc.text(`RevisaFlash · Página ${pageNum}`, pageW / 2, pageH - 6, { align: 'center' });
+    doc.text(`Una Vox · Página ${pageNum}`, pageW / 2, pageH - 6, { align: 'center' });
   };
 
   const novaPaginaRetornaY = (): number => {

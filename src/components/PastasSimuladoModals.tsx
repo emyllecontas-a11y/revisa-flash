@@ -148,7 +148,7 @@ export function GerenciarPastasSimuladoModal({
                 value={novoNome}
                 onChange={(e) => setNovoNome(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCriar()}
-                placeholder="Ex: ENARE 2024, Cardio..."
+                placeholder="Ex: Sua prova 2024, Cardio..."
                 disabled={criando}
                 className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary placeholder:text-foreground/40"
               />

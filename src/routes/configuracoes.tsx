@@ -51,7 +51,7 @@ export default function ConfigPage() {
   const [mensagemTipo, setMensagemTipo] = useState<'success' | 'error' | 'warning' | 'info'>('info');
   const [uploading, setUploading] = useState(false);
   
-  const [provaNome, setProvaNome] = useState<string>("ENARE Odontologia 2026");
+  const [provaNome, setProvaNome] = useState<string>("Sua prova 2026");
   const [provaData, setProvaData] = useState<string>("2026-09-13");
   const [salvandoProva, setSalvandoProva] = useState(false);
   
@@ -830,7 +830,7 @@ export default function ConfigPage() {
                 type="text"
                 value={provaNome}
                 onChange={(e) => setProvaNome(e.target.value)}
-                placeholder="Ex: ENARE Odontologia 2026"
+                placeholder="Ex: Sua prova 2026"
                 className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-foreground/40"
               />
             </div>

@@ -227,4 +227,4 @@ export function gerarSemanasEnare(): PlanoSemana[] {
   }));
 }
 
-export const NOME_PLANO_ENARE = 'ENARE 2026 — Revisa Emylle (26 semanas)';
+export const NOME_PLANO_PADRAO = 'Plano padrão 2026 — 26 semanas';

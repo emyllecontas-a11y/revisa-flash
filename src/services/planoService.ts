@@ -4,7 +4,7 @@ import { uid } from '@/utils/helpers';
 import { enviarOuEnfileirar } from '@/services/syncHelpers';
 import {
   gerarSemanasEnare,
-  NOME_PLANO_ENARE,
+  NOME_PLANO_PADRAO,
   type PlanoSemana,
   type PlanoBloco,
 } from '@/lib/planoEnareData';
@@ -97,7 +97,7 @@ export async function importarPlanoEnare(userId: string, dataInicio: string): Pr
   const plano: Plano = {
     id: uid(),
     user_id: userId,
-    nome: NOME_PLANO_ENARE,
+    nome: NOME_PLANO_PADRAO,
     data_inicio: dataInicio,
     ativo: true,
     semanas: gerarSemanasEnare(),
