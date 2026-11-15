@@ -355,12 +355,11 @@ export default function LoginPage() {
       </div>
 
       {/* COLUNA DIREITA — Formulário */}
-      <div className="flex items-center justify-center bg-background px-4 py-10 lg:p-8">
+      <div className="flex items-center justify-center bg-white lg:bg-background px-4 py-10 lg:p-8">
         <div className="w-full max-w-md">
           {/* Logo pequena no mobile (hidden lg:hidden) */}
-          <div className="lg:hidden mb-8 flex flex-col items-center gap-3">
-            <UnaVoxLogo variant="completa" className="h-12 w-auto" />
-            <h1 className="font-display text-xl font-bold text-foreground">Una Vox</h1>
+          <div className="lg:hidden mb-8 flex flex-col items-center">
+            <UnaVoxLogo variant="simbolo" className="h-28 w-auto" />
           </div>
 
           {/* Card */}
@@ -573,7 +572,7 @@ export default function LoginPage() {
             )}
 
             {/* Rodapé — sem link de cadastro (PARTE C) */}
-            <p className="mt-6 text-center text-sm text-foreground/40">
+            <p className="mt-6 text-center text-sm text-gray-600 lg:text-foreground/40">
               Acesso exclusivo para convidados
             </p>
           </div>

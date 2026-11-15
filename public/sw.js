@@ -1,5 +1,6 @@
 // public/sw.js
 const CACHE_NAME = 'una-vox-v2';
+console.log('[SW] Cache version:', CACHE_NAME);
 const STATIC_ASSETS = [
   '/',
   '/index.html',
