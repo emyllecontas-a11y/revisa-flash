@@ -236,13 +236,13 @@ export function AmizadesConteudo() {
           </button>
         </form>
         <p className="mt-2 text-xs text-foreground/40">
-          Ele precisa já ter conta no RevisaFlash com esse e-mail.
+          Ele precisa já ter conta no Una Vox com esse e-mail.
         </p>
 
         {result?.kind === "notfound" && (
           <div className="mt-4 rounded-xl border border-dashed border-border p-4 text-sm text-foreground/60">
             Não encontramos ninguém com esse e-mail. Confira se digitou certo e se ele já criou
-            a conta no RevisaFlash.
+            a conta no Una Vox.
           </div>
         )}
 
@@ -330,7 +330,7 @@ export function AmizadesConteudo() {
 
           <Section title="Minhas amizades" count={amigos.length}>
             {amigos.length === 0 ? (
-              <Vazio texto="Você ainda não tem amizades no RevisaFlash. Convide alguém pelo e-mail acima." />
+              <Vazio texto="Você ainda não tem amizades no Una Vox. Convide alguém pelo e-mail acima." />
             ) : (
               amigos.map((entry) => (
                 <Linha key={entry.friendshipId} pessoa={entry.pessoa}>

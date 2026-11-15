@@ -452,10 +452,10 @@ function AppShellInner({
               <div className="flex min-w-0 items-center gap-3">
                 <Link to="/" className="flex items-center gap-2 lg:hidden">
                   <LogoIcon size={32} />
-                  <span className="font-display text-sm font-semibold">RevisaFlash</span>
+                  <span className="font-display text-sm font-semibold">Una Vox</span>
                 </Link>
                 <div className="hidden items-center gap-2 text-xs lg:flex">
-                  <span className="text-foreground/40">RevisaFlash</span>
+                  <span className="text-foreground/40">Una Vox</span>
                   {breadcrumb && (
                     <>
                       <ChevronRight className="h-3 w-3 text-foreground/30" />

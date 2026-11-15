@@ -316,7 +316,7 @@ export default function LoginPage() {
         {/* Logo + Nome */}
         <div className="mb-6 flex flex-col items-center gap-3">
           <LogoIcon size={56} />
-          <h1 className="font-display text-2xl font-bold text-white">RevisaFlash</h1>
+          <h1 className="font-display text-2xl font-bold text-white">Una Vox</h1>
         </div>
 
         {/* Card */}

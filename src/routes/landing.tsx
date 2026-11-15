@@ -130,7 +130,7 @@ export default function LandingPage() {
               </h1>
 
               <p className="mt-6 max-w-xl text-base text-muted-foreground md:text-lg">
-                O RevisaFlash combina flashcards com repetição espaçada (FSRS), banco de erros
+                O Una Vox combina flashcards com repetição espaçada (FSRS), banco de erros
                 automático e estatísticas para você dominar o conteúdo da residência com o menor
                 esforço possível.
               </p>
@@ -354,10 +354,10 @@ export default function LandingPage() {
               icon={<Chrome className="h-5 w-5" />}
               platform="Android (Chrome)"
               steps={[
-                "Abra o RevisaFlash no navegador Chrome.",
+                "Abra o Una Vox no navegador Chrome.",
                 "Toque nos três pontinhos no canto superior direito.",
                 "Selecione \"Adicionar à tela inicial\" (ou \"Instalar aplicativo\").",
-                "Confirme o nome (RevisaFlash) e toque em \"Adicionar\".",
+                "Confirme o nome (Una Vox) e toque em \"Adicionar\".",
                 "O ícone aparecerá na tela inicial do celular.",
                 "Abra pelo ícone e comece a estudar.",
               ]}
@@ -366,10 +366,10 @@ export default function LandingPage() {
               icon={<Apple className="h-5 w-5" />}
               platform="iPhone / iPad (Safari)"
               steps={[
-                "Abra o RevisaFlash no navegador Safari.",
+                "Abra o Una Vox no navegador Safari.",
                 "Toque no ícone de compartilhar (quadrado com seta para cima).",
                 "Role e toque em \"Adicionar à Tela de Início\".",
-                "Confirme o nome (RevisaFlash) e toque em \"Adicionar\".",
+                "Confirme o nome (Una Vox) e toque em \"Adicionar\".",
                 "O ícone aparecerá na tela inicial do iPhone.",
                 "Abra pelo ícone e comece a estudar.",
               ]}
@@ -548,7 +548,7 @@ function HeroMockup() {
           <span className="h-2.5 w-2.5 rounded-full bg-warning/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-primary/70" />
           <span className="ml-3 text-[10px] uppercase tracking-widest text-muted-foreground">
-            revisaflash.app
+            una-vox.vercel.app
           </span>
         </div>
 

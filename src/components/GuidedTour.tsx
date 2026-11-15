@@ -35,7 +35,7 @@ const nav = (key: string, path: string) =>
 const t = (key: string) => `[data-tour="${key}"]`;
 
 export const STEPS: Step[] = [
-  { path: "/", title: "Olá, eu sou a Lumi!", text: "Bem-vinda ao RevisaFlash! Vou passar por cada aba e te mostrar onde fica cada coisa. Use as setas do teclado ou os botões.", img: LUMI_BOASVINDAS },
+  { path: "/", title: "Olá, eu sou a Lumi!", text: "Bem-vinda ao Una Vox! Vou passar por cada aba e te mostrar onde fica cada coisa. Use as setas do teclado ou os botões.", img: LUMI_BOASVINDAS },
   { path: "/", target: nav("inicio", "/"), title: "Aba Início", text: "Seu painel diário: tudo o que importa hoje em uma tela só." },
   { path: "/", target: t("inicio-prova"), title: "Contagem para a prova", text: "Quantos dias faltam para a prova, dias estudados, horas e questões resolvidas." },
   { path: "/", target: t("inicio-flash"), title: "Flashcards de hoje", text: "Quantos cards novos e revisões te esperam hoje." },
@@ -69,12 +69,12 @@ export const STEPS: Step[] = [
   { path: "/comunidade", target: t("com-ranking"), title: "Ranking", text: "Veja sua posição na semana entre as amigas." },
   { path: "/comunidade", target: t("com-amizades"), title: "Amizades", text: "Adicione amigas e acompanhe a sequência delas." },
   { path: "/comunidade", target: t("com-compartilhado"), title: "Compartilhado comigo", text: "Baralhos e cadernos que te enviaram aparecem aqui." },
-  { path: "/configuracoes", target: nav("ajustes", "/configuracoes"), title: "Aba Ajustes", text: "Deixe o RevisaFlash do seu jeito." },
+  { path: "/configuracoes", target: nav("ajustes", "/configuracoes"), title: "Aba Ajustes", text: "Deixe o Una Vox do seu jeito." },
   { path: "/configuracoes", target: t("aj-prova"), title: "Prova-alvo", text: "Defina a prova e a data — a contagem do Início vem daqui." },
   { path: "/configuracoes", target: t("aj-limites"), title: "Limites diários", text: "Controle quantas revisões e cards novos aparecem por dia." },
   { path: "/configuracoes", target: t("aj-anki"), title: "Importar do Anki", text: "Já tem baralhos no Anki? Traga o arquivo .apkg." },
   { path: "/configuracoes", target: t("aj-backup"), title: "Backup", text: "Baixe uma cópia completa dos seus dados quando quiser." },
-  { path: "/", title: "Tudo pronto!", text: "Agora você conhece cada cantinho do RevisaFlash. Bons estudos — eu fico por aqui torcendo por você!", img: LUMI_COMEMORANDO },
+  { path: "/", title: "Tudo pronto!", text: "Agora você conhece cada cantinho do Una Vox. Bons estudos — eu fico por aqui torcendo por você!", img: LUMI_COMEMORANDO },
 ];
 
 const PAD = 8;
@@ -280,7 +280,7 @@ export function GuidedTour({ userId, forceOpen = false, currentPath, onNavigate,
   const arrowStyle = arrow();
 
   return (
-    <div className="fixed inset-0 z-[9999]" role="dialog" aria-modal="true" aria-label="Tour guiado do RevisaFlash">
+    <div className="fixed inset-0 z-[9999]" role="dialog" aria-modal="true" aria-label="Tour guiado do Una Vox">
       <style>{`
         @keyframes gt-peek{from{opacity:0;transform:translateY(14px) rotate(-10deg) scale(.9)}to{opacity:1;transform:none}}
         @keyframes gt-pulse{0%,100%{box-shadow:0 0 0 3px rgba(254,120,2,.95),0 0 0 9999px rgba(20,6,15,.74),0 0 26px 8px rgba(254,120,2,.45)}50%{box-shadow:0 0 0 3px rgba(254,120,2,.95),0 0 0 9999px rgba(20,6,15,.74),0 0 40px 14px rgba(254,120,2,.25)}}

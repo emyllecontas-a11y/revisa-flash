@@ -1,12 +1,14 @@
 // public/sw.js
-const CACHE_NAME = 'revisaflash-v16';
+const CACHE_NAME = 'una-vox-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png',
-  '/icons/apple-touch-icon.png'
+  '/icons/app-icon-192.png',
+  '/icons/app-icon-512.png',
+  '/icons/app-icon-1024.png',
+  '/icons/favicon-32.png',
+  '/icons/favicon-64.png'
 ];
 
 const EXCLUDED_HOSTS = ['clerk', 'supabase', 'chrome-extension'];
