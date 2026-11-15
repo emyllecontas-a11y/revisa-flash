@@ -348,7 +348,6 @@ function AppShellInner({
             {!isSidebarMinimized && (
               <div className="truncate">
                 <div className="font-display text-base font-bold tracking-tight text-white">Una Vox</div>
-                <div className="text-[10px] uppercase tracking-widest text-white/50">2026</div>
               </div>
             )}
           </div>

@@ -57,6 +57,13 @@ export default function SimuladosPage() {
     else setSearchParams({ tab: nova }, { replace: true });
   };
 
+  // Título dinâmico por aba
+  const TITULO_POR_ABA = {
+    banco: 'Banco de Questões',
+    listas: 'Fixação',
+    simulados: 'Simulados',
+  };
+
   const [simulados, setSimulados] = useState<Simulado[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -477,7 +484,7 @@ export default function SimuladosPage() {
   });
 
   return (
-    <AppShell breadcrumb="Simulados" title="Simulados">
+    <AppShell breadcrumb="Questões" title={TITULO_POR_ABA[mainTab]}>
       <div className="mb-6 flex gap-1 border-b border-border">
         <button
           onClick={() => trocarTab('banco')}

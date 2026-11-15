@@ -329,10 +329,10 @@ export default function LoginPage() {
 
           {/* Círculo grande com logo Una Vox */}
           <div className="relative mb-10">
-            <div className="relative flex h-72 w-72 items-center justify-center rounded-full border-4 border-primary/40 bg-white/60 p-6 shadow-elevated">
+            <div className="relative flex h-80 w-80 lg:h-88 lg:w-88 items-center justify-center rounded-full border-4 border-primary/40 bg-white/60 p-2 shadow-elevated">
               <UnaVoxLogo
                 variant="simbolo"
-                className="h-full w-full max-h-[240px] max-w-[240px] object-contain"
+                className="h-full w-full max-h-[300px] max-w-[300px] object-contain"
               />
             </div>
           </div>
