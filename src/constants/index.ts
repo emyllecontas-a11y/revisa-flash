@@ -170,6 +170,18 @@ export const ROTAS = {
 export const DB_NAME = 'revisaflash_db_v2';
 
 // ============================================================
+// 📎 MATERIAL DE APOIO (aula_materiais)
+// ============================================================
+
+export const AULA_MATERIAIS = {
+  COLECAO: 'aula_materiais',
+  BUCKET: 'aula-materiais',
+  MIME_TYPE: 'application/pdf',
+  MAX_SIZE_BYTES: 20 * 1024 * 1024, // 20 MB
+  MAX_SIZE_MB: 20,
+} as const;
+
+// ============================================================
 // 🔗 CONFIGURAÇÕES DO SUPABASE (opcional)
 // ============================================================
 

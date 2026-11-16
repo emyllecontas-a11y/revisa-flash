@@ -13,6 +13,7 @@ import { PomodoroProvider } from './contexts/PomodoroContext';
 import { MusicProvider } from './contexts/MusicContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { ErrorProvider } from './contexts/ErrorContext';
+import { AulaMateriaisProvider } from './contexts/AulaMateriaisContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider, useAppUser } from './contexts/UserContext';
 import { ConfirmProvider } from './components/ConfirmDialog';
@@ -223,7 +224,9 @@ function Root() {
               <PomodoroProvider>
                 <MusicProvider>
                   <ErrorProvider>
-                    <AppContent />
+                    <AulaMateriaisProvider>
+                      <AppContent />
+                    </AulaMateriaisProvider>
                   </ErrorProvider>
                   <MiniMusicPlayer />
                 </MusicProvider>

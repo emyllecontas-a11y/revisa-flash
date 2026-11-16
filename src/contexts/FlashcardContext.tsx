@@ -47,6 +47,8 @@ interface Card {
   updatedAt: string;
   shared_card_id?: string | null;
   isDeleted?: boolean;
+  front_image_url?: string | null;
+  back_image_url?: string | null;
 }
 
 interface DeckMeta {
@@ -112,11 +114,11 @@ interface FlashcardContextType {
   reviewCard: (cardId: string, rating: Rating) => Promise<any>;
   createDeck: (name: string, description: string, color?: string, isShared?: boolean, sharedWith?: string[]) => Promise<void>;
   getOrCreateErrorDeck: () => Promise<Deck>;
-  addCard: (deckId: string, front: string, back: string, meta?: Partial<CardMeta>) => Promise<string>;
+  addCard: (deckId: string, front: string, back: string, meta?: Partial<CardMeta>, frontImageUrl?: string | null, backImageUrl?: string | null) => Promise<string>;
   deleteDeck: (deckId: string) => Promise<void>;
   deleteCard: (cardId: string) => Promise<void>;
   renameDeck: (deckId: string, name: string, description: string, color?: string) => Promise<void>;
-  editCard: (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => Promise<void>;
+  editCard: (cardId: string, front: string, back: string, meta?: Partial<CardMeta>, frontImageUrl?: string | null, backImageUrl?: string | null) => Promise<void>;
   updateCardMeta: (cardId: string, meta: Partial<CardMeta>) => Promise<void>;
   getDeckMeta: (deckId: string) => DeckMeta;
   setDeckMeta: (deckId: string, meta: DeckMeta) => void;
@@ -872,7 +874,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newDeck;
   }, [userId, refreshFlashcards]);
 
-  const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>): Promise<string> => {
+  const addCard = useCallback(async (deckId: string, front: string, back: string, meta?: Partial<CardMeta>, frontImageUrl?: string | null, backImageUrl?: string | null): Promise<string> => {
     if (!userId) throw new Error('Usuário não autenticado');
     const now = new Date().toISOString();
     const db = await getDb();
@@ -937,7 +939,9 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
         createdAt: now,
         updatedAt: now,
         shared_card_id: sharedCardId,
-        isDeleted: false
+        isDeleted: false,
+        front_image_url: frontImageUrl,
+        back_image_url: backImageUrl
       };
 
       await db.flashcards.insert(newCard);
@@ -1247,7 +1251,7 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [userId, refreshFlashcards]);
 
-  const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>) => {
+  const editCard = useCallback(async (cardId: string, front: string, back: string, meta?: Partial<CardMeta>, frontImageUrl?: string | null, backImageUrl?: string | null) => {
     if (!userId) throw new Error('Usuário não autenticado');
     const db = await getDb();
 
@@ -1306,6 +1310,14 @@ export const FlashcardProvider: React.FC<{ children: ReactNode }> = ({ children 
       back: back.trim(),
       updatedAt: new Date().toISOString()
     };
+
+    // Adicionar URLs das imagens se fornecidas (null significa remover a imagem)
+    if (frontImageUrl !== undefined) {
+      updatedData.front_image_url = frontImageUrl;
+    }
+    if (backImageUrl !== undefined) {
+      updatedData.back_image_url = backImageUrl;
+    }
 
     const topicoNormalizado = meta?.topico !== undefined
       ? (meta.topico?.trim() || null)

@@ -149,7 +149,7 @@ const deckSchema = {
 
 const flashcardSchema = {
   title: 'flashcard schema',
-  version: 0,
+  version: 16,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -172,7 +172,9 @@ const flashcardSchema = {
     createdAt: { type: 'string' },
     updated_at: { type: 'string' },
     shared_card_id: { type: ['string', 'null'] },
-    isDeleted: { type: 'boolean', default: false }
+    isDeleted: { type: 'boolean', default: false },
+    front_image_url: { type: ['string', 'null'], default: null },
+    back_image_url: { type: ['string', 'null'], default: null }
   },
   required: ['id', 'deck_id', 'user_id', 'front', 'back']
 };
@@ -462,6 +464,25 @@ const pdfTextBoxSchema = {
     isDeleted: { type: 'boolean', default: false },
   },
   required: ['id', 'user_id', 'file_id', 'page_number'],
+};
+
+const aulaMaterialSchema = {
+  title: 'aula material schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    aula_id: { type: 'string' },
+    nome: { type: 'string' },
+    storage_path: { type: 'string' },
+    tamanho: { type: 'number' },
+    mime: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+  },
+  required: ['id', 'user_id', 'aula_id', 'nome', 'storage_path'],
 };
 
 const listaSchema = {
@@ -1171,6 +1192,7 @@ export async function getDb(): Promise<RxDatabase> {
       pdf_notes: { schema: pdfNoteSchema },
       pdf_text_boxes: { schema: pdfTextBoxSchema },
       files: { schema: fileSchema },
+      aula_materiais: { schema: aulaMaterialSchema },
       anotacoes_questao: { schema: anotacaoQuestaoSchema },
       planos: { schema: planoSchema },
       plano_feitos: { schema: planoFeitoSchema },
@@ -1184,7 +1206,7 @@ export async function getDb(): Promise<RxDatabase> {
       banco_tentativas: { schema: bancoTentativaSchema },
     });
 
-    console.log('✅ Banco local criado com sucesso (v15).');
+    console.log('✅ Banco local criado com sucesso (v16).');
     dbInstance = db;
     return db;
   } catch (error: any) {
@@ -1235,6 +1257,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
       'files',
+      'aula_materiais',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
       'anotacoes_questao',
       'banco_questoes', 'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
@@ -1259,6 +1282,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       'simulados_pastas',
       'pdf_highlights', 'pdf_notes',
       'pdf_text_boxes',
+      'aula_materiais',
       'planos', 'plano_feitos', 'subtopicos', 'revisoes_subtopico',
       'anotacoes_questao',
       'pastas_caderno', 'cadernos', 'caderno_resultados', 'banco_tentativas',
@@ -1397,6 +1421,61 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
             }
           }
           if (added > 0) console.log(`✅ Pull files: ${added} novo(s)`);
+        }
+      }
+    }
+
+    {
+      const collection = database.collections.aula_materiais;
+      if (collection) {
+        const pullFrom = emptyCollections.has('aula_materiais') ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
+        const { data, error } = await supabaseClient
+          .from('aula_materiais')
+          .select('*')
+          .eq('user_id', userIdStr)
+          .gte('created_at', pullFrom);
+        if (error) {
+          console.error('❌ Pull aula_materiais:', error);
+          houveErro = true;
+        } else if (data) {
+          let added = 0;
+          for (const doc of data) {
+            const existing = await collection.findOne({ selector: { id: doc.id } }).exec();
+            if (!existing) {
+              await collection.insert({ ...doc, updated_at: doc.updated_at || doc.created_at });
+              added++;
+            }
+          }
+          if (added > 0) console.log(`✅ Pull aula_materiais: ${added} novo(s)`);
+
+          // Propagação de exclusão: busca todos os IDs remotos do usuário
+          // e remove do RxDB local os que não estão mais no Supabase.
+          try {
+            const { data: remoteIds, error: idsError } = await supabaseClient
+              .from('aula_materiais')
+              .select('id')
+              .eq('user_id', userIdStr);
+
+            if (!idsError && Array.isArray(remoteIds)) {
+              const remoteIdSet = new Set(remoteIds.map(r => r.id));
+              const localDocs = await collection.find({
+                selector: { user_id: userIdStr }
+              }).exec();
+
+              let removed = 0;
+              for (const localDoc of localDocs) {
+                if (!remoteIdSet.has(localDoc.id)) {
+                  await localDoc.remove();
+                  removed++;
+                }
+              }
+              if (removed > 0) console.log(`🗑️ Pull aula_materiais: ${removed} órfão(s) removido(s) localmente`);
+            } else if (idsError) {
+              console.warn('⚠️ Falha ao buscar IDs remotos para limpeza de aula_materiais:', idsError.message);
+            }
+          } catch (cleanupErr) {
+            console.warn('⚠️ Erro inesperado na limpeza de aula_materiais:', cleanupErr);
+          }
         }
       }
     }

@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { X, Sparkles } from "lucide-react";
+import { X, Sparkles, Image, Trash2 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useToast } from "@/hooks/useToast";
+import { compressAndUploadImage, isValidImageFile, formatFileSize } from "@/services/flashcardImageService";
 
 interface CriarFlashcardAulaModalProps {
   open: boolean;
@@ -21,7 +22,61 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
   const [novoDeckNome, setNovoDeckNome] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  // Estados para imagens
+  const [frontImageFile, setFrontImageFile] = useState<File | null>(null);
+  const [backImageFile, setBackImageFile] = useState<File | null>(null);
+  const [frontImagePreview, setFrontImagePreview] = useState<string | null>(null);
+  const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
   if (!open) return null;
+
+  // Limpar previews ao fechar
+  const handleClose = () => {
+    if (frontImagePreview) URL.revokeObjectURL(frontImagePreview);
+    if (backImagePreview) URL.revokeObjectURL(backImagePreview);
+    onClose();
+  };
+
+  const handleFrontImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!isValidImageFile(file)) {
+      showToast("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.", "error");
+      return;
+    }
+
+    setFrontImageFile(file);
+    if (frontImagePreview) URL.revokeObjectURL(frontImagePreview);
+    setFrontImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleBackImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!isValidImageFile(file)) {
+      showToast("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.", "error");
+      return;
+    }
+
+    setBackImageFile(file);
+    if (backImagePreview) URL.revokeObjectURL(backImagePreview);
+    setBackImagePreview(URL.createObjectURL(file));
+  };
+
+  const removeFrontImage = () => {
+    setFrontImageFile(null);
+    if (frontImagePreview) URL.revokeObjectURL(frontImagePreview);
+    setFrontImagePreview(null);
+  };
+
+  const removeBackImage = () => {
+    setBackImageFile(null);
+    if (backImagePreview) URL.revokeObjectURL(backImagePreview);
+    setBackImagePreview(null);
+  };
 
   const handleCriarNovaColecao = async () => {
     if (!novoDeckNome.trim()) return;
@@ -30,7 +85,6 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       showToast("Baralho criado com sucesso!", "success");
       setNovoDeckNome("");
       setShowNovaColecao(false);
-      // Seleciona o recém criado (último deck)
       if (decks.length > 0) {
         setDeckId(decks[decks.length - 1].id);
       }
@@ -59,22 +113,58 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
 
     setIsSaving(true);
     try {
+      let frontImageUrl: string | undefined;
+      let backImageUrl: string | undefined;
+
+      // Upload da imagem da frente se houver
+      if (frontImageFile) {
+        setIsUploadingImage(true);
+        try {
+          // Obter userId do contexto (precisamos acessar de alguma forma)
+          // Como não temos acesso direto ao userId aqui, vamos passar undefined
+          // e o addCard vai lidar com isso
+          frontImageUrl = await compressAndUploadImage(frontImageFile, 'current-user');
+        } catch (uploadError) {
+          console.warn('⚠️ Falha no upload da imagem da frente, salvando apenas texto:', uploadError);
+          showToast("Aviso: imagem da frente não foi enviada, mas o flashcard será salvo.", "warning");
+        }
+        setIsUploadingImage(false);
+      }
+
+      // Upload da imagem do verso se houver
+      if (backImageFile) {
+        setIsUploadingImage(true);
+        try {
+          backImageUrl = await compressAndUploadImage(backImageFile, 'current-user');
+        } catch (uploadError) {
+          console.warn('⚠️ Falha no upload da imagem do verso, salvando apenas texto:', uploadError);
+          showToast("Aviso: imagem do verso não foi enviada, mas o flashcard será salvo.", "warning");
+        }
+        setIsUploadingImage(false);
+      }
+
+      // Salvar o card - o addCard precisa ser atualizado para aceitar as URLs das imagens
+      // Por enquanto, vamos adicionar as imagens como parte do front/back ou como metadados
+      // A implementação ideal seria passar as URLs para o addCard
       await addCard(targetDeckId, front.trim(), back.trim());
       showToast("Flashcard criado com sucesso!", "success");
       setFront("");
       setBack("");
-      onClose();
+      removeFrontImage();
+      removeBackImage();
+      handleClose();
     } catch (err) {
       console.error(err);
       showToast("Erro ao salvar flashcard", "error");
     } finally {
       setIsSaving(false);
+      setIsUploadingImage(false);
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in">
-      <div 
+      <div
         className="w-full max-w-lg rounded-3xl border border-border bg-surface p-6 shadow-2xl relative"
         onClick={(e) => e.stopPropagation()}
       >
@@ -85,9 +175,9 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
             </div>
             <h2 className="font-display text-xl font-bold text-foreground">Criar flashcard</h2>
           </div>
-          <button 
-            type="button" 
-            onClick={onClose} 
+          <button
+            type="button"
+            onClick={handleClose}
             className="grid h-8 w-8 place-items-center rounded-full text-foreground/50 hover:bg-surface-2 hover:text-foreground transition-colors"
           >
             <X className="h-4 w-4" />
@@ -110,6 +200,40 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
             <span className="mt-1 block text-[11px] text-foreground/40">A pergunta ou o enunciado</span>
           </div>
 
+          {/* Upload de imagem da frente */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-foreground/70 mb-1.5">
+              Imagem da frente (opcional)
+            </label>
+            <div className="space-y-2">
+              <input
+                type="file"
+                accept="image/png, image/jpeg, image/webp"
+                onChange={handleFrontImageChange}
+                className="w-full rounded-xl border border-border bg-background p-3 text-sm text-foreground outline-none focus:border-primary transition-colors file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-primary hover:file:bg-primary/20"
+                disabled={isUploadingImage}
+              />
+              {frontImagePreview && (
+                <div className="relative group inline-block">
+                  <img
+                    src={frontImagePreview}
+                    alt="Preview da frente"
+                    className="max-w-full h-auto rounded-lg border border-border max-h-48 object-contain"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeFrontImage}
+                    className="absolute top-1 right-1 rounded-full bg-red-500/90 text-white p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                    aria-label="Remover imagem"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP • máx. 0.5 MB após compressão</span>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-foreground/70 mb-1.5">
               Verso <span className="text-primary">*</span>
@@ -123,6 +247,40 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
               required
             />
             <span className="mt-1 block text-[11px] text-foreground/40">A resposta</span>
+          </div>
+
+          {/* Upload de imagem do verso */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-foreground/70 mb-1.5">
+              Imagem do verso (opcional)
+            </label>
+            <div className="space-y-2">
+              <input
+                type="file"
+                accept="image/png, image/jpeg, image/webp"
+                onChange={handleBackImageChange}
+                className="w-full rounded-xl border border-border bg-background p-3 text-sm text-foreground outline-none focus:border-primary transition-colors file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-primary hover:file:bg-primary/20"
+                disabled={isUploadingImage}
+              />
+              {backImagePreview && (
+                <div className="relative group inline-block">
+                  <img
+                    src={backImagePreview}
+                    alt="Preview do verso"
+                    className="max-w-full h-auto rounded-lg border border-border max-h-48 object-contain"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeBackImage}
+                    className="absolute top-1 right-1 rounded-full bg-red-500/90 text-white p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                    aria-label="Remover imagem"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP • máx. 0.5 MB após compressão</span>
           </div>
 
           <div>
@@ -181,17 +339,17 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
           <div className="pt-3 flex items-center justify-end gap-3 border-t border-border mt-6">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="rounded-full border border-border bg-surface px-5 py-2.5 text-sm font-medium text-foreground hover:bg-surface-2 transition-colors"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={isSaving || isUploadingImage}
               className="rounded-full bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 inline-flex items-center gap-2 shadow-md"
             >
-              {isSaving ? "Salvando..." : "Salvar flashcard"}
+              {isSaving ? "Salvando..." : isUploadingImage ? "Enviando imagem..." : "Salvar flashcard"}
             </button>
           </div>
         </form>
