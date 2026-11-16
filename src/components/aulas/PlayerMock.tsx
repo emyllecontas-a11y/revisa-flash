@@ -10,14 +10,14 @@ import {
   Settings,
   Volume2,
 } from "lucide-react";
-import type { Aula } from "./aulas-data";
+import type { AulaVisual } from "./aulas-data";
 
 /**
  * Player DEMONSTRATIVO. Nenhum vídeo é reproduzido.
  * O botão play apenas alterna o ícone (estado local) para mostrar o visual.
  * O DeepSeek deve substituir a área marcada por "VIDEO_SLOT" pelo player real.
  */
-export function PlayerMock({ aula }: { aula: Aula }) {
+export function PlayerMock({ aula }: { aula: AulaVisual }) {
   const [playing, setPlaying] = useState(false);
   const pct = Math.max(aula.progresso, 3);
   return (

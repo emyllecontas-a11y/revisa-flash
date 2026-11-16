@@ -1,8 +1,8 @@
 import { CheckCircle2, Clock, Play, ChevronUp, ChevronDown } from "lucide-react";
-import type { Aula } from "./aulas-data";
+import type { AulaVisual } from "./aulas-data";
 
 interface AulaCardProps {
-  aula: Aula;
+  aula: AulaVisual;
   active: boolean;
   onSelect: (id: string) => void;
   onMoveUp?: () => void;

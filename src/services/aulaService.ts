@@ -7,9 +7,11 @@ export interface Aula {
   titulo: string;
   descricao: string;
   terabox_url: string;
-  disciplina?: string; // Nova coluna
-  assunto?: string;    // Nova coluna
-  ordem?: number;      // Nova coluna para ordenação
+  disciplina?: string;          // Nova coluna
+  assunto?: string;             // Nova coluna
+  subassunto?: string | null;   // Opcional: 3º nível da árvore
+  assunto_ordem?: number | null;// Ordem do assunto dentro da disciplina
+  ordem?: number;               // Nova coluna para ordenação
   created_at: string;
 }
 

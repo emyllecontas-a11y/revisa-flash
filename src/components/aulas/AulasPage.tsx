@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ListVideo, X, Loader2, Folder, BookOpen, CheckCircle, Heart, PlusSquare, ChevronUp, ChevronDown } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ListVideo, Loader2, Folder, BookOpen, CheckCircle, Heart, PlusSquare, Layers } from "lucide-react";
 import { AulaCard } from "./AulaCard";
 import { AulasStyles } from "./AulasStyles";
 import { PlayerEmpty } from "./PlayerMock";
@@ -7,10 +7,11 @@ import { AulaPlayer } from "./AulaPlayer";
 import { useAppUser } from "@/contexts/UserContext";
 import { getAulasDoUsuario, atualizarOrdemAula } from "@/services/aulaService";
 import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
+import { formatarAula, construirArvore, achatarArvore, primeiraAulaId, type AulaFormatada, type AulaItem } from "./aulasArvore";
 
 export function AulasPage() {
   const { user } = useAppUser();
-  const [aulasRaw, setAulasRaw] = useState<any[]>([]);
+  const [aulasRaw, setAulasRaw] = useState<AulaFormatada[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -59,75 +60,52 @@ export function AulasPage() {
     });
   };
 
-  const handleMoveUp = useCallback(async (aulaId: string, currentOrdem: number) => {
-    if (!user?.id || currentOrdem <= 1) return;
-    const novaOrdem = currentOrdem - 1;
-    await atualizarOrdemAula(aulaId, novaOrdem);
-    // Refresh the list
+  // Único ponto de recarga: busca no Supabase, formata e atualiza a tela.
+  const recarregar = useCallback(async (selecionarPrimeira = false) => {
+    if (!user?.id) return;
     const data = await getAulasDoUsuario(user.id);
-    const aulasFormatadas = data.map((aula, index) => ({
-      id: aula.id,
-      numero: aula.ordem ?? (index + 1),
-      modulo: aula.disciplina || "Geral",
-      titulo: aula.titulo,
-      descricao: aula.descricao || "Aula em vídeo",
-      duracao: "--:--",
-      tone: index % 2 === 0 ? "laranja" : "rosa",
-      terabox_url: aula.terabox_url,
-      disciplina: aula.disciplina || "Outras Disciplinas",
-      assunto: aula.assunto || "Geral"
-    }));
-    setAulasRaw(aulasFormatadas);
-  }, [user?.id]);
-
-  const handleMoveDown = useCallback(async (aulaId: string, currentOrdem: number, maxOrdem: number) => {
-    if (!user?.id || currentOrdem >= maxOrdem) return;
-    const novaOrdem = currentOrdem + 1;
-    await atualizarOrdemAula(aulaId, novaOrdem);
-    // Refresh the list
-    const data = await getAulasDoUsuario(user.id);
-    const aulasFormatadas = data.map((aula, index) => ({
-      id: aula.id,
-      numero: aula.ordem ?? (index + 1),
-      modulo: aula.disciplina || "Geral",
-      titulo: aula.titulo,
-      descricao: aula.descricao || "Aula em vídeo",
-      duracao: "--:--",
-      tone: index % 2 === 0 ? "laranja" : "rosa",
-      terabox_url: aula.terabox_url,
-      disciplina: aula.disciplina || "Outras Disciplinas",
-      assunto: aula.assunto || "Geral"
-    }));
-    setAulasRaw(aulasFormatadas);
+    const formatadas = data.map(formatarAula);
+    setAulasRaw(formatadas);
+    if (selecionarPrimeira) {
+      setSelectedId(primeiraAulaId(construirArvore(formatadas)));
+    }
+    setLoading(false);
   }, [user?.id]);
 
   useEffect(() => {
-    if (user?.id) {
-      getAulasDoUsuario(user.id).then((data) => {
-        const aulasFormatadas = data.map((aula, index) => ({
-          id: aula.id,
-          numero: aula.ordem ?? (index + 1),
-          modulo: aula.disciplina || "Geral",
-          titulo: aula.titulo,
-          descricao: aula.descricao || "Aula em vídeo",
-          duracao: "--:--",
-          tone: index % 2 === 0 ? "laranja" : "rosa",
-          terabox_url: aula.terabox_url,
-          disciplina: aula.disciplina || "Outras Disciplinas",
-          assunto: aula.assunto || "Geral"
-        }));
+    recarregar(true);
+  }, [recarregar]);
 
-        setAulasRaw(aulasFormatadas);
-        if (aulasFormatadas.length > 0) {
-          setSelectedId(aulasFormatadas[0].id);
+  // Troca a ordem com a aula vizinha do MESMO grupo (mesmo assunto + mesmo subassunto).
+  // O assunto não muda de posição: assunto_ordem não é tocado.
+  const handleMover = useCallback(async (aula: AulaItem, grupo: AulaItem[], direcao: -1 | 1) => {
+    if (!user?.id) return;
+
+    const posicao = grupo.findIndex((item) => item.id === aula.id);
+    const vizinho = grupo[posicao + direcao];
+    if (posicao < 0 || !vizinho) return;
+
+    if (aula.ordem === vizinho.ordem) {
+      // Empate herdado de dados antigos: renumera o grupo inteiro na ordem desejada.
+      const reordenado = [...grupo];
+      reordenado.splice(posicao, 1);
+      reordenado.splice(posicao + direcao, 0, aula);
+      for (let i = 0; i < reordenado.length; i++) {
+        const novaOrdem = i + 1;
+        if (reordenado[i].ordem !== novaOrdem) {
+          await atualizarOrdemAula(reordenado[i].id, novaOrdem);
         }
-        setLoading(false);
-      });
+      }
+    } else {
+      await atualizarOrdemAula(aula.id, vizinho.ordem);
+      await atualizarOrdemAula(vizinho.id, aula.ordem);
     }
-  }, [user?.id]);
+
+    await recarregar();
+  }, [user?.id, recarregar]);
 
   // Mescla com o estado local de concluídas e progresso
-  const aulas = useMemo(() => {
+  const aulas = useMemo<AulaItem[]>(() => {
     return aulasRaw.map((a) => {
       const isConcluida = !!concluidas[a.id];
       const progresso = isConcluida ? 100 : (tempos[a.id]?.total ? Math.round((tempos[a.id].current / tempos[a.id].total) * 100) : 0);
@@ -140,29 +118,21 @@ export function AulasPage() {
     });
   }, [aulasRaw, concluidas, favoritas, tempos]);
 
-  const arvore = useMemo(() => {
-    return aulas.reduce((acc, aula) => {
-      const disc = aula.disciplina;
-      const assunto = aula.assunto;
+  const arvore = useMemo(() => construirArvore(aulas), [aulas]);
 
-      if (!acc[disc]) acc[disc] = {};
-      if (!acc[disc][assunto]) acc[disc][assunto] = [];
+  // Ordem de navegação = ordem em que a árvore é exibida.
+  const listaNavegacao = useMemo(() => achatarArvore(arvore), [arvore]);
 
-      acc[disc][assunto].push(aula);
-      return acc;
-    }, {} as Record<string, Record<string, any[]>>);
-  }, [aulas]);
-
-  const index = aulas.findIndex((a) => a.id === selectedId);
-  const aula = index >= 0 ? aulas[index] : null;
+  const index = listaNavegacao.findIndex((a) => a.id === selectedId);
+  const aula = aulas.find((a) => a.id === selectedId) ?? null;
 
   const select = (id: string) => {
     setSelectedId(id);
     setMobileView("player");
   };
   const go = (delta: number) => {
-    const next = aulas[index + delta];
-    if (next) setSelectedId(next.id);
+    const proxima = listaNavegacao[index + delta];
+    if (proxima) setSelectedId(proxima.id);
   };
 
   if (loading) {
@@ -183,36 +153,67 @@ export function AulasPage() {
         <aside className={`${mobileView === "player" ? "hidden lg:block" : "block"} min-w-0`}>
           <div className="lg:sticky lg:top-6">
             <div className="lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto lg:pr-2 pb-4">
-              {Object.entries(arvore).map(([disciplina, assuntos]) => (
-                <details key={disciplina} className="mb-3 group" open>
+              {arvore.map((disciplina) => (
+                <details key={disciplina.nome} className="mb-3 group" open>
                   <summary className="flex cursor-pointer items-center gap-2 font-semibold text-lg text-foreground hover:text-primary transition-colors list-none [&::-webkit-details-marker]:hidden">
                     <Folder className="h-5 w-5 text-primary group-open:fill-primary/20" />
-                    {disciplina}
+                    {disciplina.nome}
                   </summary>
 
                   <div className="ml-4 mt-2 pl-4 border-l border-border/50 flex flex-col gap-2">
-                    {Object.entries(assuntos).map(([assunto, aulasDoAssunto]) => (
-                      <details key={assunto} className="group/assunto" open>
+                    {disciplina.assuntos.map((assunto) => (
+                      <details key={assunto.nome} className="group/assunto" open>
                         <summary className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground hover:text-foreground list-none [&::-webkit-details-marker]:hidden py-1">
                           <BookOpen className="h-4 w-4" />
-                          {assunto}
+                          {assunto.nome}
                         </summary>
 
-                        <ul className="mt-2 flex flex-col gap-2">
-                          {aulasDoAssunto.map((a, i) => (
-                            <li key={a.id} className="rf-fade-in">
-                              <AulaCard
-                                aula={a}
-                                active={a.id === selectedId}
-                                onSelect={select}
-                                onMoveUp={() => handleMoveUp(a.id, a.numero)}
-                                onMoveDown={() => handleMoveDown(a.id, a.numero, aulasDoAssunto.length)}
-                                isFirst={i === 0}
-                                isLast={i === aulasDoAssunto.length - 1}
-                              />
-                            </li>
-                          ))}
-                        </ul>
+                        {assunto.semSubassunto.length > 0 && (
+                          <ul className="mt-2 flex flex-col gap-2">
+                            {assunto.semSubassunto.map((a, i) => (
+                              <li key={a.id} className="rf-fade-in">
+                                <AulaCard
+                                  aula={a}
+                                  active={a.id === selectedId}
+                                  onSelect={select}
+                                  onMoveUp={() => handleMover(a, assunto.semSubassunto, -1)}
+                                  onMoveDown={() => handleMover(a, assunto.semSubassunto, 1)}
+                                  isFirst={i === 0}
+                                  isLast={i === assunto.semSubassunto.length - 1}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {assunto.subassuntos.length > 0 && (
+                          <div className="mt-2 ml-3 pl-3 border-l border-border/40 flex flex-col gap-2">
+                            {assunto.subassuntos.map((subassunto) => (
+                              <details key={subassunto.nome} className="group/subassunto" open>
+                                <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground list-none [&::-webkit-details-marker]:hidden py-1">
+                                  <Layers className="h-3.5 w-3.5 text-primary/70" />
+                                  {subassunto.nome}
+                                </summary>
+
+                                <ul className="mt-2 flex flex-col gap-2">
+                                  {subassunto.aulas.map((a, i) => (
+                                    <li key={a.id} className="rf-fade-in">
+                                      <AulaCard
+                                        aula={a}
+                                        active={a.id === selectedId}
+                                        onSelect={select}
+                                        onMoveUp={() => handleMover(a, subassunto.aulas, -1)}
+                                        onMoveDown={() => handleMover(a, subassunto.aulas, 1)}
+                                        isFirst={i === 0}
+                                        isLast={i === subassunto.aulas.length - 1}
+                                      />
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            ))}
+                          </div>
+                        )}
                       </details>
                     ))}
                   </div>
@@ -241,7 +242,7 @@ export function AulasPage() {
               <div className="mb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {aula.disciplina} · {aula.assunto}
+                    {aula.disciplina} · {aula.assunto}{aula.subassunto ? ` · ${aula.subassunto}` : ""}
                   </p>
                   <h1 className="mt-1 text-2xl font-bold text-foreground sm:text-3xl">{aula.titulo}</h1>
                 </div>
@@ -286,7 +287,7 @@ export function AulasPage() {
               </div>
 
               <AulaPlayer
-                teraboxUrl={aula.terabox_url}
+                teraboxUrl={aula.terabox_url ?? ""}
                 aulaId={aula.id}
                 initialTime={tempos[aula.id]?.current || 0}
                 onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
@@ -308,7 +309,7 @@ export function AulasPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={index >= aulas.length - 1}
+                    disabled={index < 0 || index >= listaNavegacao.length - 1}
                     onClick={() => go(1)}
                     className="btn-sun inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
                   >
