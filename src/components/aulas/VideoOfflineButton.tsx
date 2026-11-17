@@ -136,7 +136,7 @@ export function VideoOfflineButton({ aulaId, videoUrl, title, isOnline }: VideoO
   }, [retry]);
 
   const phase = state.phase;
-  const percent = state.percent;
+  const percent = Math.max(0, Math.min(100, state.percent));
   const message = state.message;
 
   // Desabilitado se não for URL baixável

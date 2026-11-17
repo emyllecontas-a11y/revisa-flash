@@ -291,7 +291,12 @@ class DownloadManager {
       totalBytes: 0,
       message: "",
     };
-    this.states.set(aulaId, { ...current, ...partial });
+    // Garante que percent nunca ultrapasse 100
+    const next = { ...current, ...partial };
+    if (typeof next.percent === "number") {
+      next.percent = Math.max(0, Math.min(100, next.percent));
+    }
+    this.states.set(aulaId, next);
     this.notify();
   }
 
@@ -465,6 +470,19 @@ class DownloadManager {
       return;
     }
 
+    // Validação de integridade do parcial salvo
+    const validationResult = await this.validatePartialDownload(aulaId, meta);
+    if (!validationResult.valid) {
+      console.warn("[videoOffline] Partial download inválido:", validationResult.reason);
+      await removeVideo(aulaId);
+      this.setState(aulaId, {
+        phase: "checking",
+        message: "O download anterior estava inconsistente e foi reiniciado.",
+      });
+      // Recomeça do zero
+      return this.startDownload(aulaId, url, title);
+    }
+
     // Verifica espaço disponível
     if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
       const estimate = await navigator.storage.estimate();
@@ -490,6 +508,67 @@ class DownloadManager {
 
     // Inicia download com retentativas
     await this.downloadWithRetries(aulaId, meta, 0);
+  }
+
+  /**
+   * Valida a integridade de um download parcial salvo no banco.
+   * Retorna { valid: boolean, reason?: string }.
+   */
+  private async validatePartialDownload(
+    aulaId: string,
+    meta: VideoMeta,
+  ): Promise<{ valid: boolean; reason?: string }> {
+    // Se não baixou nada ainda, é válido (começa do zero)
+    if (meta.downloadedBytes === 0) {
+      return { valid: true };
+    }
+
+    // downloadedBytes não pode ser maior que totalBytes
+    if (meta.downloadedBytes > meta.totalBytes) {
+      return {
+        valid: false,
+        reason: `downloadedBytes (${meta.downloadedBytes}) > totalBytes (${meta.totalBytes})`,
+      };
+    }
+
+    // Carrega chunks salvos
+    const db = getVideoDb();
+    const chunks = await db.videoChunks.where("aulaId").equals(aulaId).toArray();
+
+    // Número de chunks deve bater: downloadedBytes / chunkSize (arredondado para cima para o último chunk parcial)
+    const expectedChunkCount =
+      meta.downloadedBytes === meta.totalBytes
+        ? meta.chunkCount
+        : Math.ceil(meta.downloadedBytes / meta.chunkSize);
+
+    if (chunks.length !== expectedChunkCount) {
+      return {
+        valid: false,
+        reason: `chunk count mismatch: saved ${chunks.length}, expected ${expectedChunkCount}`,
+      };
+    }
+
+    // Soma dos tamanhos dos blobs deve ser igual a downloadedBytes
+    const totalChunksSize = chunks.reduce((sum, c) => sum + c.blob.size, 0);
+    if (totalChunksSize !== meta.downloadedBytes) {
+      return {
+        valid: false,
+        reason: `chunk size sum (${totalChunksSize}) != downloadedBytes (${meta.downloadedBytes})`,
+      };
+    }
+
+    // Índices devem ser contíguos a partir de 0
+    const sortedChunks = chunks.sort((a, b) => a.index - b.index);
+    for (let i = 0; i < sortedChunks.length; i++) {
+      if (sortedChunks[i].index !== i) {
+        return {
+          valid: false,
+          reason: `chunk index gap: expected ${i}, got ${sortedChunks[i].index}`,
+        };
+      }
+    }
+
+    return { valid: true };
   }
 
   private async downloadWithRetries(
@@ -529,6 +608,47 @@ class DownloadManager {
         signal: controller.signal,
       });
 
+      // Tratamento específico de 416 (Range Not Satisfiable)
+      if (response.status === 416) {
+        // Se o startByte for exatamente o totalBytes, o arquivo já estava completo
+        if (startByte >= meta.totalBytes) {
+          // Verifica integridade final
+          const chunks = await db.videoChunks.where("aulaId").equals(aulaId).toArray();
+          const totalChunksSize = chunks.reduce(
+            (sum: number, c: VideoChunk) => sum + c.blob.size,
+            0,
+          );
+
+          if (totalChunksSize === meta.totalBytes) {
+            meta.status = "complete";
+            meta.updatedAt = new Date().toISOString();
+            await db.videoMeta.put(meta);
+
+            this.setState(aulaId, {
+              phase: "complete",
+              percent: 100,
+              downloadedBytes: meta.totalBytes,
+              totalBytes: meta.totalBytes,
+              message: "Download concluído!",
+            });
+            this.releaseWakeLock();
+            this.currentDownloadAulaId = null;
+            return;
+          }
+        }
+        // Caso contrário, o parcial salvo está corrompido/inconsistente: descarta e reinicia do zero UMA vez
+        console.warn(
+          "[videoOffline] 416 Range Not Satisfiable - descartando parcial e reiniciando",
+        );
+        await removeVideo(aulaId);
+        this.abortControllers.delete(aulaId);
+        this.setState(aulaId, {
+          phase: "checking",
+          message: "O download anterior estava inconsistente e foi reiniciado.",
+        });
+        return this.startDownload(aulaId, meta.url, meta.title);
+      }
+
       // Verifica status esperado
       const expectedStatus = startByte === 0 ? [200, 206] : [206];
       if (!expectedStatus.includes(response.status)) {
@@ -564,6 +684,8 @@ class DownloadManager {
           }
         }
       }
+
+      console.info(`[videoOffline] pedindo Range bytes=${startByte}-`);
 
       const reader = response.body?.getReader();
       if (!reader) {
@@ -602,28 +724,8 @@ class DownloadManager {
             }
           }
 
-          // Remove as partes consumidas
-          let consumed = 0;
-          for (const part of parts) {
-            if (consumed >= meta.chunkSize) break;
-            consumed += part.length;
-          }
-          // Recalcula partes restantes de forma simples
-          const remainingParts: Uint8Array<ArrayBuffer>[] = [];
-          let remainingNeeded = bufferedBytes - meta.chunkSize;
-          for (const part of parts) {
-            if (remainingNeeded === 0) {
-              remainingParts.push(part);
-            } else if (part.length <= remainingNeeded) {
-              remainingNeeded -= part.length;
-            } else {
-              remainingParts.push(part.subarray(part.length - remainingNeeded));
-              remainingNeeded = 0;
-            }
-          }
-          parts.length = 0;
-          parts.push(...remainingParts);
-          bufferedBytes = remainingParts.reduce((sum, p) => sum + p.length, 0);
+          // bufferedBytes agora é a soma dos bytes restantes em parts (após o splice acima)
+          bufferedBytes = parts.reduce((sum, p) => sum + p.length, 0);
 
           const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
           const chunkBlob = new Blob(chunkParts as BlobPart[], { type: meta.mime });
@@ -641,11 +743,15 @@ class DownloadManager {
           });
 
           chunkWrittenThisAttempt = true;
+          console.info(
+            `[videoOffline] chunk ${chunkIndex} gravado: ${meta.chunkSize} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
+          );
+
           this.setState(aulaId, {
             downloadedBytes: meta.downloadedBytes,
             totalBytes: meta.totalBytes,
-            percent: Math.round((meta.downloadedBytes / meta.totalBytes) * 100),
-            message: `Baixando... ${Math.round((meta.downloadedBytes / meta.totalBytes) * 100)}%`,
+            percent: Math.min(100, Math.round((meta.downloadedBytes / meta.totalBytes) * 100)),
+            message: `Baixando... ${Math.min(100, Math.round((meta.downloadedBytes / meta.totalBytes) * 100))}%`,
           });
         }
 
@@ -672,10 +778,14 @@ class DownloadManager {
         });
 
         chunkWrittenThisAttempt = true;
+        console.info(
+          `[videoOffline] chunk ${chunkIndex} gravado: ${bufferedBytes} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
+        );
+
         this.setState(aulaId, {
           downloadedBytes: meta.downloadedBytes,
           totalBytes: meta.totalBytes,
-          percent: Math.round((meta.downloadedBytes / meta.totalBytes) * 100),
+          percent: Math.min(100, Math.round((meta.downloadedBytes / meta.totalBytes) * 100)),
         });
       }
 
