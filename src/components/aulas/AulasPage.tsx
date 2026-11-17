@@ -27,7 +27,13 @@ import { AulaMateriais } from "./AulaMateriais";
 import { VideoOfflineButton } from "./VideoOfflineButton";
 import { Button } from "@/components/ui/button";
 import { useAppUser } from "@/contexts/UserContext";
-import { getAulasDoUsuario, atualizarOrdemAula } from "@/services/aulaService";
+import {
+  getAulasDoUsuario,
+  atualizarOrdemAula,
+  getAulasCacheInfo,
+  isAulasFromCache,
+  limparCacheAulas,
+} from "@/services/aulaService";
 import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
 import {
   formatarAula,
@@ -46,6 +52,7 @@ import {
   subscribeToDownloads,
   getPlayableObjectUrl,
   type DownloadState,
+  type DownloadPhase,
 } from "@/services/videoOfflineService";
 import { useToast } from "@/hooks/useToast";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -68,13 +75,31 @@ function nomeSeguroArquivo(titulo: string): string {
   return (limpo || "aula").slice(0, 120);
 }
 
+function formatarDataPtBR(isoString: string | null): string {
+  if (!isoString) return "";
+  try {
+    const data = new Date(isoString);
+    if (isNaN(data.getTime())) return isoString;
+    return data.toLocaleString("pt-BR");
+  } catch {
+    return isoString;
+  }
+}
+
+// Intervalo mínimo entre gravações do progresso do vídeo no localStorage.
+const INTERVALO_GRAVACAO_PROGRESSO_MS = 5000;
+
 export function AulasPage() {
   const { user } = useAppUser();
   const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const confirm = useConfirm();
   const [aulasRaw, setAulasRaw] = useState<AulaFormatada[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
+  const [isFromCache, setIsFromCache] = useState(false);
+  const [cacheSavedAt, setCacheSavedAt] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"lista" | "player">("lista");
@@ -88,6 +113,9 @@ export function AulasPage() {
   const [concluidas, setConcluidas] = useState<Record<string, boolean>>({});
   const [favoritas, setFavoritas] = useState<Record<string, boolean>>({});
   const [tempos, setTempos] = useState<Record<string, { current: number; total: number }>>({});
+
+  // Intervalo mínimo entre gravações do progresso no localStorage.
+  const ultimoProgressoWriteRef = useRef(0);
 
   // Offline video state
   const [offlineAulaIds, setOfflineAulaIds] = useState<Set<string>>(new Set());
@@ -103,8 +131,10 @@ export function AulasPage() {
     persisted: boolean;
     supported: boolean;
   }>({ usage: 0, quota: 0, persisted: false, supported: false });
-  const [currentOfflineObjectUrl, setCurrentOfflineObjectUrl] = useState<string | null>(null);
-  const currentObjectUrlRef = useRef<string | null>(null);
+  // Fonte offline: fica presa à aula que a gerou (evita entregar URL de outra aula).
+  const [offlineSource, setOfflineSource] = useState<{ aulaId: string; url: string | null } | null>(
+    null,
+  );
 
   useEffect(() => {
     try {
@@ -119,19 +149,6 @@ export function AulasPage() {
     }
   }, [user?.id]);
 
-  // Acompanha conexão para liberar/bloquear o download do vídeo.
-  useEffect(() => {
-    const online = () => setIsOnline(true);
-    const offline = () => setIsOnline(false);
-    setIsOnline(navigator.onLine);
-    window.addEventListener("online", online);
-    window.addEventListener("offline", offline);
-    return () => {
-      window.removeEventListener("online", online);
-      window.removeEventListener("offline", offline);
-    };
-  }, []);
-
   // Carrega IDs de aulas disponíveis offline
   const loadOfflineAulaIds = useCallback(async () => {
     const ids = await getOfflineAulaIds();
@@ -142,15 +159,10 @@ export function AulasPage() {
     loadOfflineAulaIds();
   }, [loadOfflineAulaIds]);
 
-  // Revoga object URL ao trocar de aula ou desmontar
-  useEffect(() => {
-    return () => {
-      if (currentObjectUrlRef.current) {
-        URL.revokeObjectURL(currentObjectUrlRef.current);
-        currentObjectUrlRef.current = null;
-      }
-    };
-  }, []);
+  // Última fase conhecida de cada aula + aula selecionada (para o toast de conclusão)
+  const ultimaFaseRef = useRef<Map<string, DownloadPhase>>(new Map());
+  const selectedIdRef = useRef<string | null>(selectedId);
+  selectedIdRef.current = selectedId;
 
   // Subscreve progresso de downloads para mostrar na árvore
   useEffect(() => {
@@ -161,31 +173,58 @@ export function AulasPage() {
       });
       setDownloadProgress(progress);
       // Atualiza offlineAulaIds quando algum completa
-      const newOfflineIds = new Set(offlineAulaIds);
-      states.forEach((state, aulaId) => {
-        if (state.phase === "complete") newOfflineIds.add(aulaId);
-        else if (state.phase === "idle" || state.phase === "error") newOfflineIds.delete(aulaId);
+      setOfflineAulaIds((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        states.forEach((state, aulaId) => {
+          if (state.phase === "complete" && !next.has(aulaId)) {
+            next.add(aulaId);
+            changed = true;
+          } else if ((state.phase === "idle" || state.phase === "error") && next.has(aulaId)) {
+            next.delete(aulaId);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
       });
-      setOfflineAulaIds(newOfflineIds);
+      // Toast só quando uma aula JÁ conhecida (fase anterior registrada) chega a "complete"
+      states.forEach((state, aulaId) => {
+        const anterior = ultimaFaseRef.current.get(aulaId);
+        ultimaFaseRef.current.set(aulaId, state.phase);
+        if (anterior && anterior !== "complete" && state.phase === "complete") {
+          if (aulaId === selectedIdRef.current) {
+            toastRef.current.success(
+              "Vídeo salvo. Ele será usado offline na próxima vez que você abrir esta aula.",
+            );
+          }
+        }
+      });
     });
     return unsubscribe;
-  }, [offlineAulaIds]);
+  }, []);
 
   // Carrega object URL offline quando a aula selecionada muda
   useEffect(() => {
+    setOfflineSource(null);
     if (!selectedId) {
-      setCurrentOfflineObjectUrl(null);
       return;
     }
     let cancelled = false;
+    let urlCriado: string | null = null;
     getPlayableObjectUrl(selectedId).then((url) => {
-      if (!cancelled) {
-        setCurrentOfflineObjectUrl(url);
-        if (url) currentObjectUrlRef.current = url;
+      if (cancelled) {
+        if (url) URL.revokeObjectURL(url);
+        return;
       }
+      urlCriado = url;
+      setOfflineSource({ aulaId: selectedId, url });
     });
     return () => {
       cancelled = true;
+      if (urlCriado) {
+        URL.revokeObjectURL(urlCriado);
+        urlCriado = null;
+      }
     };
   }, [selectedId]);
 
@@ -208,12 +247,47 @@ export function AulasPage() {
   const handleTimeUpdate = (id: string, current: number, total: number) => {
     setTempos((prev) => {
       const next = { ...prev, [id]: { current, total } };
-      try {
-        localStorage.setItem(storageKeyProgresso, JSON.stringify(next));
-      } catch (e) {}
+      // Grava no localStorage no máximo uma vez a cada 5 s (evita I/O a cada frame).
+      const agora = Date.now();
+      if (agora - ultimoProgressoWriteRef.current >= INTERVALO_GRAVACAO_PROGRESSO_MS) {
+        ultimoProgressoWriteRef.current = agora;
+        try {
+          localStorage.setItem(storageKeyProgresso, JSON.stringify(next));
+        } catch (e) {}
+      }
       return next;
     });
   };
+
+  const temposRef = useRef(tempos);
+  temposRef.current = tempos;
+
+  // Grava o progresso imediatamente, sem esperar o intervalo de 5 s.
+  // Usado ao pausar o vídeo e ao trocar de aula.
+  const gravarProgressoAgora = useCallback(
+    (id: string) => {
+      const registro = temposRef.current[id];
+      if (!registro) return;
+      try {
+        const atual = JSON.parse(localStorage.getItem(storageKeyProgresso) || "{}");
+        localStorage.setItem(storageKeyProgresso, JSON.stringify({ ...atual, [id]: registro }));
+      } catch (e) {
+        // localStorage indisponível: ignora
+      }
+      ultimoProgressoWriteRef.current = Date.now();
+    },
+    [storageKeyProgresso],
+  );
+
+  // Ao trocar de aula, grava o progresso da aula anterior.
+  const aulaAnteriorRef = useRef<string | null>(null);
+  useEffect(() => {
+    const anterior = aulaAnteriorRef.current;
+    if (anterior && anterior !== selectedId) {
+      gravarProgressoAgora(anterior);
+    }
+    aulaAnteriorRef.current = selectedId;
+  }, [selectedId, gravarProgressoAgora]);
 
   // Único ponto de recarga: busca no Supabase, formata e atualiza a tela.
   const recarregar = useCallback(
@@ -222,6 +296,10 @@ export function AulasPage() {
       const data = await getAulasDoUsuario(user.id);
       const formatadas = data.map(formatarAula);
       setAulasRaw(formatadas);
+      // Captura status de cache após a busca
+      const info = getAulasCacheInfo(user.id);
+      setIsFromCache(info.isFromCache);
+      setCacheSavedAt(info.savedAt);
       if (selecionarPrimeira) {
         setSelectedId(primeiraAulaId(construirArvore(formatadas)));
       }
@@ -233,6 +311,25 @@ export function AulasPage() {
   useEffect(() => {
     recarregar(true);
   }, [recarregar]);
+
+  // Acompanha conexão para liberar/bloquear o download do vídeo.
+  // Ao voltar a internet (evento 'online'), recarrega a lista do Supabase.
+  useEffect(() => {
+    const online = () => {
+      setIsOnline(true);
+      if (user?.id) {
+        recarregar();
+      }
+    };
+    const offline = () => setIsOnline(false);
+    setIsOnline(navigator.onLine);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, [user?.id, recarregar]);
 
   // Troca a ordem com a aula vizinha do MESMO grupo (mesmo assunto + mesmo subassunto).
   // O assunto não muda de posição: assunto_ordem não é tocado.
@@ -316,6 +413,17 @@ export function AulasPage() {
   return (
     <div className="w-full px-2 py-2 sm:px-4 lg:py-4">
       <AulasStyles />
+
+      {/* Banner: lista carregada do cache (offline) */}
+      {isFromCache && cacheSavedAt && (
+        <div
+          className="mb-4 flex items-center gap-2 rounded bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+          role="status"
+        >
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>Sem conexão: mostrando a lista salva em {formatarDataPtBR(cacheSavedAt)}.</span>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:gap-8">
         {/* ===== Lista de aulas em Árvore ===== */}
@@ -544,14 +652,27 @@ export function AulasPage() {
                 </p>
               ) : null}
 
-              <AulaPlayer
-                teraboxUrl={aula.terabox_url ?? ""}
-                aulaId={aula.id}
-                initialTime={tempos[aula.id]?.current || 0}
-                onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
-                offlineObjectUrl={currentOfflineObjectUrl}
-                isOnline={isOnline}
-              />
+              {offlineSource?.aulaId !== aula.id ? (
+                <div
+                  className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg flex items-center justify-center"
+                  aria-live="polite"
+                >
+                  <div className="flex flex-col items-center gap-3 text-white">
+                    <Loader2 className="h-8 w-8 animate-spin text-white/80" />
+                    <span className="text-sm text-white/80">Preparando vídeo…</span>
+                  </div>
+                </div>
+              ) : (
+                <AulaPlayer
+                  teraboxUrl={aula.terabox_url ?? ""}
+                  aulaId={aula.id}
+                  initialTime={tempos[aula.id]?.current || 0}
+                  onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
+                  onPause={() => gravarProgressoAgora(aula.id)}
+                  offlineObjectUrl={offlineSource.url}
+                  isOnline={isOnline}
+                />
+              )}
 
               <div className="mt-6">
                 <AulaMateriais aulaId={aula.id} />

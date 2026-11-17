@@ -8,6 +8,7 @@ import {
 import { useAppUser } from "@/contexts/UserContext";
 import { useClerk } from "@clerk/react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
+import { limparCacheAulas } from "@/services/aulaService";
 import { uid } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
@@ -500,14 +501,16 @@ export default function ConfigPage() {
     if (!ok) return;
     try {
       await signOut();
+      if (user?.id) limparCacheAulas(user.id);
       localStorage.removeItem('revisaflash_user_id');
       window.location.href = '/login';
     } catch (error) {
       console.error("Erro ao fazer logout:", error);
+      if (user?.id) limparCacheAulas(user.id);
       localStorage.removeItem('revisaflash_user_id');
       window.location.href = '/login';
     }
-  }, [signOut, confirmDialog]);
+  }, [signOut, confirmDialog, user?.id]);
 
   const reabrirTour = useCallback(async () => {
     if (!user?.id) return;
@@ -554,6 +557,7 @@ export default function ConfigPage() {
 
       window.open('https://dashboard.clerk.com/users', '_blank');
       await signOut();
+      if (user?.id) limparCacheAulas(user.id);
       setMensagem("📋 Redirecionado para o Clerk. Exclua seu usuário manualmente.");
       setMensagemTipo('info');
       setTimeout(() => { window.location.href = '/login'; }, 3000);

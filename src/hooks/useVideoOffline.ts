@@ -5,15 +5,13 @@ import { useEffect, useState, useCallback } from "react";
 import {
   isDownloadableVideoUrl,
   getVideoMeta,
-  getPlayableObjectUrl,
   startDownload,
   cancelDownload,
-  removeVideo as removeVideoService,
+  removeVideo,
   pauseDownload,
   subscribeToDownloads,
   getDownloadState,
   type DownloadState,
-  type DownloadPhase,
 } from "@/services/videoOfflineService";
 
 export interface UseVideoOfflineReturn {
@@ -25,7 +23,6 @@ export interface UseVideoOfflineReturn {
   resume: () => Promise<void>;
   remove: () => Promise<void>;
   retry: () => Promise<void>;
-  objectUrl: string | null;
 }
 
 export function useVideoOffline(
@@ -34,14 +31,6 @@ export function useVideoOffline(
   title: string,
 ): UseVideoOfflineReturn {
   const [state, setState] = useState<DownloadState>(() => getDownloadState(aulaId));
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [hasCheckedInitial, setHasCheckedInitial] = useState(false);
-
-  // Atualiza objectUrl se status for complete
-  const refreshObjectUrl = useCallback(async () => {
-    const url = await getPlayableObjectUrl(aulaId);
-    setObjectUrl(url);
-  }, [aulaId]);
 
   // Subscribe to download manager updates
   useEffect(() => {
@@ -49,31 +38,35 @@ export function useVideoOffline(
       const newState = states.get(aulaId);
       if (newState) {
         setState(newState);
-        // Se completou, atualiza objectUrl
-        if (newState.phase === "complete") {
-          refreshObjectUrl();
-        }
       }
     });
     return unsubscribe;
-  }, [aulaId, refreshObjectUrl]);
+  }, [aulaId]);
 
-  // Verificação inicial: se já tem meta complete ou partial, carrega estado
+  // Verificação inicial ao montar: se o vídeo já está completo no IndexedDB,
+  // inicia em "complete" para o botão mostrar "Disponível offline" após recarregar.
   useEffect(() => {
-    if (hasCheckedInitial) return;
-    setHasCheckedInitial(true);
+    let cancelled = false;
 
     const checkInitial = async () => {
       const meta = await getVideoMeta(aulaId);
-      if (meta) {
-        if (meta.status === "complete") {
-          await refreshObjectUrl();
-        }
-        // O subscribe já vai pegar o estado do gerenciador
+      if (cancelled) return;
+      if (meta && meta.status === "complete") {
+        setState({
+          phase: "complete",
+          percent: 100,
+          downloadedBytes: meta.totalBytes,
+          totalBytes: meta.totalBytes,
+          message: "Download concluído!",
+        });
       }
     };
     checkInitial();
-  }, [aulaId, hasCheckedInitial, refreshObjectUrl]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [aulaId]);
 
   const canDownload = videoUrl ? isDownloadableVideoUrl(videoUrl) : false;
 
@@ -89,7 +82,6 @@ export function useVideoOffline(
 
   const cancel = useCallback(async () => {
     await cancelDownload(aulaId);
-    setObjectUrl(null);
   }, [aulaId]);
 
   const pause = useCallback(() => {
@@ -105,8 +97,7 @@ export function useVideoOffline(
   }, [aulaId, videoUrl, title]);
 
   const remove = useCallback(async () => {
-    await removeVideoFromManager(aulaId);
-    setObjectUrl(null);
+    await removeVideo(aulaId);
   }, [aulaId]);
 
   const retry = useCallback(async () => {
@@ -126,9 +117,5 @@ export function useVideoOffline(
     resume,
     remove,
     retry,
-    objectUrl,
   };
 }
-
-// Re-exporta removeVideoFromManager para uso no hook
-import { removeVideo as removeVideoFromManager } from "@/services/videoOfflineService";

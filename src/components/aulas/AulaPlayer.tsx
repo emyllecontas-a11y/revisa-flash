@@ -2,20 +2,41 @@ import { useEffect, useRef, useState } from "react";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import { RotateCcw, RotateCw, WifiOff, AlertTriangle } from "lucide-react";
+import { useToast } from "@/hooks/useToast";
 
 interface AulaPlayerProps {
   teraboxUrl: string;
   aulaId: string;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
+  onPause?: () => void;
   initialTime?: number;
   offlineObjectUrl?: string | null;
   isOnline?: boolean;
 }
 
+// Estado do overlay de mensagem do player.
+type PlayerMessage = null | "sem-internet" | "salvo-falhou" | "erro-carregar";
+
+const MENSAGENS: Record<Exclude<PlayerMessage, null>, { titulo: string; detalhe: string }> = {
+  "sem-internet": {
+    titulo: "Sem internet e esta aula não foi baixada",
+    detalhe: "Conecte-se ou baixe a aula quando estiver online",
+  },
+  "salvo-falhou": {
+    titulo: "Não foi possível tocar o vídeo salvo neste aparelho.",
+    detalhe: "Remova o download e baixe de novo.",
+  },
+  "erro-carregar": {
+    titulo: "Não foi possível carregar o vídeo.",
+    detalhe: "Verifique sua conexão e tente de novo.",
+  },
+};
+
 export function AulaPlayer({
   teraboxUrl,
   aulaId,
   onTimeUpdate,
+  onPause,
   initialTime = 0,
   offlineObjectUrl,
   isOnline = true,
@@ -23,33 +44,44 @@ export function AulaPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const hasRestoredTime = useRef(false);
-  const [currentSrc, setCurrentSrc] = useState<string>(offlineObjectUrl || teraboxUrl);
-  const [showOfflineError, setShowOfflineError] = useState(false);
   const triedFallbackRef = useRef(false);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  onTimeUpdateRef.current = onTimeUpdate;
+  const onPauseRef = useRef(onPause);
+  onPauseRef.current = onPause;
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  // initialTime é aplicado uma única vez, no loadedmetadata; a ref guarda o valor de montagem.
+  const initialTimeRef = useRef(initialTime);
+  const [playerMessage, setPlayerMessage] = useState<PlayerMessage>(null);
 
-  // Determine which source to use: offline if available, else remote
-  const effectiveSrc = offlineObjectUrl || teraboxUrl;
+  // A fonte é definida UMA vez por montagem. AulasPage já garante a remontagem
+  // (aulaId na key do wrapper), então mudanças de props não trocam a fonte.
+  const [fonteInicial] = useState(() => ({
+    src: offlineObjectUrl || teraboxUrl,
+    isOffline: !!offlineObjectUrl,
+  }));
 
+  // Sem internet e sem vídeo salvo: avisa já no mount.
+  // Se a conexão voltar, libera a montagem do vídeo e carrega uma única vez.
   useEffect(() => {
-    hasRestoredTime.current = false;
-    triedFallbackRef.current = false;
-    setShowOfflineError(false);
-  }, [aulaId, effectiveSrc]);
-
-  useEffect(() => {
-    if (!videoRef.current) return;
-
-    // Update source if it changed (but don't change mid-playback)
-    const videoEl = videoRef.current;
-    if (videoEl.src !== effectiveSrc && !videoEl.paused) {
-      // Don't switch source mid-playback; will apply on next mount
+    if (fonteInicial.isOffline) return;
+    if (!isOnline) {
+      setPlayerMessage("sem-internet");
       return;
     }
-    if (videoEl.src !== effectiveSrc) {
-      videoEl.src = effectiveSrc;
-      videoEl.load();
+    if (playerMessage === "sem-internet") {
+      hasRestoredTime.current = false;
+      setPlayerMessage(null);
+      videoRef.current?.load();
     }
+  }, [isOnline, fonteInicial.isOffline, playerMessage]);
 
+  // Plyr: criado no efeito do elemento e destruído no cleanup (deps [aulaId]).
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const videoEl = videoRef.current;
     playerRef.current = new Plyr(videoEl, {
       controls: [
         "play-large",
@@ -68,45 +100,69 @@ export function AulaPlayer({
       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 4] },
     });
 
+    return () => {
+      playerRef.current?.destroy();
+      playerRef.current = null;
+    };
+  }, [aulaId]);
+
+  // Eventos do vídeo: tempo, restauração e fallback de fonte.
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
     const handleLoadedMetadata = () => {
-      if (initialTime > 0 && !hasRestoredTime.current) {
-        videoEl.currentTime = initialTime;
+      if (initialTimeRef.current > 0 && !hasRestoredTime.current) {
+        videoEl.currentTime = initialTimeRef.current;
         hasRestoredTime.current = true;
       }
     };
 
     const handleTimeUpdate = () => {
-      if (onTimeUpdate && videoEl) {
-        onTimeUpdate(videoEl.currentTime, videoEl.duration || 0);
+      if (onTimeUpdateRef.current) {
+        onTimeUpdateRef.current(videoEl.currentTime, videoEl.duration || 0);
+      }
+    };
+
+    const handlePause = () => {
+      if (onPauseRef.current) {
+        onPauseRef.current();
       }
     };
 
     const handleError = () => {
-      // If offline video fails and we're online, try remote URL
-      if (!triedFallbackRef.current && offlineObjectUrl && isOnline && teraboxUrl) {
-        triedFallbackRef.current = true;
-        console.warn("[AulaPlayer] Offline video failed, falling back to remote URL");
-        videoEl.src = teraboxUrl;
-        videoEl.load();
+      if (fonteInicial.isOffline) {
+        if (isOnline && teraboxUrl && !triedFallbackRef.current) {
+          triedFallbackRef.current = true;
+          hasRestoredTime.current = false;
+          toastRef.current.warning("Não foi possível tocar o vídeo salvo. Usando a versão online.");
+          setPlayerMessage(null);
+          videoEl.src = teraboxUrl;
+          videoEl.load();
+          return;
+        }
+        setPlayerMessage("salvo-falhou");
         return;
       }
-      // If we're offline and no video available
-      if (!isOnline && (!offlineObjectUrl || triedFallbackRef.current)) {
-        setShowOfflineError(true);
+      if (!isOnline) {
+        setPlayerMessage("sem-internet");
+      } else {
+        setPlayerMessage("erro-carregar");
       }
     };
 
     videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
     videoEl.addEventListener("timeupdate", handleTimeUpdate);
+    videoEl.addEventListener("pause", handlePause);
     videoEl.addEventListener("error", handleError);
 
     return () => {
       videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
       videoEl.removeEventListener("timeupdate", handleTimeUpdate);
+      videoEl.removeEventListener("pause", handlePause);
       videoEl.removeEventListener("error", handleError);
-      if (playerRef.current) playerRef.current.destroy();
     };
-  }, [effectiveSrc, aulaId, initialTime, offlineObjectUrl, teraboxUrl, isOnline]);
+  }, [aulaId, fonteInicial, isOnline, teraboxUrl]);
 
   const handleRewind = () => {
     if (videoRef.current) {
@@ -123,27 +179,34 @@ export function AulaPlayer({
     }
   };
 
-  // Show offline message when no video available
-  if (showOfflineError) {
-    return (
-      <div className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg flex items-center justify-center">
-        <div className="text-center p-4 text-white">
-          <WifiOff className="mx-auto h-10 w-10 text-white/50 mb-3" />
-          <p className="text-lg font-medium">Sem internet e esta aula não foi baixada</p>
-          <p className="mt-1 text-sm text-white/70">
-            Conecte-se ou baixe a aula quando estiver online
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const mensagem = playerMessage ? MENSAGENS[playerMessage] : null;
 
   return (
     <div className="relative group">
       <div className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg">
-        <video ref={videoRef} className="w-full h-full" playsInline controls key={effectiveSrc}>
-          <source src={effectiveSrc} type="video/mp4" />
-        </video>
+        {fonteInicial.src ? (
+          <video
+            ref={videoRef}
+            src={fonteInicial.src}
+            className="w-full h-full"
+            playsInline
+            controls
+            key={aulaId}
+          />
+        ) : null}
+        {mensagem ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
+            {playerMessage === "sem-internet" ? (
+              <WifiOff className="mx-auto mb-3 h-10 w-10 text-white/50" />
+            ) : (
+              <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-white/50" />
+            )}
+            <div className="p-4 text-center text-white">
+              <p className="text-lg font-medium">{mensagem.titulo}</p>
+              <p className="mt-1 text-sm text-white/70">{mensagem.detalhe}</p>
+            </div>
+          </div>
+        ) : null}
       </div>
       {/* Botões rápidos de -10s e +10s */}
       <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity bg-black/60 backdrop-blur-md px-2.5 py-1.5 rounded-full border border-white/10">

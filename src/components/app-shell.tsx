@@ -11,6 +11,7 @@ import { useAppUser } from "@/contexts/UserContext";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useClerk } from "@clerk/react";
 import { getSupabaseWithToken } from "@/lib/supabaseClient";
+import { limparCacheAulas } from "@/services/aulaService";
 import { useStudy } from "@/contexts/StudyContext";
 import { UnaVoxLogo } from "@/components/UnaVoxLogo";
 import { syncWithSupabase, readLastSync } from "@/lib/db";
@@ -291,9 +292,11 @@ function AppShellInner({
     if (ok) {
       try {
         await signOut();
+        if (user?.id) limparCacheAulas(user.id);
         localStorage.removeItem('revisaflash_user_id');
         navigate('/login');
       } catch (error) {
+        if (user?.id) limparCacheAulas(user.id);
         localStorage.removeItem('revisaflash_user_id');
         window.location.href = '/login';
       }

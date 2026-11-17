@@ -1,0 +1,1232 @@
+diff --git a/src/components/aulas/AulaPlayer.tsx b/src/components/aulas/AulaPlayer.tsx
+index 3617f1f3..e769075e 100644
+--- a/src/components/aulas/AulaPlayer.tsx
++++ b/src/components/aulas/AulaPlayer.tsx
+@@ -2,20 +2,41 @@ import { useEffect, useRef, useState } from "react";
+ import Plyr from "plyr";
+ import "plyr/dist/plyr.css";
+ import { RotateCcw, RotateCw, WifiOff, AlertTriangle } from "lucide-react";
++import { useToast } from "@/hooks/useToast";
+ 
+ interface AulaPlayerProps {
+   teraboxUrl: string;
+   aulaId: string;
+   onTimeUpdate?: (currentTime: number, duration: number) => void;
++  onPause?: () => void;
+   initialTime?: number;
+   offlineObjectUrl?: string | null;
+   isOnline?: boolean;
+ }
+ 
++// Estado do overlay de mensagem do player.
++type PlayerMessage = null | "sem-internet" | "salvo-falhou" | "erro-carregar";
++
++const MENSAGENS: Record<Exclude<PlayerMessage, null>, { titulo: string; detalhe: string }> = {
++  "sem-internet": {
++    titulo: "Sem internet e esta aula não foi baixada",
++    detalhe: "Conecte-se ou baixe a aula quando estiver online",
++  },
++  "salvo-falhou": {
++    titulo: "Não foi possível tocar o vídeo salvo neste aparelho.",
++    detalhe: "Remova o download e baixe de novo.",
++  },
++  "erro-carregar": {
++    titulo: "Não foi possível carregar o vídeo.",
++    detalhe: "Verifique sua conexão e tente de novo.",
++  },
++};
++
+ export function AulaPlayer({
+   teraboxUrl,
+   aulaId,
+   onTimeUpdate,
++  onPause,
+   initialTime = 0,
+   offlineObjectUrl,
+   isOnline = true,
+@@ -23,33 +44,44 @@ export function AulaPlayer({
+   const videoRef = useRef<HTMLVideoElement>(null);
+   const playerRef = useRef<Plyr | null>(null);
+   const hasRestoredTime = useRef(false);
+-  const [currentSrc, setCurrentSrc] = useState<string>(offlineObjectUrl || teraboxUrl);
+-  const [showOfflineError, setShowOfflineError] = useState(false);
+   const triedFallbackRef = useRef(false);
+-
+-  // Determine which source to use: offline if available, else remote
+-  const effectiveSrc = offlineObjectUrl || teraboxUrl;
+-
++  const onTimeUpdateRef = useRef(onTimeUpdate);
++  onTimeUpdateRef.current = onTimeUpdate;
++  const onPauseRef = useRef(onPause);
++  onPauseRef.current = onPause;
++  const toast = useToast();
++  const toastRef = useRef(toast);
++  toastRef.current = toast;
++  // initialTime é aplicado uma única vez, no loadedmetadata; a ref guarda o valor de montagem.
++  const initialTimeRef = useRef(initialTime);
++  const [playerMessage, setPlayerMessage] = useState<PlayerMessage>(null);
++
++  // A fonte é definida UMA vez por montagem. AulasPage já garante a remontagem
++  // (aulaId na key do wrapper), então mudanças de props não trocam a fonte.
++  const [fonteInicial] = useState(() => ({
++    src: offlineObjectUrl || teraboxUrl,
++    isOffline: !!offlineObjectUrl,
++  }));
++
++  // Sem internet e sem vídeo salvo: avisa já no mount.
++  // Se a conexão voltar, libera a montagem do vídeo e carrega uma única vez.
+   useEffect(() => {
+-    hasRestoredTime.current = false;
+-    triedFallbackRef.current = false;
+-    setShowOfflineError(false);
+-  }, [aulaId, effectiveSrc]);
+-
+-  useEffect(() => {
+-    if (!videoRef.current) return;
+-
+-    // Update source if it changed (but don't change mid-playback)
+-    const videoEl = videoRef.current;
+-    if (videoEl.src !== effectiveSrc && !videoEl.paused) {
+-      // Don't switch source mid-playback; will apply on next mount
++    if (fonteInicial.isOffline) return;
++    if (!isOnline) {
++      setPlayerMessage("sem-internet");
+       return;
+     }
+-    if (videoEl.src !== effectiveSrc) {
+-      videoEl.src = effectiveSrc;
+-      videoEl.load();
++    if (playerMessage === "sem-internet") {
++      hasRestoredTime.current = false;
++      setPlayerMessage(null);
++      videoRef.current?.load();
+     }
++  }, [isOnline, fonteInicial.isOffline, playerMessage]);
+ 
++  // Plyr: criado no efeito do elemento e destruído no cleanup (deps [aulaId]).
++  useEffect(() => {
++    if (!videoRef.current) return;
++    const videoEl = videoRef.current;
+     playerRef.current = new Plyr(videoEl, {
+       controls: [
+         "play-large",
+@@ -68,45 +100,69 @@ export function AulaPlayer({
+       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 4] },
+     });
+ 
++    return () => {
++      playerRef.current?.destroy();
++      playerRef.current = null;
++    };
++  }, [aulaId]);
++
++  // Eventos do vídeo: tempo, restauração e fallback de fonte.
++  useEffect(() => {
++    const videoEl = videoRef.current;
++    if (!videoEl) return;
++
+     const handleLoadedMetadata = () => {
+-      if (initialTime > 0 && !hasRestoredTime.current) {
+-        videoEl.currentTime = initialTime;
++      if (initialTimeRef.current > 0 && !hasRestoredTime.current) {
++        videoEl.currentTime = initialTimeRef.current;
+         hasRestoredTime.current = true;
+       }
+     };
+ 
+     const handleTimeUpdate = () => {
+-      if (onTimeUpdate && videoEl) {
+-        onTimeUpdate(videoEl.currentTime, videoEl.duration || 0);
++      if (onTimeUpdateRef.current) {
++        onTimeUpdateRef.current(videoEl.currentTime, videoEl.duration || 0);
++      }
++    };
++
++    const handlePause = () => {
++      if (onPauseRef.current) {
++        onPauseRef.current();
+       }
+     };
+ 
+     const handleError = () => {
+-      // If offline video fails and we're online, try remote URL
+-      if (!triedFallbackRef.current && offlineObjectUrl && isOnline && teraboxUrl) {
+-        triedFallbackRef.current = true;
+-        console.warn("[AulaPlayer] Offline video failed, falling back to remote URL");
+-        videoEl.src = teraboxUrl;
+-        videoEl.load();
++      if (fonteInicial.isOffline) {
++        if (isOnline && teraboxUrl && !triedFallbackRef.current) {
++          triedFallbackRef.current = true;
++          hasRestoredTime.current = false;
++          toastRef.current.warning("Não foi possível tocar o vídeo salvo. Usando a versão online.");
++          setPlayerMessage(null);
++          videoEl.src = teraboxUrl;
++          videoEl.load();
++          return;
++        }
++        setPlayerMessage("salvo-falhou");
+         return;
+       }
+-      // If we're offline and no video available
+-      if (!isOnline && (!offlineObjectUrl || triedFallbackRef.current)) {
+-        setShowOfflineError(true);
++      if (!isOnline) {
++        setPlayerMessage("sem-internet");
++      } else {
++        setPlayerMessage("erro-carregar");
+       }
+     };
+ 
+     videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
+     videoEl.addEventListener("timeupdate", handleTimeUpdate);
++    videoEl.addEventListener("pause", handlePause);
+     videoEl.addEventListener("error", handleError);
+ 
+     return () => {
+       videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
+       videoEl.removeEventListener("timeupdate", handleTimeUpdate);
++      videoEl.removeEventListener("pause", handlePause);
+       videoEl.removeEventListener("error", handleError);
+-      if (playerRef.current) playerRef.current.destroy();
+     };
+-  }, [effectiveSrc, aulaId, initialTime, offlineObjectUrl, teraboxUrl, isOnline]);
++  }, [aulaId, fonteInicial, isOnline, teraboxUrl]);
+ 
+   const handleRewind = () => {
+     if (videoRef.current) {
+@@ -123,27 +179,34 @@ export function AulaPlayer({
+     }
+   };
+ 
+-  // Show offline message when no video available
+-  if (showOfflineError) {
+-    return (
+-      <div className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg flex items-center justify-center">
+-        <div className="text-center p-4 text-white">
+-          <WifiOff className="mx-auto h-10 w-10 text-white/50 mb-3" />
+-          <p className="text-lg font-medium">Sem internet e esta aula não foi baixada</p>
+-          <p className="mt-1 text-sm text-white/70">
+-            Conecte-se ou baixe a aula quando estiver online
+-          </p>
+-        </div>
+-      </div>
+-    );
+-  }
++  const mensagem = playerMessage ? MENSAGENS[playerMessage] : null;
+ 
+   return (
+     <div className="relative group">
+       <div className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg">
+-        <video ref={videoRef} className="w-full h-full" playsInline controls key={effectiveSrc}>
+-          <source src={effectiveSrc} type="video/mp4" />
+-        </video>
++        {fonteInicial.src ? (
++          <video
++            ref={videoRef}
++            src={fonteInicial.src}
++            className="w-full h-full"
++            playsInline
++            controls
++            key={aulaId}
++          />
++        ) : null}
++        {mensagem ? (
++          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
++            {playerMessage === "sem-internet" ? (
++              <WifiOff className="mx-auto mb-3 h-10 w-10 text-white/50" />
++            ) : (
++              <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-white/50" />
++            )}
++            <div className="p-4 text-center text-white">
++              <p className="text-lg font-medium">{mensagem.titulo}</p>
++              <p className="mt-1 text-sm text-white/70">{mensagem.detalhe}</p>
++            </div>
++          </div>
++        ) : null}
+       </div>
+       {/* Botões rápidos de -10s e +10s */}
+       <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity bg-black/60 backdrop-blur-md px-2.5 py-1.5 rounded-full border border-white/10">
+diff --git a/src/components/aulas/AulasPage.tsx b/src/components/aulas/AulasPage.tsx
+index 367272d7..322e0c5e 100644
+--- a/src/components/aulas/AulasPage.tsx
++++ b/src/components/aulas/AulasPage.tsx
+@@ -27,7 +27,13 @@ import { AulaMateriais } from "./AulaMateriais";
+ import { VideoOfflineButton } from "./VideoOfflineButton";
+ import { Button } from "@/components/ui/button";
+ import { useAppUser } from "@/contexts/UserContext";
+-import { getAulasDoUsuario, atualizarOrdemAula } from "@/services/aulaService";
++import {
++  getAulasDoUsuario,
++  atualizarOrdemAula,
++  getAulasCacheInfo,
++  isAulasFromCache,
++  limparCacheAulas,
++} from "@/services/aulaService";
+ import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
+ import {
+   formatarAula,
+@@ -46,6 +52,7 @@ import {
+   subscribeToDownloads,
+   getPlayableObjectUrl,
+   type DownloadState,
++  type DownloadPhase,
+ } from "@/services/videoOfflineService";
+ import { useToast } from "@/hooks/useToast";
+ import { useConfirm } from "@/components/ConfirmDialog";
+@@ -68,13 +75,31 @@ function nomeSeguroArquivo(titulo: string): string {
+   return (limpo || "aula").slice(0, 120);
+ }
+ 
++function formatarDataPtBR(isoString: string | null): string {
++  if (!isoString) return "";
++  try {
++    const data = new Date(isoString);
++    if (isNaN(data.getTime())) return isoString;
++    return data.toLocaleString("pt-BR");
++  } catch {
++    return isoString;
++  }
++}
++
++// Intervalo mínimo entre gravações do progresso do vídeo no localStorage.
++const INTERVALO_GRAVACAO_PROGRESSO_MS = 5000;
++
+ export function AulasPage() {
+   const { user } = useAppUser();
+   const toast = useToast();
++  const toastRef = useRef(toast);
++  toastRef.current = toast;
+   const confirm = useConfirm();
+   const [aulasRaw, setAulasRaw] = useState<AulaFormatada[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [isOnline, setIsOnline] = useState(true);
++  const [isFromCache, setIsFromCache] = useState(false);
++  const [cacheSavedAt, setCacheSavedAt] = useState<string | null>(null);
+ 
+   const [selectedId, setSelectedId] = useState<string | null>(null);
+   const [mobileView, setMobileView] = useState<"lista" | "player">("lista");
+@@ -89,6 +114,9 @@ export function AulasPage() {
+   const [favoritas, setFavoritas] = useState<Record<string, boolean>>({});
+   const [tempos, setTempos] = useState<Record<string, { current: number; total: number }>>({});
+ 
++  // Intervalo mínimo entre gravações do progresso no localStorage.
++  const ultimoProgressoWriteRef = useRef(0);
++
+   // Offline video state
+   const [offlineAulaIds, setOfflineAulaIds] = useState<Set<string>>(new Set());
+   const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadState>>({});
+@@ -103,8 +131,10 @@ export function AulasPage() {
+     persisted: boolean;
+     supported: boolean;
+   }>({ usage: 0, quota: 0, persisted: false, supported: false });
+-  const [currentOfflineObjectUrl, setCurrentOfflineObjectUrl] = useState<string | null>(null);
+-  const currentObjectUrlRef = useRef<string | null>(null);
++  // Fonte offline: fica presa à aula que a gerou (evita entregar URL de outra aula).
++  const [offlineSource, setOfflineSource] = useState<{ aulaId: string; url: string | null } | null>(
++    null,
++  );
+ 
+   useEffect(() => {
+     try {
+@@ -119,19 +149,6 @@ export function AulasPage() {
+     }
+   }, [user?.id]);
+ 
+-  // Acompanha conexão para liberar/bloquear o download do vídeo.
+-  useEffect(() => {
+-    const online = () => setIsOnline(true);
+-    const offline = () => setIsOnline(false);
+-    setIsOnline(navigator.onLine);
+-    window.addEventListener("online", online);
+-    window.addEventListener("offline", offline);
+-    return () => {
+-      window.removeEventListener("online", online);
+-      window.removeEventListener("offline", offline);
+-    };
+-  }, []);
+-
+   // Carrega IDs de aulas disponíveis offline
+   const loadOfflineAulaIds = useCallback(async () => {
+     const ids = await getOfflineAulaIds();
+@@ -142,15 +159,10 @@ export function AulasPage() {
+     loadOfflineAulaIds();
+   }, [loadOfflineAulaIds]);
+ 
+-  // Revoga object URL ao trocar de aula ou desmontar
+-  useEffect(() => {
+-    return () => {
+-      if (currentObjectUrlRef.current) {
+-        URL.revokeObjectURL(currentObjectUrlRef.current);
+-        currentObjectUrlRef.current = null;
+-      }
+-    };
+-  }, []);
++  // Última fase conhecida de cada aula + aula selecionada (para o toast de conclusão)
++  const ultimaFaseRef = useRef<Map<string, DownloadPhase>>(new Map());
++  const selectedIdRef = useRef<string | null>(selectedId);
++  selectedIdRef.current = selectedId;
+ 
+   // Subscreve progresso de downloads para mostrar na árvore
+   useEffect(() => {
+@@ -161,31 +173,58 @@ export function AulasPage() {
+       });
+       setDownloadProgress(progress);
+       // Atualiza offlineAulaIds quando algum completa
+-      const newOfflineIds = new Set(offlineAulaIds);
++      setOfflineAulaIds((prev) => {
++        let changed = false;
++        const next = new Set(prev);
++        states.forEach((state, aulaId) => {
++          if (state.phase === "complete" && !next.has(aulaId)) {
++            next.add(aulaId);
++            changed = true;
++          } else if ((state.phase === "idle" || state.phase === "error") && next.has(aulaId)) {
++            next.delete(aulaId);
++            changed = true;
++          }
++        });
++        return changed ? next : prev;
++      });
++      // Toast só quando uma aula JÁ conhecida (fase anterior registrada) chega a "complete"
+       states.forEach((state, aulaId) => {
+-        if (state.phase === "complete") newOfflineIds.add(aulaId);
+-        else if (state.phase === "idle" || state.phase === "error") newOfflineIds.delete(aulaId);
++        const anterior = ultimaFaseRef.current.get(aulaId);
++        ultimaFaseRef.current.set(aulaId, state.phase);
++        if (anterior && anterior !== "complete" && state.phase === "complete") {
++          if (aulaId === selectedIdRef.current) {
++            toastRef.current.success(
++              "Vídeo salvo. Ele será usado offline na próxima vez que você abrir esta aula.",
++            );
++          }
++        }
+       });
+-      setOfflineAulaIds(newOfflineIds);
+     });
+     return unsubscribe;
+-  }, [offlineAulaIds]);
++  }, []);
+ 
+   // Carrega object URL offline quando a aula selecionada muda
+   useEffect(() => {
++    setOfflineSource(null);
+     if (!selectedId) {
+-      setCurrentOfflineObjectUrl(null);
+       return;
+     }
+     let cancelled = false;
++    let urlCriado: string | null = null;
+     getPlayableObjectUrl(selectedId).then((url) => {
+-      if (!cancelled) {
+-        setCurrentOfflineObjectUrl(url);
+-        if (url) currentObjectUrlRef.current = url;
++      if (cancelled) {
++        if (url) URL.revokeObjectURL(url);
++        return;
+       }
++      urlCriado = url;
++      setOfflineSource({ aulaId: selectedId, url });
+     });
+     return () => {
+       cancelled = true;
++      if (urlCriado) {
++        URL.revokeObjectURL(urlCriado);
++        urlCriado = null;
++      }
+     };
+   }, [selectedId]);
+ 
+@@ -208,13 +247,43 @@ export function AulasPage() {
+   const handleTimeUpdate = (id: string, current: number, total: number) => {
+     setTempos((prev) => {
+       const next = { ...prev, [id]: { current, total } };
+-      try {
+-        localStorage.setItem(storageKeyProgresso, JSON.stringify(next));
+-      } catch (e) {}
++      // Grava no localStorage no máximo uma vez a cada 5 s (evita I/O a cada frame).
++      const agora = Date.now();
++      if (agora - ultimoProgressoWriteRef.current >= INTERVALO_GRAVACAO_PROGRESSO_MS) {
++        ultimoProgressoWriteRef.current = agora;
++        try {
++          localStorage.setItem(storageKeyProgresso, JSON.stringify(next));
++        } catch (e) {}
++      }
+       return next;
+     });
+   };
+ 
++  const temposRef = useRef(tempos);
++  temposRef.current = tempos;
++
++  // Grava o progresso imediatamente, sem esperar o intervalo de 5 s.
++  // Usado ao pausar o vídeo e ao trocar de aula.
++  const gravarProgressoAgora = useCallback(
++    (id: string) => {
++      const registro = temposRef.current[id];
++      if (!registro) return;
++      try {
++        const atual = JSON.parse(localStorage.getItem(storageKeyProgresso) || "{}");
++        localStorage.setItem(storageKeyProgresso, JSON.stringify({ ...atual, [id]: registro }));
++      } catch (e) {}
++      ultimoProgressoWriteRef.current = Date.now();
++    },
++    [storageKeyProgresso],
++  );
++
++  // Ao trocar de aula, grava o progresso da aula anterior.
++  useEffect(() => {
++    const anterior = selectedIdRef.current;
++    if (!anterior || anterior === selectedId) return;
++    gravarProgressoAgora(anterior);
++  }, [selectedId, gravarProgressoAgora]);
++
+   // Único ponto de recarga: busca no Supabase, formata e atualiza a tela.
+   const recarregar = useCallback(
+     async (selecionarPrimeira = false) => {
+@@ -222,6 +291,10 @@ export function AulasPage() {
+       const data = await getAulasDoUsuario(user.id);
+       const formatadas = data.map(formatarAula);
+       setAulasRaw(formatadas);
++      // Captura status de cache após a busca
++      const info = getAulasCacheInfo(user.id);
++      setIsFromCache(info.isFromCache);
++      setCacheSavedAt(info.savedAt);
+       if (selecionarPrimeira) {
+         setSelectedId(primeiraAulaId(construirArvore(formatadas)));
+       }
+@@ -234,6 +307,25 @@ export function AulasPage() {
+     recarregar(true);
+   }, [recarregar]);
+ 
++  // Acompanha conexão para liberar/bloquear o download do vídeo.
++  // Ao voltar a internet (evento 'online'), recarrega a lista do Supabase.
++  useEffect(() => {
++    const online = () => {
++      setIsOnline(true);
++      if (user?.id) {
++        recarregar();
++      }
++    };
++    const offline = () => setIsOnline(false);
++    setIsOnline(navigator.onLine);
++    window.addEventListener("online", online);
++    window.addEventListener("offline", offline);
++    return () => {
++      window.removeEventListener("online", online);
++      window.removeEventListener("offline", offline);
++    };
++  }, [user?.id, recarregar]);
++
+   // Troca a ordem com a aula vizinha do MESMO grupo (mesmo assunto + mesmo subassunto).
+   // O assunto não muda de posição: assunto_ordem não é tocado.
+   const handleMover = useCallback(
+@@ -317,6 +409,17 @@ export function AulasPage() {
+     <div className="w-full px-2 py-2 sm:px-4 lg:py-4">
+       <AulasStyles />
+ 
++      {/* Banner: lista carregada do cache (offline) */}
++      {isFromCache && cacheSavedAt && (
++        <div
++          className="mb-4 flex items-center gap-2 rounded bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
++          role="status"
++        >
++          <WifiOff className="h-4 w-4 shrink-0" />
++          <span>Sem conexão: mostrando a lista salva em {formatarDataPtBR(cacheSavedAt)}.</span>
++        </div>
++      )}
++
+       <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:gap-8">
+         {/* ===== Lista de aulas em Árvore ===== */}
+         <aside className={`${mobileView === "player" ? "hidden lg:block" : "block"} min-w-0`}>
+@@ -544,14 +647,27 @@ export function AulasPage() {
+                 </p>
+               ) : null}
+ 
+-              <AulaPlayer
+-                teraboxUrl={aula.terabox_url ?? ""}
+-                aulaId={aula.id}
+-                initialTime={tempos[aula.id]?.current || 0}
+-                onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
+-                offlineObjectUrl={currentOfflineObjectUrl}
+-                isOnline={isOnline}
+-              />
++              {offlineSource?.aulaId !== aula.id ? (
++                <div
++                  className="rf-au-player relative aspect-video w-full overflow-hidden bg-black shadow-lg flex items-center justify-center"
++                  aria-live="polite"
++                >
++                  <div className="flex flex-col items-center gap-3 text-white">
++                    <Loader2 className="h-8 w-8 animate-spin text-white/80" />
++                    <span className="text-sm text-white/80">Preparando vídeo…</span>
++                  </div>
++                </div>
++              ) : (
++                <AulaPlayer
++                  teraboxUrl={aula.terabox_url ?? ""}
++                  aulaId={aula.id}
++                  initialTime={tempos[aula.id]?.current || 0}
++                  onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
++                  onPause={() => gravarProgressoAgora(aula.id)}
++                  offlineObjectUrl={offlineSource.url}
++                  isOnline={isOnline}
++                />
++              )}
+ 
+               <div className="mt-6">
+                 <AulaMateriais aulaId={aula.id} />
+diff --git a/src/components/aulas/VideoOfflineButton.tsx b/src/components/aulas/VideoOfflineButton.tsx
+index cd0d3627..40ed3b61 100644
+--- a/src/components/aulas/VideoOfflineButton.tsx
++++ b/src/components/aulas/VideoOfflineButton.tsx
+@@ -31,8 +31,11 @@ interface VideoOfflineButtonProps {
+ export function VideoOfflineButton({ aulaId, videoUrl, title, isOnline }: VideoOfflineButtonProps) {
+   const confirm = useConfirm();
+   const toast = useToast();
+-  const { state, canDownload, download, cancel, pause, resume, remove, retry, objectUrl } =
+-    useVideoOffline(aulaId, videoUrl, title);
++  const { state, canDownload, download, cancel, pause, resume, remove, retry } = useVideoOffline(
++    aulaId,
++    videoUrl,
++    title,
++  );
+ 
+   const [showProgress, setShowProgress] = useState(false);
+   const [iosWarningShown, setIosWarningShown] = useState(false);
+diff --git a/src/hooks/useVideoOffline.ts b/src/hooks/useVideoOffline.ts
+index 8ab864a5..08791e65 100644
+--- a/src/hooks/useVideoOffline.ts
++++ b/src/hooks/useVideoOffline.ts
+@@ -5,15 +5,13 @@ import { useEffect, useState, useCallback } from "react";
+ import {
+   isDownloadableVideoUrl,
+   getVideoMeta,
+-  getPlayableObjectUrl,
+   startDownload,
+   cancelDownload,
+-  removeVideo as removeVideoService,
++  removeVideo,
+   pauseDownload,
+   subscribeToDownloads,
+   getDownloadState,
+   type DownloadState,
+-  type DownloadPhase,
+ } from "@/services/videoOfflineService";
+ 
+ export interface UseVideoOfflineReturn {
+@@ -25,7 +23,6 @@ export interface UseVideoOfflineReturn {
+   resume: () => Promise<void>;
+   remove: () => Promise<void>;
+   retry: () => Promise<void>;
+-  objectUrl: string | null;
+ }
+ 
+ export function useVideoOffline(
+@@ -34,14 +31,6 @@ export function useVideoOffline(
+   title: string,
+ ): UseVideoOfflineReturn {
+   const [state, setState] = useState<DownloadState>(() => getDownloadState(aulaId));
+-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+-  const [hasCheckedInitial, setHasCheckedInitial] = useState(false);
+-
+-  // Atualiza objectUrl se status for complete
+-  const refreshObjectUrl = useCallback(async () => {
+-    const url = await getPlayableObjectUrl(aulaId);
+-    setObjectUrl(url);
+-  }, [aulaId]);
+ 
+   // Subscribe to download manager updates
+   useEffect(() => {
+@@ -49,31 +38,35 @@ export function useVideoOffline(
+       const newState = states.get(aulaId);
+       if (newState) {
+         setState(newState);
+-        // Se completou, atualiza objectUrl
+-        if (newState.phase === "complete") {
+-          refreshObjectUrl();
+-        }
+       }
+     });
+     return unsubscribe;
+-  }, [aulaId, refreshObjectUrl]);
++  }, [aulaId]);
+ 
+-  // Verificação inicial: se já tem meta complete ou partial, carrega estado
++  // Verificação inicial ao montar: se o vídeo já está completo no IndexedDB,
++  // inicia em "complete" para o botão mostrar "Disponível offline" após recarregar.
+   useEffect(() => {
+-    if (hasCheckedInitial) return;
+-    setHasCheckedInitial(true);
++    let cancelled = false;
+ 
+     const checkInitial = async () => {
+       const meta = await getVideoMeta(aulaId);
+-      if (meta) {
+-        if (meta.status === "complete") {
+-          await refreshObjectUrl();
+-        }
+-        // O subscribe já vai pegar o estado do gerenciador
++      if (cancelled) return;
++      if (meta && meta.status === "complete") {
++        setState({
++          phase: "complete",
++          percent: 100,
++          downloadedBytes: meta.totalBytes,
++          totalBytes: meta.totalBytes,
++          message: "Download concluído!",
++        });
+       }
+     };
+     checkInitial();
+-  }, [aulaId, hasCheckedInitial, refreshObjectUrl]);
++
++    return () => {
++      cancelled = true;
++    };
++  }, [aulaId]);
+ 
+   const canDownload = videoUrl ? isDownloadableVideoUrl(videoUrl) : false;
+ 
+@@ -89,7 +82,6 @@ export function useVideoOffline(
+ 
+   const cancel = useCallback(async () => {
+     await cancelDownload(aulaId);
+-    setObjectUrl(null);
+   }, [aulaId]);
+ 
+   const pause = useCallback(() => {
+@@ -105,8 +97,7 @@ export function useVideoOffline(
+   }, [aulaId, videoUrl, title]);
+ 
+   const remove = useCallback(async () => {
+-    await removeVideoFromManager(aulaId);
+-    setObjectUrl(null);
++    await removeVideo(aulaId);
+   }, [aulaId]);
+ 
+   const retry = useCallback(async () => {
+@@ -126,9 +117,5 @@ export function useVideoOffline(
+     resume,
+     remove,
+     retry,
+-    objectUrl,
+   };
+ }
+-
+-// Re-exporta removeVideoFromManager para uso no hook
+-import { removeVideo as removeVideoFromManager } from "@/services/videoOfflineService";
+diff --git a/src/services/aulaService.ts b/src/services/aulaService.ts
+index 3114834e..eafa8c0d 100644
+--- a/src/services/aulaService.ts
++++ b/src/services/aulaService.ts
+@@ -1,5 +1,5 @@
+ // src/services/aulaService.ts
+-import { supabase } from '@/lib/supabaseClient';
++import { supabase } from "@/lib/supabaseClient";
+ 
+ export interface Aula {
+   id: string;
+@@ -7,42 +7,177 @@ export interface Aula {
+   titulo: string;
+   descricao: string;
+   terabox_url: string;
+-  disciplina?: string;          // Nova coluna
+-  assunto?: string;             // Nova coluna
+-  subassunto?: string | null;   // Opcional: 3º nível da árvore
+-  assunto_ordem?: number | null;// Ordem do assunto dentro da disciplina
+-  ordem?: number;               // Nova coluna para ordenação
++  disciplina?: string; // Nova coluna
++  assunto?: string; // Nova coluna
++  subassunto?: string | null; // Opcional: 3º nível da árvore
++  assunto_ordem?: number | null; // Ordem do assunto dentro da disciplina
++  ordem?: number; // Nova coluna para ordenação
+   created_at: string;
+ }
+ 
++const CACHE_PREFIX = "unavox_aulas_cache_v1_";
++
++const cacheStatusMap: Record<string, { isFromCache: boolean; savedAt: string | null }> = {};
++
++function salvarCacheAulas(userId: string, aulas: Aula[], savedAt: string): void {
++  try {
++    const key = `${CACHE_PREFIX}${userId}`;
++    const payload = JSON.stringify({ savedAt, aulas });
++    localStorage.setItem(key, payload);
++  } catch (e) {
++    console.warn("Erro ao salvar cache de aulas no localStorage:", e);
++  }
++}
++
++function lerCacheAulas(userId: string): { savedAt: string; aulas: Aula[] } | null {
++  try {
++    const key = `${CACHE_PREFIX}${userId}`;
++    const raw = localStorage.getItem(key);
++    if (!raw) return null;
++    const parsed = JSON.parse(raw);
++    if (parsed && typeof parsed === "object" && Array.isArray(parsed.aulas)) {
++      return {
++        savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
++        aulas: parsed.aulas as Aula[],
++      };
++    }
++    return null;
++  } catch (e) {
++    console.warn("Erro ao ler cache de aulas do localStorage:", e);
++    return null;
++  }
++}
++
++export function getAulasCacheInfo(userId: string): { savedAt: string | null; isFromCache: boolean } {
++  if (!userId) return { savedAt: null, isFromCache: false };
++  const status = cacheStatusMap[userId];
++  if (status) {
++    return status;
++  }
++  const cached = lerCacheAulas(userId);
++  return {
++    savedAt: cached?.savedAt || null,
++    isFromCache: false,
++  };
++}
++
++export function isAulasFromCache(userId: string): boolean {
++  if (!userId) return false;
++  return cacheStatusMap[userId]?.isFromCache ?? false;
++}
++
++// Tempo máximo de espera da consulta ao Supabase antes de cair no cache local.
++const TIMEOUT_BUSCA_AULAS_MS = 8000;
++
+ export async function getAulasDoUsuario(userId: string): Promise<Aula[]> {
+-  const { data, error } = await supabase
+-    .from('aulas')
+-    .select('*')
+-    .eq('user_id', userId)
+-    .order('ordem', { ascending: true, nullsFirst: false })
+-    .order('created_at', { ascending: true });
+-
+-  if (error) {
+-    console.error('Erro ao buscar aulas no Supabase:', error);
++  if (!userId) {
++    cacheStatusMap["anon"] = { isFromCache: false, savedAt: null };
++    return [];
++  }
++
++  if (typeof navigator !== "undefined" && navigator.onLine === false) {
++    const cached = lerCacheAulas(userId);
++    if (cached) {
++      cacheStatusMap[userId] = { isFromCache: true, savedAt: cached.savedAt };
++      return cached.aulas;
++    }
++    cacheStatusMap[userId] = { isFromCache: false, savedAt: null };
+     return [];
+   }
+-  return data || [];
++
++  let timedOut = false;
++  let timer: ReturnType<typeof setTimeout> | undefined;
++
++  try {
++    const busca = supabase
++      .from("aulas")
++      .select("*")
++      .eq("user_id", userId)
++      .order("ordem", { ascending: true, nullsFirst: false })
++      .order("created_at", { ascending: true });
++
++    // Promise.race com timeout: consultas lentas não deixam a tela em spinner infinito.
++    const limite = new Promise<"timeout">((resolve) => {
++      timer = setTimeout(() => {
++        timedOut = true;
++        resolve("timeout");
++      }, TIMEOUT_BUSCA_AULAS_MS);
++    });
++
++    const resultado = await Promise.race([busca, limite]);
++
++    if (resultado === "timeout") {
++      throw new Error(`Busca de aulas excedeu ${TIMEOUT_BUSCA_AULAS_MS}ms`);
++    }
++
++    const { data, error } = resultado;
++
++    if (error) {
++      console.error("Erro ao buscar aulas no Supabase:", error);
++      const cached = lerCacheAulas(userId);
++      if (cached) {
++        cacheStatusMap[userId] = { isFromCache: true, savedAt: cached.savedAt };
++        return cached.aulas;
++      }
++      cacheStatusMap[userId] = { isFromCache: false, savedAt: null };
++      return [];
++    }
++
++    const aulas = data || [];
++    const savedAt = new Date().toISOString();
++    salvarCacheAulas(userId, aulas, savedAt);
++    cacheStatusMap[userId] = { isFromCache: false, savedAt };
++    return aulas;
++  } catch (err) {
++    console.error("Exceção ao buscar aulas no Supabase:", err);
++    // Sem internet aparente, mas a rede caiu no meio da busca: usa o cache salvo.
++    const semConexaoReal =
++      timedOut || (typeof navigator !== "undefined" && navigator.onLine === false);
++    if (semConexaoReal) {
++      const cached = lerCacheAulas(userId);
++      if (cached) {
++        cacheStatusMap[userId] = { isFromCache: true, savedAt: cached.savedAt };
++        return cached.aulas;
++      }
++    }
++    cacheStatusMap[userId] = { isFromCache: false, savedAt: null };
++    return [];
++  } finally {
++    if (timer !== undefined) clearTimeout(timer);
++  }
+ }
+ 
+-export async function atualizarOrdemAula(aulaId: string, novaOrdem: number): Promise<{ success: boolean; error?: string }> {
++/**
++ * Limpa o cache de aulas do usuário no localStorage.
++ * Deve ser chamado no logout para não vazar dados entre usuários.
++ */
++export function limparCacheAulas(userId: string): void {
++  try {
++    const key = `${CACHE_PREFIX}${userId}`;
++    localStorage.removeItem(key);
++    delete cacheStatusMap[userId];
++  } catch (e) {
++    console.warn("Erro ao limpar cache de aulas:", e);
++  }
++}
++
++export async function atualizarOrdemAula(
++  aulaId: string,
++  novaOrdem: number,
++): Promise<{ success: boolean; error?: string }> {
+   try {
+     const { error } = await supabase
+-      .from('aulas')
++      .from("aulas")
+       .update({ ordem: novaOrdem })
+-      .eq('id', aulaId);
++      .eq("id", aulaId);
+ 
+     if (error) {
+-      console.error('Erro ao atualizar ordem da aula:', error);
++      console.error("Erro ao atualizar ordem da aula:", error);
+       return { success: false, error: error.message };
+     }
+     return { success: true };
+-  } catch (e: any) {
+-    return { success: false, error: e?.message || 'Erro ao atualizar ordem.' };
++  } catch (e: unknown) {
++    const message = e instanceof Error ? e.message : "Erro ao atualizar ordem.";
++    return { success: false, error: message };
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/src/services/videoOfflineService.ts b/src/services/videoOfflineService.ts
+index f52629bb..53512a7f 100644
+--- a/src/services/videoOfflineService.ts
++++ b/src/services/videoOfflineService.ts
+@@ -131,7 +131,8 @@ export async function getPlayableObjectUrl(aulaId: string): Promise<string | nul
+     const blobs = chunks.map((c) => c.blob);
+     const combinedBlob = new Blob(blobs, { type: meta.mime });
+     return URL.createObjectURL(combinedBlob);
+-  } catch {
++  } catch (err) {
++    console.warn("[videoOffline] Falha ao montar object URL do vídeo:", err);
+     return null;
+   }
+ }
+@@ -195,19 +196,12 @@ export async function getStorageInfo(): Promise<{
+ /**
+  * Descobre o tamanho total do vídeo remoto via Range: bytes=0-0 no proxy.
+  * Reutiliza a lógica interna de leitura do Content-Range.
+- * Cacheia o resultado em videoMeta para evitar chamadas de rede repetidas.
+  */
+ async function fetchRemoteVideoSize(url: string): Promise<number> {
+   if (!isDownloadableVideoUrl(url)) {
+     throw new Error("Este vídeo não pode ser baixado para uso offline.");
+   }
+ 
+-  const db = getVideoDb();
+-  const existingMeta = await db.videoMeta.get(url);
+-  if (existingMeta && existingMeta.totalBytes > 0) {
+-    return existingMeta.totalBytes;
+-  }
+-
+   const proxyUrl = `${VIDEO_OFFLINE.PROXY_URL}/?url=${encodeURIComponent(url)}`;
+   const response = await fetch(proxyUrl, {
+     method: "GET",
+@@ -295,6 +289,9 @@ class DownloadManager {
+   private wakeLock: WakeLockSentinel | null = null;
+   private currentDownloadAulaId: string | null = null;
+   private onlineHandler: (() => void) | null = null;
++  // AulaIds que já tiveram um reinício do zero nesta tentativa (416 ou parcial inválido).
++  // Evita loop infinito de reinícios; zerado quando o download termina, é cancelado ou falha.
++  private restartedAulaIds = new Set<string>();
+ 
+   constructor() {
+     if (typeof window !== "undefined") {
+@@ -388,7 +385,14 @@ class DownloadManager {
+    * Inicia ou retoma download de um vídeo.
+    * UM download por vez; segundo pedido entra em erro.
+    */
+-  async startDownload(aulaId: string, url: string, title: string): Promise<void> {
++  async startDownload(
++    aulaId: string,
++    url: string,
++    title: string,
++    isRestart = false,
++  ): Promise<void> {
++    if (!isRestart) this.restartedAulaIds.delete(aulaId);
++
+     // Validação da URL
+     if (!isDownloadableVideoUrl(url)) {
+       this.setState(aulaId, {
+@@ -499,14 +503,38 @@ class DownloadManager {
+     // Validação de integridade do parcial salvo
+     const validationResult = await this.validatePartialDownload(aulaId, meta);
+     if (!validationResult.valid) {
+-      console.warn("[videoOffline] Partial download inválido:", validationResult.reason);
+-      await removeVideo(aulaId);
++      if (!this.restartedAulaIds.has(aulaId)) {
++        this.restartedAulaIds.add(aulaId);
++        console.warn("[videoOffline] Partial download inválido:", validationResult.reason);
++        await removeVideo(aulaId);
++        // Libera a trava de "um download por vez" antes de reiniciar
++        if (this.currentDownloadAulaId === aulaId) {
++          this.currentDownloadAulaId = null;
++        }
++        this.abortControllers.delete(aulaId);
++        this.releaseWakeLock();
++        this.setState(aulaId, {
++          phase: "checking",
++          message: "O download anterior estava inconsistente e foi reiniciado.",
++        });
++        // Recomeça do zero (uma única vez)
++        return this.startDownload(aulaId, url, title, true);
++      }
++      // Já reiniciou uma vez e o parcial continua inconsistente: erro, sem novo reinício
++      console.warn(
++        "[videoOffline] Partial download inválido após reinício:",
++        validationResult.reason,
++      );
++      this.releaseWakeLock();
++      if (this.currentDownloadAulaId === aulaId) {
++        this.currentDownloadAulaId = null;
++      }
++      this.restartedAulaIds.delete(aulaId);
+       this.setState(aulaId, {
+-        phase: "checking",
+-        message: "O download anterior estava inconsistente e foi reiniciado.",
++        phase: "error",
++        message: "O arquivo baixado está inconsistente. Remova e baixe de novo.",
+       });
+-      // Recomeça do zero
+-      return this.startDownload(aulaId, url, title);
++      return;
+     }
+ 
+     // Verifica espaço disponível
+@@ -608,6 +636,11 @@ class DownloadManager {
+         phase: "error",
+         message: "Muitas tentativas falharam. Tente novamente mais tarde.",
+       });
++      this.releaseWakeLock();
++      this.restartedAulaIds.delete(aulaId);
++      if (this.currentDownloadAulaId === aulaId) {
++        this.currentDownloadAulaId = null;
++      }
+       return;
+     }
+ 
+@@ -650,6 +683,7 @@ class DownloadManager {
+             meta.updatedAt = new Date().toISOString();
+             await db.videoMeta.put(meta);
+ 
++            this.restartedAulaIds.delete(aulaId);
+             this.setState(aulaId, {
+               phase: "complete",
+               percent: 100,
+@@ -663,16 +697,34 @@ class DownloadManager {
+           }
+         }
+         // Caso contrário, o parcial salvo está corrompido/inconsistente: descarta e reinicia do zero UMA vez
+-        console.warn(
+-          "[videoOffline] 416 Range Not Satisfiable - descartando parcial e reiniciando",
+-        );
+-        await removeVideo(aulaId);
++        if (!this.restartedAulaIds.has(aulaId)) {
++          this.restartedAulaIds.add(aulaId);
++          console.warn(
++            "[videoOffline] 416 Range Not Satisfiable - descartando parcial e reiniciando",
++          );
++          await removeVideo(aulaId);
++          // Libera a trava de "um download por vez" antes de reiniciar
++          this.abortControllers.delete(aulaId);
++          if (this.currentDownloadAulaId === aulaId) {
++            this.currentDownloadAulaId = null;
++          }
++          this.releaseWakeLock();
++          this.setState(aulaId, {
++            phase: "checking",
++            message: "O download anterior estava inconsistente e foi reiniciado.",
++          });
++          return this.startDownload(aulaId, meta.url, meta.title, true);
++        }
++        // 416 de novo após o reinício: erro definitivo, sem novo reinício
++        this.releaseWakeLock();
+         this.abortControllers.delete(aulaId);
++        this.currentDownloadAulaId = null;
++        this.restartedAulaIds.delete(aulaId);
+         this.setState(aulaId, {
+-          phase: "checking",
+-          message: "O download anterior estava inconsistente e foi reiniciado.",
++          phase: "error",
++          message: "O servidor recusou o trecho pedido (416). Remova o download e tente de novo.",
+         });
+-        return this.startDownload(aulaId, meta.url, meta.title);
++        return;
+       }
+ 
+       // Verifica status esperado
+@@ -793,19 +845,21 @@ class DownloadManager {
+       // Stream acabou: grava o que sobrou como último chunk (pode ser menor que chunkSize)
+       // Mas só se não completou o totalBytes
+       if (bufferedBytes > 0) {
++        let finalParts: Uint8Array<ArrayBuffer>[] = parts;
++
+         if (meta.downloadedBytes + bufferedBytes > meta.totalBytes) {
+-          console.warn(
+-            `[videoOffline] Excedente de ${meta.downloadedBytes + bufferedBytes - meta.totalBytes} bytes ignorado`,
+-          );
+           // Tira apenas o necessário para completar totalBytes
+           const needed = meta.totalBytes - meta.downloadedBytes;
+-          const chunkParts = takeBytes(parts, needed);
+-          bufferedBytes = parts.reduce((sum, p) => sum + p.length, 0); // recalcula o que sobrou (deve ser 0 ou excedente ignorado)
++          const excedenteBytes = bufferedBytes - needed;
++          console.warn(`[videoOffline] Excedente de ${excedenteBytes} bytes descartado`);
++          finalParts = needed > 0 ? takeBytes(parts, needed) : [];
++          parts.length = 0;
++          bufferedBytes = needed > 0 ? needed : 0;
+         }
+ 
+-        if (meta.downloadedBytes < meta.totalBytes) {
++        if (meta.downloadedBytes < meta.totalBytes && bufferedBytes > 0) {
+           const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
+-          const chunkBlob = new Blob(parts as BlobPart[], { type: meta.mime });
++          const chunkBlob = new Blob(finalParts as BlobPart[], { type: meta.mime });
+           const actualChunkSize = chunkBlob.size;
+ 
+           if (meta.downloadedBytes + actualChunkSize > meta.totalBytes) {
+@@ -850,12 +904,15 @@ class DownloadManager {
+         const totalChunksSize = chunks.reduce((sum: number, c: VideoChunk) => sum + c.blob.size, 0);
+ 
+         if (totalChunksSize !== meta.totalBytes) {
++          this.restartedAulaIds.delete(aulaId);
+           this.setState(aulaId, {
+             phase: "error",
+             message: "O arquivo baixado está incompleto. Remova e baixe de novo.",
+             downloadedBytes: meta.downloadedBytes,
+             totalBytes: meta.totalBytes,
+           });
++          this.releaseWakeLock();
++          this.currentDownloadAulaId = null;
+           return;
+         }
+ 
+@@ -870,6 +927,7 @@ class DownloadManager {
+           `[videoOffline] download completo: ${finalChunks.length} chunks, ${meta.downloadedBytes} bytes`,
+         );
+ 
++        this.restartedAulaIds.delete(aulaId);
+         this.setState(aulaId, {
+           phase: "complete",
+           percent: 100,
+@@ -884,16 +942,26 @@ class DownloadManager {
+       this.releaseWakeLock();
+ 
+       // Se foi abortado pelo usuário, não tenta novamente
+-      if (err instanceof Error && err.name === "AbortError") {
+-        this.setState(aulaId, {
+-          phase: "paused",
+-          message: "Download pausado",
+-        });
++      if ((err instanceof Error && err.name === "AbortError") || controller.signal.aborted) {
++        this.restartedAulaIds.delete(aulaId);
++        if (this.currentDownloadAulaId === aulaId) {
++          this.currentDownloadAulaId = null;
++        }
++        if (this.states.has(aulaId)) {
++          this.setState(aulaId, {
++            phase: "paused",
++            message: "Download pausado",
++          });
++        }
+         return;
+       }
+ 
+       // Se está offline, pausa e aguarda voltar
+       if (typeof navigator !== "undefined" && !navigator.onLine) {
++        this.restartedAulaIds.delete(aulaId);
++        if (this.currentDownloadAulaId === aulaId) {
++          this.currentDownloadAulaId = null;
++        }
+         this.setState(aulaId, {
+           phase: "paused",
+           message: "Sem internet — pausado",
+@@ -903,6 +971,10 @@ class DownloadManager {
+ 
+       // Erro de quota
+       if (err instanceof DOMException && err.name === "QuotaExceededError") {
++        this.restartedAulaIds.delete(aulaId);
++        if (this.currentDownloadAulaId === aulaId) {
++          this.currentDownloadAulaId = null;
++        }
+         this.setState(aulaId, {
+           phase: "error",
+           message: "Sem espaço no aparelho. Libere espaço ou remova outros vídeos offline.",
+@@ -927,10 +999,22 @@ class DownloadManager {
+       });
+ 
+       await new Promise((r) => setTimeout(r, delay));
++      if (controller.signal.aborted) {
++        this.restartedAulaIds.delete(aulaId);
++        if (this.currentDownloadAulaId === aulaId) {
++          this.currentDownloadAulaId = null;
++        }
++        if (this.states.has(aulaId)) {
++          this.setState(aulaId, { phase: "paused", message: "Download pausado" });
++        }
++        return;
++      }
+       this.abortControllers.delete(aulaId);
+       return this.downloadWithRetries(aulaId, meta, nextAttempt);
+     } finally {
+-      this.abortControllers.delete(aulaId);
++      if (this.abortControllers.get(aulaId) === controller) {
++        this.abortControllers.delete(aulaId);
++      }
+     }
+   }
+ 
+@@ -943,6 +1027,7 @@ class DownloadManager {
+       controller.abort();
+     }
+     await removeVideo(aulaId);
++    this.restartedAulaIds.delete(aulaId);
+     this.states.delete(aulaId);
+     this.notify();
+     if (this.currentDownloadAulaId === aulaId) {
+@@ -970,6 +1055,7 @@ class DownloadManager {
+    */
+   async removeVideo(aulaId: string): Promise<void> {
+     await removeVideo(aulaId);
++    this.restartedAulaIds.delete(aulaId);
+     this.states.delete(aulaId);
+     this.notify();
+   }

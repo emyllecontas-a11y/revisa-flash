@@ -1,0 +1,10 @@
+
+C:\Users\vande\revisa-flash\src\components\aulas\AulasPage.tsx
+  150:6   warning  React Hook useEffect has missing dependencies: 'storageKeyConcluidas', 'storageKeyFavoritas', and 'storageKeyProgresso'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  236:17  error    Empty block statement                                                                                                                                                        no-empty
+  244:17  error    Empty block statement                                                                                                                                                        no-empty
+  256:21  error    Empty block statement                                                                                                                                                        no-empty
+  274:19  error    Empty block statement                                                                                                                                                        no-empty
+
+✖ 5 problems (4 errors, 1 warning)
+

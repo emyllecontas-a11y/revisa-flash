@@ -131,7 +131,8 @@ export async function getPlayableObjectUrl(aulaId: string): Promise<string | nul
     const blobs = chunks.map((c) => c.blob);
     const combinedBlob = new Blob(blobs, { type: meta.mime });
     return URL.createObjectURL(combinedBlob);
-  } catch {
+  } catch (err) {
+    console.warn("[videoOffline] Falha ao montar object URL do vídeo:", err);
     return null;
   }
 }
@@ -195,17 +196,10 @@ export async function getStorageInfo(): Promise<{
 /**
  * Descobre o tamanho total do vídeo remoto via Range: bytes=0-0 no proxy.
  * Reutiliza a lógica interna de leitura do Content-Range.
- * Cacheia o resultado em videoMeta para evitar chamadas de rede repetidas.
  */
 async function fetchRemoteVideoSize(url: string): Promise<number> {
   if (!isDownloadableVideoUrl(url)) {
     throw new Error("Este vídeo não pode ser baixado para uso offline.");
-  }
-
-  const db = getVideoDb();
-  const existingMeta = await db.videoMeta.get(url);
-  if (existingMeta && existingMeta.totalBytes > 0) {
-    return existingMeta.totalBytes;
   }
 
   const proxyUrl = `${VIDEO_OFFLINE.PROXY_URL}/?url=${encodeURIComponent(url)}`;
@@ -295,6 +289,9 @@ class DownloadManager {
   private wakeLock: WakeLockSentinel | null = null;
   private currentDownloadAulaId: string | null = null;
   private onlineHandler: (() => void) | null = null;
+  // AulaIds que já tiveram um reinício do zero nesta tentativa (416 ou parcial inválido).
+  // Evita loop infinito de reinícios; zerado quando o download termina, é cancelado ou falha.
+  private restartedAulaIds = new Set<string>();
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -388,7 +385,14 @@ class DownloadManager {
    * Inicia ou retoma download de um vídeo.
    * UM download por vez; segundo pedido entra em erro.
    */
-  async startDownload(aulaId: string, url: string, title: string): Promise<void> {
+  async startDownload(
+    aulaId: string,
+    url: string,
+    title: string,
+    isRestart = false,
+  ): Promise<void> {
+    if (!isRestart) this.restartedAulaIds.delete(aulaId);
+
     // Validação da URL
     if (!isDownloadableVideoUrl(url)) {
       this.setState(aulaId, {
@@ -499,14 +503,38 @@ class DownloadManager {
     // Validação de integridade do parcial salvo
     const validationResult = await this.validatePartialDownload(aulaId, meta);
     if (!validationResult.valid) {
-      console.warn("[videoOffline] Partial download inválido:", validationResult.reason);
-      await removeVideo(aulaId);
+      if (!this.restartedAulaIds.has(aulaId)) {
+        this.restartedAulaIds.add(aulaId);
+        console.warn("[videoOffline] Partial download inválido:", validationResult.reason);
+        await removeVideo(aulaId);
+        // Libera a trava de "um download por vez" antes de reiniciar
+        if (this.currentDownloadAulaId === aulaId) {
+          this.currentDownloadAulaId = null;
+        }
+        this.abortControllers.delete(aulaId);
+        this.releaseWakeLock();
+        this.setState(aulaId, {
+          phase: "checking",
+          message: "O download anterior estava inconsistente e foi reiniciado.",
+        });
+        // Recomeça do zero (uma única vez)
+        return this.startDownload(aulaId, url, title, true);
+      }
+      // Já reiniciou uma vez e o parcial continua inconsistente: erro, sem novo reinício
+      console.warn(
+        "[videoOffline] Partial download inválido após reinício:",
+        validationResult.reason,
+      );
+      this.releaseWakeLock();
+      if (this.currentDownloadAulaId === aulaId) {
+        this.currentDownloadAulaId = null;
+      }
+      this.restartedAulaIds.delete(aulaId);
       this.setState(aulaId, {
-        phase: "checking",
-        message: "O download anterior estava inconsistente e foi reiniciado.",
+        phase: "error",
+        message: "O arquivo baixado está inconsistente. Remova e baixe de novo.",
       });
-      // Recomeça do zero
-      return this.startDownload(aulaId, url, title);
+      return;
     }
 
     // Verifica espaço disponível
@@ -608,6 +636,11 @@ class DownloadManager {
         phase: "error",
         message: "Muitas tentativas falharam. Tente novamente mais tarde.",
       });
+      this.releaseWakeLock();
+      this.restartedAulaIds.delete(aulaId);
+      if (this.currentDownloadAulaId === aulaId) {
+        this.currentDownloadAulaId = null;
+      }
       return;
     }
 
@@ -650,6 +683,7 @@ class DownloadManager {
             meta.updatedAt = new Date().toISOString();
             await db.videoMeta.put(meta);
 
+            this.restartedAulaIds.delete(aulaId);
             this.setState(aulaId, {
               phase: "complete",
               percent: 100,
@@ -663,16 +697,34 @@ class DownloadManager {
           }
         }
         // Caso contrário, o parcial salvo está corrompido/inconsistente: descarta e reinicia do zero UMA vez
-        console.warn(
-          "[videoOffline] 416 Range Not Satisfiable - descartando parcial e reiniciando",
-        );
-        await removeVideo(aulaId);
+        if (!this.restartedAulaIds.has(aulaId)) {
+          this.restartedAulaIds.add(aulaId);
+          console.warn(
+            "[videoOffline] 416 Range Not Satisfiable - descartando parcial e reiniciando",
+          );
+          await removeVideo(aulaId);
+          // Libera a trava de "um download por vez" antes de reiniciar
+          this.abortControllers.delete(aulaId);
+          if (this.currentDownloadAulaId === aulaId) {
+            this.currentDownloadAulaId = null;
+          }
+          this.releaseWakeLock();
+          this.setState(aulaId, {
+            phase: "checking",
+            message: "O download anterior estava inconsistente e foi reiniciado.",
+          });
+          return this.startDownload(aulaId, meta.url, meta.title, true);
+        }
+        // 416 de novo após o reinício: erro definitivo, sem novo reinício
+        this.releaseWakeLock();
         this.abortControllers.delete(aulaId);
+        this.currentDownloadAulaId = null;
+        this.restartedAulaIds.delete(aulaId);
         this.setState(aulaId, {
-          phase: "checking",
-          message: "O download anterior estava inconsistente e foi reiniciado.",
+          phase: "error",
+          message: "O servidor recusou o trecho pedido (416). Remova o download e tente de novo.",
         });
-        return this.startDownload(aulaId, meta.url, meta.title);
+        return;
       }
 
       // Verifica status esperado
@@ -793,19 +845,21 @@ class DownloadManager {
       // Stream acabou: grava o que sobrou como último chunk (pode ser menor que chunkSize)
       // Mas só se não completou o totalBytes
       if (bufferedBytes > 0) {
+        let finalParts: Uint8Array<ArrayBuffer>[] = parts;
+
         if (meta.downloadedBytes + bufferedBytes > meta.totalBytes) {
-          console.warn(
-            `[videoOffline] Excedente de ${meta.downloadedBytes + bufferedBytes - meta.totalBytes} bytes ignorado`,
-          );
           // Tira apenas o necessário para completar totalBytes
           const needed = meta.totalBytes - meta.downloadedBytes;
-          const chunkParts = takeBytes(parts, needed);
-          bufferedBytes = parts.reduce((sum, p) => sum + p.length, 0); // recalcula o que sobrou (deve ser 0 ou excedente ignorado)
+          const excedenteBytes = bufferedBytes - needed;
+          console.warn(`[videoOffline] Excedente de ${excedenteBytes} bytes descartado`);
+          finalParts = needed > 0 ? takeBytes(parts, needed) : [];
+          parts.length = 0;
+          bufferedBytes = needed > 0 ? needed : 0;
         }
 
-        if (meta.downloadedBytes < meta.totalBytes) {
+        if (meta.downloadedBytes < meta.totalBytes && bufferedBytes > 0) {
           const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
-          const chunkBlob = new Blob(parts as BlobPart[], { type: meta.mime });
+          const chunkBlob = new Blob(finalParts as BlobPart[], { type: meta.mime });
           const actualChunkSize = chunkBlob.size;
 
           if (meta.downloadedBytes + actualChunkSize > meta.totalBytes) {
@@ -850,12 +904,15 @@ class DownloadManager {
         const totalChunksSize = chunks.reduce((sum: number, c: VideoChunk) => sum + c.blob.size, 0);
 
         if (totalChunksSize !== meta.totalBytes) {
+          this.restartedAulaIds.delete(aulaId);
           this.setState(aulaId, {
             phase: "error",
             message: "O arquivo baixado está incompleto. Remova e baixe de novo.",
             downloadedBytes: meta.downloadedBytes,
             totalBytes: meta.totalBytes,
           });
+          this.releaseWakeLock();
+          this.currentDownloadAulaId = null;
           return;
         }
 
@@ -870,6 +927,7 @@ class DownloadManager {
           `[videoOffline] download completo: ${finalChunks.length} chunks, ${meta.downloadedBytes} bytes`,
         );
 
+        this.restartedAulaIds.delete(aulaId);
         this.setState(aulaId, {
           phase: "complete",
           percent: 100,
@@ -884,16 +942,26 @@ class DownloadManager {
       this.releaseWakeLock();
 
       // Se foi abortado pelo usuário, não tenta novamente
-      if (err instanceof Error && err.name === "AbortError") {
-        this.setState(aulaId, {
-          phase: "paused",
-          message: "Download pausado",
-        });
+      if ((err instanceof Error && err.name === "AbortError") || controller.signal.aborted) {
+        this.restartedAulaIds.delete(aulaId);
+        if (this.currentDownloadAulaId === aulaId) {
+          this.currentDownloadAulaId = null;
+        }
+        if (this.states.has(aulaId)) {
+          this.setState(aulaId, {
+            phase: "paused",
+            message: "Download pausado",
+          });
+        }
         return;
       }
 
       // Se está offline, pausa e aguarda voltar
       if (typeof navigator !== "undefined" && !navigator.onLine) {
+        this.restartedAulaIds.delete(aulaId);
+        if (this.currentDownloadAulaId === aulaId) {
+          this.currentDownloadAulaId = null;
+        }
         this.setState(aulaId, {
           phase: "paused",
           message: "Sem internet — pausado",
@@ -903,6 +971,10 @@ class DownloadManager {
 
       // Erro de quota
       if (err instanceof DOMException && err.name === "QuotaExceededError") {
+        this.restartedAulaIds.delete(aulaId);
+        if (this.currentDownloadAulaId === aulaId) {
+          this.currentDownloadAulaId = null;
+        }
         this.setState(aulaId, {
           phase: "error",
           message: "Sem espaço no aparelho. Libere espaço ou remova outros vídeos offline.",
@@ -927,10 +999,22 @@ class DownloadManager {
       });
 
       await new Promise((r) => setTimeout(r, delay));
+      if (controller.signal.aborted) {
+        this.restartedAulaIds.delete(aulaId);
+        if (this.currentDownloadAulaId === aulaId) {
+          this.currentDownloadAulaId = null;
+        }
+        if (this.states.has(aulaId)) {
+          this.setState(aulaId, { phase: "paused", message: "Download pausado" });
+        }
+        return;
+      }
       this.abortControllers.delete(aulaId);
       return this.downloadWithRetries(aulaId, meta, nextAttempt);
     } finally {
-      this.abortControllers.delete(aulaId);
+      if (this.abortControllers.get(aulaId) === controller) {
+        this.abortControllers.delete(aulaId);
+      }
     }
   }
 
@@ -943,6 +1027,7 @@ class DownloadManager {
       controller.abort();
     }
     await removeVideo(aulaId);
+    this.restartedAulaIds.delete(aulaId);
     this.states.delete(aulaId);
     this.notify();
     if (this.currentDownloadAulaId === aulaId) {
@@ -970,6 +1055,7 @@ class DownloadManager {
    */
   async removeVideo(aulaId: string): Promise<void> {
     await removeVideo(aulaId);
+    this.restartedAulaIds.delete(aulaId);
     this.states.delete(aulaId);
     this.notify();
   }

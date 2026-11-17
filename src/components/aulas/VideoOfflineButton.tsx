@@ -31,8 +31,11 @@ interface VideoOfflineButtonProps {
 export function VideoOfflineButton({ aulaId, videoUrl, title, isOnline }: VideoOfflineButtonProps) {
   const confirm = useConfirm();
   const toast = useToast();
-  const { state, canDownload, download, cancel, pause, resume, remove, retry, objectUrl } =
-    useVideoOffline(aulaId, videoUrl, title);
+  const { state, canDownload, download, cancel, pause, resume, remove, retry } = useVideoOffline(
+    aulaId,
+    videoUrl,
+    title,
+  );
 
   const [showProgress, setShowProgress] = useState(false);
   const [iosWarningShown, setIosWarningShown] = useState(false);
