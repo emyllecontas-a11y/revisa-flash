@@ -1,18 +1,43 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ListVideo, Loader2, Folder, BookOpen, CheckCircle, Heart, PlusSquare, Layers } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ListVideo,
+  Loader2,
+  Folder,
+  BookOpen,
+  CheckCircle,
+  Heart,
+  PlusSquare,
+  Layers,
+  Download,
+  WifiOff,
+} from "lucide-react";
 import { AulaCard } from "./AulaCard";
 import { AulasStyles } from "./AulasStyles";
 import { PlayerEmpty } from "./PlayerMock";
 import { AulaPlayer } from "./AulaPlayer";
+import { AulaMateriais } from "./AulaMateriais";
 import { useAppUser } from "@/contexts/UserContext";
 import { getAulasDoUsuario, atualizarOrdemAula } from "@/services/aulaService";
 import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
 import { formatarAula, construirArvore, achatarArvore, primeiraAulaId, type AulaFormatada, type AulaItem } from "./aulasArvore";
 
+// Nome do arquivo no download do vídeo: sem \ / : * ? " < > | e com até 120 caracteres.
+function nomeSeguroArquivo(titulo: string): string {
+  const limpo = (titulo || "")
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (limpo || "aula").slice(0, 120);
+}
+
 export function AulasPage() {
   const { user } = useAppUser();
   const [aulasRaw, setAulasRaw] = useState<AulaFormatada[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"lista" | "player">("lista");
@@ -39,6 +64,19 @@ export function AulasPage() {
       console.error(e);
     }
   }, [user?.id]);
+
+  // Acompanha conexão para liberar/bloquear o download do vídeo.
+  useEffect(() => {
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    setIsOnline(navigator.onLine);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
 
   const toggleConcluida = (id: string) => {
     const updated = { ...concluidas, [id]: !concluidas[id] };
@@ -125,6 +163,11 @@ export function AulasPage() {
 
   const index = listaNavegacao.findIndex((a) => a.id === selectedId);
   const aula = aulas.find((a) => a.id === selectedId) ?? null;
+
+  // URL do vídeo só vale para download se for http(s) de verdade.
+  const videoUrl =
+    aula?.terabox_url && /^https?:\/\//i.test(aula.terabox_url) ? aula.terabox_url : null;
+  const nomeVideo = nomeSeguroArquivo(aula?.titulo ?? "");
 
   const select = (id: string) => {
     setSelectedId(id);
@@ -241,13 +284,15 @@ export function AulasPage() {
             <div key={aula.id} className="rf-fade-in">
               <div className="mb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {aula.disciplina} · {aula.assunto}{aula.subassunto ? ` · ${aula.subassunto}` : ""}
+                  <h1 className="text-2xl font-bold text-foreground sm:text-3xl">{aula.titulo}</h1>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {aula.disciplina}
+                    {aula.assunto ? ` · ${aula.assunto}` : ""}
+                    {aula.subassunto ? ` · ${aula.subassunto}` : ""}
                   </p>
-                  <h1 className="mt-1 text-2xl font-bold text-foreground sm:text-3xl">{aula.titulo}</h1>
                 </div>
 
-                {/* Botões de Ação do Topo (Marcar concluída, Favoritar, Criar flashcard) */}
+                {/* Botões de Ação do Topo (Concluída, Favoritar, Criar flashcard, Baixar vídeo) */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
@@ -283,8 +328,42 @@ export function AulasPage() {
                     <PlusSquare className="h-3.5 w-3.5 text-primary" />
                     Criar flashcard
                   </button>
+
+                  {videoUrl ? (
+                    <a
+                      href={videoUrl}
+                      download={`${nomeVideo}.mp4`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={isOnline ? "Baixar vídeo" : "Sem internet para baixar o vídeo"}
+                      aria-disabled={!isOnline}
+                      className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-foreground hover:bg-surface-2 transition-colors shadow-sm ${
+                        isOnline ? "" : "pointer-events-none opacity-50"
+                      }`}
+                    >
+                      <Download className="h-3.5 w-3.5 text-primary" />
+                      Baixar vídeo
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Vídeo indisponível"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-foreground/40 transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Baixar vídeo
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {!isOnline && videoUrl ? (
+                <p className="-mt-2 mb-3 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" />
+                  Sem internet para baixar o vídeo
+                </p>
+              ) : null}
 
               <AulaPlayer
                 teraboxUrl={aula.terabox_url ?? ""}
@@ -293,17 +372,15 @@ export function AulasPage() {
                 onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
               />
 
-              <div className="mt-6 flex justify-between items-center">
-                <div className="rf-card min-w-0 p-5 flex-1 mr-4">
-                  <h3 className="text-sm font-semibold text-muted-foreground">Sobre esta aula</h3>
-                  <p className="mt-1.5 text-[15px] leading-relaxed text-foreground">{aula.descricao}</p>
-                </div>
-                <div className="flex gap-2 sm:flex-col">
+              <div className="mt-6">
+                <AulaMateriais aulaId={aula.id} />
+
+                <div className="mt-4 flex gap-2 sm:justify-end">
                   <button
                     type="button"
                     disabled={index <= 0}
                     onClick={() => go(-1)}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-full bg-secondary px-4 py-2.5 text-sm font-semibold text-secondary-foreground transition-colors hover:bg-surface-2 disabled:opacity-40"
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-secondary px-4 py-2.5 text-sm font-semibold text-secondary-foreground transition-colors hover:bg-surface-2 disabled:opacity-40 sm:flex-none"
                   >
                     <ChevronLeft className="h-4 w-4" /> Anterior
                   </button>
@@ -311,7 +388,7 @@ export function AulasPage() {
                     type="button"
                     disabled={index < 0 || index >= listaNavegacao.length - 1}
                     onClick={() => go(1)}
-                    className="btn-sun inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
+                    className="btn-sun inline-flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40 sm:flex-none"
                   >
                     Próxima <ChevronRight className="h-4 w-4" />
                   </button>

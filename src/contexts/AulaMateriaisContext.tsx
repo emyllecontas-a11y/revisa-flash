@@ -11,10 +11,14 @@ import React, {
   useCallback,
   useEffect,
   ReactNode,
-} from 'react';
-import { getDb } from '@/lib/db';
-import { uploadMaterial, removeMaterial as removeMaterialService, getMateriaisByAula, type AulaMaterial } from '@/services/aulaMateriaisService';
-import { useAppUser } from '@/contexts/UserContext';
+} from "react";
+import { getDb } from "@/lib/db";
+import {
+  uploadMaterial,
+  removeMaterial as removeMaterialService,
+  type AulaMaterial,
+} from "@/services/aulaMateriaisService";
+import { useAppUser } from "@/contexts/UserContext";
 
 interface AulaMateriaisContextType {
   materiais: AulaMaterial[];
@@ -48,14 +52,16 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
         return;
       }
 
-      const docs = await col.find({
-        selector: { user_id: userId },
-      }).exec();
+      const docs = await col
+        .find({
+          selector: { user_id: userId },
+        })
+        .exec();
 
-      const loaded = docs.map((d: any) => d.toJSON() as AulaMaterial);
+      const loaded = docs.map((d) => d.toJSON() as unknown as AulaMaterial);
       setMateriais(loaded);
     } catch (error) {
-      console.error('❌ [AulaMateriaisContext] Erro ao carregar dados:', error);
+      console.error("❌ [AulaMateriaisContext] Erro ao carregar dados:", error);
     } finally {
       setLoading(false);
     }
@@ -82,7 +88,7 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
             if (timeoutId) clearTimeout(timeoutId);
             timeoutId = setTimeout(() => {
               if (isSubscribed) {
-                console.log('🔄 [AulaMateriaisContext] Mudança detectada, recarregando...');
+                console.log("🔄 [AulaMateriaisContext] Mudança detectada, recarregando...");
                 loadData();
               }
               timeoutId = null;
@@ -95,7 +101,7 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
           };
         }
       } catch (e) {
-        console.warn('Erro ao configurar listener de aula_materiais:', e);
+        console.warn("Erro ao configurar listener de aula_materiais:", e);
       }
     };
 
@@ -105,7 +111,7 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
   const addMaterial = useCallback(
     async (aulaId: string, file: File): Promise<AulaMaterial> => {
       if (!userId) {
-        throw new Error('Usuário não autenticado');
+        throw new Error("Usuário não autenticado");
       }
 
       const material = await uploadMaterial(aulaId, file, userId);
@@ -115,13 +121,13 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
 
       return material;
     },
-    [userId]
+    [userId],
   );
 
   const removeMaterial = useCallback(
     async (materialId: string, storagePath: string): Promise<void> => {
       if (!userId) {
-        throw new Error('Usuário não autenticado');
+        throw new Error("Usuário não autenticado");
       }
 
       await removeMaterialService(materialId, storagePath, userId);
@@ -129,14 +135,14 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
       // Atualiza estado local
       setMateriais((prev) => prev.filter((m) => m.id !== materialId));
     },
-    [userId]
+    [userId],
   );
 
   const getByAula = useCallback(
     (aulaId: string): AulaMaterial[] => {
       return materiais.filter((m) => m.aula_id === aulaId);
     },
-    [materiais]
+    [materiais],
   );
 
   const refresh = useCallback(async () => {
@@ -153,20 +159,16 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
       removeMaterial,
       getByAula,
     }),
-    [materiais, loading, userId, refresh, addMaterial, removeMaterial, getByAula]
+    [materiais, loading, userId, refresh, addMaterial, removeMaterial, getByAula],
   );
 
-  return (
-    <AulaMateriaisContext.Provider value={value}>
-      {children}
-    </AulaMateriaisContext.Provider>
-  );
+  return <AulaMateriaisContext.Provider value={value}>{children}</AulaMateriaisContext.Provider>;
 };
 
 export const useAulaMateriais = () => {
   const context = useContext(AulaMateriaisContext);
   if (!context) {
-    throw new Error('useAulaMateriais deve ser usado dentro de AulaMateriaisProvider');
+    throw new Error("useAulaMateriais deve ser usado dentro de AulaMateriaisProvider");
   }
   return context;
 };
