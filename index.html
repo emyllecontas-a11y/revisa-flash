@@ -3,6 +3,7 @@
   <head>
     <script>
       window.onerror = function(message, source, lineno, colno, error) {
+        if (typeof message !== 'string') return;
         document.body.innerHTML = `
           <div style="color: white; padding: 20px; font-family: sans-serif; background: #290E1F; min-height: 100vh; box-sizing: border-box;">
             <h3 style="color: #FE7802;">Ocorreu um erro no App:</h3>
