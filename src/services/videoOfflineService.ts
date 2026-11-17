@@ -262,6 +262,32 @@ export async function getRemoteVideoSize(url: string): Promise<number> {
 // GERENCIADOR DE DOWNLOADS (singleton, fora do React)
 // ============================================================
 
+/**
+ * Retira exatamente n bytes do início do array `parts` (mutando-o).
+ * Retorna as partes retiradas como um novo array.
+ * Se uma parte for maior que o necessário, divide-a com subarray e deixa o restante em `parts`.
+ */
+function takeBytes(parts: Uint8Array<ArrayBuffer>[], n: number): Uint8Array<ArrayBuffer>[] {
+  const taken: Uint8Array<ArrayBuffer>[] = [];
+  let remaining = n;
+
+  while (remaining > 0 && parts.length > 0) {
+    const first = parts[0];
+    if (first.length <= remaining) {
+      taken.push(first);
+      parts.shift();
+      remaining -= first.length;
+    } else {
+      // Parte maior que o necessário: divide
+      taken.push(first.subarray(0, remaining));
+      parts[0] = first.subarray(remaining);
+      remaining = 0;
+    }
+  }
+
+  return taken;
+}
+
 class DownloadManager {
   private states = new Map<string, DownloadState>();
   private listeners = new Set<Listener>();
@@ -695,6 +721,8 @@ class DownloadManager {
       // Array de partes recebidas para evitar concatenação repetida de buffers grandes
       const parts: Uint8Array<ArrayBuffer>[] = [];
       let bufferedBytes = 0;
+      let chunksWrittenThisAttempt = 0;
+      const maxChunksThisAttempt = Math.ceil(meta.totalBytes / meta.chunkSize) + 1;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -703,32 +731,32 @@ class DownloadManager {
         parts.push(value);
         bufferedBytes += value.length;
 
-        // Quando atingir CHUNK_SIZE_BYTES, monta o Blob do chunk e grava
-        while (bufferedBytes >= meta.chunkSize) {
-          // Monta Blob contendo EXATAMENTE chunkSize bytes
-          const chunkParts: Uint8Array<ArrayBuffer>[] = [];
-          let needed = meta.chunkSize;
-
-          for (const part of parts) {
-            if (needed === 0) break;
-            if (part.length <= needed) {
-              chunkParts.push(part);
-              needed -= part.length;
-            } else {
-              // Parte maior que o necessário: divide
-              chunkParts.push(part.subarray(0, needed));
-              // Substitui a parte original pelo restante
-              const remaining = part.subarray(needed);
-              parts.splice(0, parts.indexOf(part) + 1, remaining);
-              needed = 0;
-            }
+        // Escreve chunks completos enquanto houver bytes suficientes E não passar do total
+        while (
+          bufferedBytes >= meta.chunkSize &&
+          meta.downloadedBytes + meta.chunkSize <= meta.totalBytes
+        ) {
+          if (chunksWrittenThisAttempt >= maxChunksThisAttempt) {
+            throw new Error("Erro interno no download: limite de chunks excedido.");
           }
 
-          // bufferedBytes agora é a soma dos bytes restantes em parts (após o splice acima)
-          bufferedBytes = parts.reduce((sum, p) => sum + p.length, 0);
+          // TRAVA DE SEGURANÇA: não passar do total
+          if (meta.downloadedBytes + meta.chunkSize > meta.totalBytes) {
+            throw new Error("Erro interno no download: bytes além do tamanho do arquivo.");
+          }
+
+          // Tira exatamente chunkSize bytes de parts
+          const chunkParts = takeBytes(parts, meta.chunkSize);
+          bufferedBytes -= meta.chunkSize;
 
           const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
           const chunkBlob = new Blob(chunkParts as BlobPart[], { type: meta.mime });
+
+          // TRAVA DE SEGURANÇA: usar tamanho REAL do Blob, nunca a constante
+          const actualChunkSize = chunkBlob.size;
+          if (meta.downloadedBytes + actualChunkSize > meta.totalBytes) {
+            throw new Error("Erro interno no download: bytes além do tamanho do arquivo.");
+          }
 
           // Grava chunk + atualiza meta NA MESMA transação
           await db.transaction("rw", db.videoMeta, db.videoChunks, async () => {
@@ -737,14 +765,15 @@ class DownloadManager {
               index: chunkIndex,
               blob: chunkBlob,
             });
-            meta.downloadedBytes += meta.chunkSize;
+            meta.downloadedBytes += actualChunkSize;
             meta.updatedAt = new Date().toISOString();
             await db.videoMeta.put(meta);
           });
 
+          chunksWrittenThisAttempt++;
           chunkWrittenThisAttempt = true;
           console.info(
-            `[videoOffline] chunk ${chunkIndex} gravado: ${meta.chunkSize} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
+            `[videoOffline] chunk ${chunkIndex} gravado: ${actualChunkSize} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
           );
 
           this.setState(aulaId, {
@@ -761,32 +790,57 @@ class DownloadManager {
         }
       }
 
-      // Grava último chunk (pode ser menor que CHUNK_SIZE)
+      // Stream acabou: grava o que sobrou como último chunk (pode ser menor que chunkSize)
+      // Mas só se não completou o totalBytes
       if (bufferedBytes > 0) {
-        const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
-        const chunkBlob = new Blob(parts as BlobPart[], { type: meta.mime });
+        if (meta.downloadedBytes + bufferedBytes > meta.totalBytes) {
+          console.warn(
+            `[videoOffline] Excedente de ${meta.downloadedBytes + bufferedBytes - meta.totalBytes} bytes ignorado`,
+          );
+          // Tira apenas o necessário para completar totalBytes
+          const needed = meta.totalBytes - meta.downloadedBytes;
+          const chunkParts = takeBytes(parts, needed);
+          bufferedBytes = parts.reduce((sum, p) => sum + p.length, 0); // recalcula o que sobrou (deve ser 0 ou excedente ignorado)
+        }
 
-        await db.transaction("rw", db.videoMeta, db.videoChunks, async () => {
-          await db.videoChunks.put({
-            aulaId,
-            index: chunkIndex,
-            blob: chunkBlob,
+        if (meta.downloadedBytes < meta.totalBytes) {
+          const chunkIndex = Math.floor(meta.downloadedBytes / meta.chunkSize);
+          const chunkBlob = new Blob(parts as BlobPart[], { type: meta.mime });
+          const actualChunkSize = chunkBlob.size;
+
+          if (meta.downloadedBytes + actualChunkSize > meta.totalBytes) {
+            throw new Error("Erro interno no download: bytes além do tamanho do arquivo.");
+          }
+
+          await db.transaction("rw", db.videoMeta, db.videoChunks, async () => {
+            await db.videoChunks.put({
+              aulaId,
+              index: chunkIndex,
+              blob: chunkBlob,
+            });
+            meta.downloadedBytes += actualChunkSize;
+            meta.updatedAt = new Date().toISOString();
+            await db.videoMeta.put(meta);
           });
-          meta.downloadedBytes += bufferedBytes;
-          meta.updatedAt = new Date().toISOString();
-          await db.videoMeta.put(meta);
-        });
 
-        chunkWrittenThisAttempt = true;
-        console.info(
-          `[videoOffline] chunk ${chunkIndex} gravado: ${bufferedBytes} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
+          chunkWrittenThisAttempt = true;
+          console.info(
+            `[videoOffline] chunk ${chunkIndex} gravado: ${actualChunkSize} bytes, total ${meta.downloadedBytes}/${meta.totalBytes}`,
+          );
+
+          this.setState(aulaId, {
+            downloadedBytes: meta.downloadedBytes,
+            totalBytes: meta.totalBytes,
+            percent: Math.min(100, Math.round((meta.downloadedBytes / meta.totalBytes) * 100)),
+          });
+        }
+      }
+
+      // Stream acabou: se não baixou tudo, é falha de rede (não marca como completo)
+      if (meta.downloadedBytes < meta.totalBytes) {
+        throw new Error(
+          `Stream encerrou antes do fim: baixados ${meta.downloadedBytes}/${meta.totalBytes} bytes`,
         );
-
-        this.setState(aulaId, {
-          downloadedBytes: meta.downloadedBytes,
-          totalBytes: meta.totalBytes,
-          percent: Math.min(100, Math.round((meta.downloadedBytes / meta.totalBytes) * 100)),
-        });
       }
 
       // Verifica se completou
@@ -809,6 +863,12 @@ class DownloadManager {
         meta.status = "complete";
         meta.updatedAt = new Date().toISOString();
         await db.videoMeta.put(meta);
+
+        // Conta chunks para log final
+        const finalChunks = await db.videoChunks.where("aulaId").equals(aulaId).toArray();
+        console.info(
+          `[videoOffline] download completo: ${finalChunks.length} chunks, ${meta.downloadedBytes} bytes`,
+        );
 
         this.setState(aulaId, {
           phase: "complete",
