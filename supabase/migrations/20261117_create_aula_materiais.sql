@@ -2,7 +2,7 @@
 -- Data: 2026-11-17
 -- Objetivo: permitir anexar PDFs (Material de Apoio) a cada aula.
 --   - Tabela aula_materiais guarda metadados (nome, storage_path, tamanho, mime).
---   - Bucket privado 'aula-materiais' guarda os PDFs (máx. 20 MB, application/pdf).
+--   - Bucket privado 'aula-materiais' guarda os PDFs (máx. 50 MB, application/pdf).
 --   - Caminho no bucket: ${userId}/${aulaId}/${uid()}.pdf
 --   - user_id é text (Clerk ID), igual à tabela files.
 --   - aula_id é uuid (igual a aulas.id), sem foreign key.
@@ -69,9 +69,9 @@ CREATE POLICY "aula_materiais_delete_own"
 -- ============================================================
 -- 4. BUCKET PRIVADO 'aula-materiais'
 -- ============================================================
--- Bucket privado: file_size_limit = 20 MB, allowed_mime_types = application/pdf
+-- Bucket privado: file_size_limit = 50 MB, allowed_mime_types = application/pdf
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('aula-materiais', 'aula-materiais', false, 20971520, ARRAY['application/pdf'])
+VALUES ('aula-materiais', 'aula-materiais', false, 52428800, ARRAY['application/pdf'])
 ON CONFLICT (id) DO UPDATE SET
   file_size_limit  = EXCLUDED.file_size_limit,
   allowed_mime_types = EXCLUDED.allowed_mime_types,

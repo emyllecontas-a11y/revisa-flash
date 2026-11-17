@@ -26,7 +26,7 @@ export interface AulaMaterial {
 /**
  * Faz upload de um PDF para o bucket privado 'aula-materiais',
  * grava metadados no Supabase (tabela aula_materiais) e no RxDB.
- * Valida tipo (application/pdf) e tamanho (máx. 20 MB).
+ * Valida tipo (application/pdf) e tamanho (máx. 50 MB).
  */
 export async function uploadMaterial(
   aulaId: string,
