@@ -11,6 +11,7 @@ import {
   WifiOff,
   Loader2,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,9 @@ function formatBytes(bytes: number): string {
   return `${mb.toFixed(1).replace(".", ",")} MB`;
 }
 
+// Limiar para considerar "arquivo grande" e mostrar aviso especial (10 MB)
+const LARGE_FILE_THRESHOLD_MB = 10;
+
 export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
   const { materiais, loading, addMaterial, removeMaterial } = useAulaMateriais();
   const confirm = useConfirm();
@@ -45,8 +49,21 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
   );
   const [enviando, setEnviando] = useState(false);
   const [nomeEnviando, setNomeEnviando] = useState<string | null>(null);
+  const [tamanhoEnviando, setTamanhoEnviando] = useState<number | null>(null);
   const [abrindoId, setAbrindoId] = useState<string | null>(null);
   const [offlineIds, setOfflineIds] = useState<Record<string, boolean>>({});
+
+  // beforeunload warning durante upload
+  useEffect(() => {
+    if (!enviando) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [enviando]);
 
   // useMemo: getByAula devolve um array novo a cada chamada, o que reexecutaria
   // o effect do cache em loop. Filtrar aqui mantém a referência estável.
@@ -91,6 +108,7 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
       setEnviando(true);
       for (const arquivo of arquivos) {
         setNomeEnviando(arquivo.name);
+        setTamanhoEnviando(arquivo.size);
 
         if (
           arquivo.type !== AULA_MATERIAIS.MIME_TYPE &&
@@ -115,6 +133,7 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
         }
       }
       setNomeEnviando(null);
+      setTamanhoEnviando(null);
       setEnviando(false);
     },
     [aulaId, addMaterial, toast],
@@ -315,9 +334,25 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
         ) : null}
 
         {enviando && nomeEnviando ? (
-          <p className="border-b border-border px-5 py-2 text-xs text-muted-foreground">
-            Enviando: <span className="font-medium text-foreground">{nomeEnviando}</span>
-          </p>
+          <>
+            {tamanhoEnviando && tamanhoEnviando > LARGE_FILE_THRESHOLD_MB * 1024 * 1024 ? (
+              <div className="border-b border-border px-5 py-2.5 bg-amber-50 dark:bg-amber-900/20">
+                <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium">
+                    Enviando {nomeEnviando} ({(tamanhoEnviando / 1024 / 1024).toFixed(1)} MB)…
+                  </span>
+                </p>
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-500">
+                  Arquivos grandes podem levar alguns minutos. Não feche esta página.
+                </p>
+              </div>
+            ) : (
+              <p className="border-b border-border px-5 py-2 text-xs text-muted-foreground">
+                Enviando: <span className="font-medium text-foreground">{nomeEnviando}</span>
+              </p>
+            )}
+          </>
         ) : null}
 
         {materiaisDaAula.length === 0 ? (

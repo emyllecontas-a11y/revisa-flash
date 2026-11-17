@@ -215,6 +215,25 @@ self.addEventListener('fetch', event => {
 
   if (isExcluded(url, event.request)) return;
 
+  // Não interceptar (deixar o navegador resolver sozinho) quando:
+  // (i) host github.com, githubusercontent.com ou workers.dev
+  // (ii) requisição tem header Range
+  // (iii) destination 'video' ou 'audio'
+  // (iv) URL termina em .mp4
+  const hostname = url.hostname;
+  const isGithubOrProxy =
+    hostname === 'github.com' ||
+    hostname.endsWith('.githubusercontent.com') ||
+    hostname.endsWith('.workers.dev');
+  const hasRangeHeader = event.request.headers.has('range');
+  const isVideoOrAudio = event.request.destination === 'video' || event.request.destination === 'audio';
+  const isMp4Url = url.pathname.endsWith('.mp4');
+
+  if (isGithubOrProxy || hasRangeHeader || isVideoOrAudio || isMp4Url) {
+    console.log('[SW] Bypass para vídeo/proxy/Range:', url.pathname);
+    return; // deixa o navegador fazer o fetch direto
+  }
+
   console.log(`[SW] Fetch: ${url.pathname}`);
 
   if (isDocument(event.request, url)) {

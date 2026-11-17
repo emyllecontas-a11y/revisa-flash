@@ -10,6 +10,7 @@ import { enqueueOperation } from "@/services/queueService";
 import { deletePdfBlob } from "@/services/pdfCache";
 import { uid } from "@/utils/helpers";
 import { AULA_MATERIAIS } from "@/constants";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export interface AulaMaterial {
   id: string;
@@ -24,15 +25,18 @@ export interface AulaMaterial {
 }
 
 /**
- * Faz upload de um PDF para o bucket privado 'aula-materiais',
+ * Faz upload de um PDF para o bucket privado 'aula-materiais' usando URL assinada de upload,
  * grava metadados no Supabase (tabela aula_materiais) e no RxDB.
  * Valida tipo (application/pdf) e tamanho (máx. 50 MB).
+ * O token da URL assinada tem validade própria e NÃO depende do token do Clerk durante o upload.
  */
 export async function uploadMaterial(
   aulaId: string,
   file: File,
   userId: string,
 ): Promise<AulaMaterial> {
+  const inicioTotal = Date.now();
+
   // Validações
   if (file.type !== AULA_MATERIAIS.MIME_TYPE) {
     throw new Error(`Tipo de arquivo inválido. Use apenas PDF (application/pdf).`);
@@ -45,23 +49,77 @@ export async function uploadMaterial(
     );
   }
 
-  const supabase = await getSupabaseWithToken();
+  // 1. Cliente com token NOVO para criar a URL assinada de upload
+  let supabase: SupabaseClient;
+  try {
+    supabase = await getSupabaseWithToken();
+  } catch (err) {
+    console.error("❌ Falha ao obter cliente autenticado:", err);
+    throw new Error("Usuário não autenticado. Faça login novamente.");
+  }
 
   // Caminho: ${userId}/${aulaId}/${uid()}.pdf
   const fileId = uid();
   const storagePath = `${userId}/${aulaId}/${fileId}.pdf`;
 
-  // Upload para o bucket privado
-  const { error: uploadError } = await supabase.storage
-    .from(AULA_MATERIAIS.BUCKET)
-    .upload(storagePath, file, {
-      cacheControl: "3600",
-      upsert: false,
-    });
+  // 2. Cria URL assinada de UPLOAD (token tem validade própria, não depende do token do Clerk durante o upload)
+  let uploadToken: string;
+  const inicioSignedUrl = Date.now();
+  try {
+    const { data, error: signedUrlError } = await supabase.storage
+      .from(AULA_MATERIAIS.BUCKET)
+      .createSignedUploadUrl(storagePath);
 
-  if (uploadError) {
-    console.error("❌ Erro ao fazer upload do material:", uploadError);
-    throw uploadError;
+    if (signedUrlError) {
+      console.error("❌ Erro ao criar URL assinada de upload:", signedUrlError);
+      throw new Error(`Falha ao preparar envio: ${signedUrlError.message}`);
+    }
+
+    uploadToken = data?.token;
+    if (!uploadToken) {
+      throw new Error("Falha ao obter token de upload assinado.");
+    }
+    console.info(
+      `[aulaMateriais] URL assinada criada em ${((Date.now() - inicioSignedUrl) / 1000).toFixed(2)} s`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro desconhecido ao criar URL de upload.";
+    console.error("❌ Erro ao criar URL assinada de upload:", err);
+    throw new Error(msg);
+  }
+
+  // 3. Faz upload usando a URL assinada (NÃO usa o token do Clerk)
+  try {
+    const { error: uploadError } = await supabase.storage
+      .from(AULA_MATERIAIS.BUCKET)
+      .uploadToSignedUrl(storagePath, uploadToken, file, {
+        contentType: "application/pdf",
+      });
+
+    if (uploadError) {
+      console.error("❌ Erro no upload para URL assinada:", uploadError);
+      throw new Error(`Falha no envio do arquivo: ${uploadError.message}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro desconhecido no upload.";
+    console.error("❌ Erro no upload do arquivo:", err);
+    throw new Error(msg);
+  }
+
+  // 4. Cliente com token NOVO para gravar metadados (e para rollback se falhar)
+  let supabaseForDb: SupabaseClient;
+  try {
+    supabaseForDb = await getSupabaseWithToken();
+  } catch (err) {
+    console.error("❌ Falha ao obter cliente autenticado para gravar metadados:", err);
+    // Rollback: tenta remover o arquivo que foi enviado
+    try {
+      const cleanupClient = await getSupabaseWithToken();
+      await cleanupClient.storage.from(AULA_MATERIAIS.BUCKET).remove([storagePath]);
+    } catch {
+      /* ignore rollback error */
+    }
+    throw new Error("Sessão expirada ao gravar metadados. Faça login novamente.");
   }
 
   // Metadados
@@ -78,17 +136,22 @@ export async function uploadMaterial(
     updated_at: now,
   };
 
-  // Grava no Supabase (tabela aula_materiais)
-  const { error: dbError } = await supabase.from(AULA_MATERIAIS.COLECAO).insert(material);
+  // 5. Grava no Supabase (tabela aula_materiais)
+  const { error: dbError } = await supabaseForDb.from(AULA_MATERIAIS.COLECAO).insert(material);
 
   if (dbError) {
     console.error("❌ Erro ao salvar metadados no Supabase:", dbError);
-    // Rollback: remove o arquivo do storage
-    await supabase.storage.from(AULA_MATERIAIS.BUCKET).remove([storagePath]);
-    throw dbError;
+    // Rollback: remove o arquivo do storage usando cliente com token novo
+    try {
+      const rollbackClient = await getSupabaseWithToken();
+      await rollbackClient.storage.from(AULA_MATERIAIS.BUCKET).remove([storagePath]);
+    } catch (rollbackErr) {
+      console.error("❌ Falha no rollback (remoção do arquivo):", rollbackErr);
+    }
+    throw new Error(`Falha ao gravar metadados: ${dbError.message}`);
   }
 
-  // Grava no RxDB (para leitura offline)
+  // 6. Grava no RxDB (para leitura offline)
   try {
     const db = await getDb();
     const col = db.collections.aula_materiais;
@@ -99,6 +162,9 @@ export async function uploadMaterial(
     console.warn("⚠️ [aulaMateriais] Falha ao gravar no RxDB (offline?):", rxErr);
   }
 
+  console.info(
+    `[aulaMateriais] upload concluído em ${((Date.now() - inicioTotal) / 1000).toFixed(2)} s`,
+  );
   console.log("✅ Material de apoio enviado:", material);
   return material;
 }
@@ -109,15 +175,23 @@ export async function uploadMaterial(
  * Se falhar no Supabase, lança erro e NÃO apaga nada localmente.
  * Se o delete no Supabase der certo e SÓ a remoção no Storage falhar, NÃO lança erro:
  * faz console.warn com o storage_path e continua removendo do RxDB e do cache do PDF.
+ * Usa cliente com token NOVO antes de cada chamada remota.
  */
 export async function removeMaterial(
   materialId: string,
   storagePath: string,
   userId: string,
 ): Promise<void> {
-  const supabase = await getSupabaseWithToken();
+  // 1. Cliente com token NOVO para remover da tabela Supabase
+  let supabase: SupabaseClient;
+  try {
+    supabase = await getSupabaseWithToken();
+  } catch (err) {
+    console.error("❌ Falha ao obter cliente autenticado:", err);
+    throw new Error("Usuário não autenticado. Faça login novamente.");
+  }
 
-  // 1. Remove da tabela Supabase (primeiro, para validar permissão e existência)
+  // Remove da tabela Supabase (primeiro, para validar permissão e existência)
   const { error: dbError } = await supabase
     .from(AULA_MATERIAIS.COLECAO)
     .delete()
@@ -129,19 +203,34 @@ export async function removeMaterial(
     throw new Error(`Falha ao remover no servidor: ${dbError.message}`);
   }
 
-  // 2. Remove do Storage
-  const { error: storageError } = await supabase.storage
-    .from(AULA_MATERIAIS.BUCKET)
-    .remove([storagePath]);
-
-  if (storageError) {
+  // 2. Cliente com token NOVO para remover do Storage
+  let storageClient: SupabaseClient | null = null;
+  try {
+    storageClient = await getSupabaseWithToken();
+  } catch (err) {
+    console.error("❌ Falha ao obter cliente autenticado para storage:", err);
+    // Não lança erro aqui - o Supabase já removeu os metadados
+    // Apenas avisa que a limpeza do storage pode não ter acontecido
     console.warn(
-      "⚠️ [aulaMateriais] Falha ao remover arquivo do storage (storage_path:",
-      storagePath,
-      "):",
-      storageError,
+      "⚠️ [aulaMateriais] Token expirado ao tentar limpar storage. " +
+        "Arquivo pode permanecer órfão.",
     );
-    // Não lança erro - continua para limpar localmente
+  }
+
+  if (storageClient) {
+    const { error: storageError } = await storageClient.storage
+      .from(AULA_MATERIAIS.BUCKET)
+      .remove([storagePath]);
+
+    if (storageError) {
+      console.warn(
+        "⚠️ [aulaMateriais] Falha ao remover arquivo do storage (storage_path:",
+        storagePath,
+        "):",
+        storageError,
+      );
+      // Não lança erro - continua para limpar localmente
+    }
   }
 
   // 3. Remove do RxDB (agora que o remoto deu certo)

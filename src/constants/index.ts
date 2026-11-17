@@ -179,6 +179,21 @@ export const AULA_MATERIAIS = {
 } as const;
 
 // ============================================================
+// 🎬 VÍDEO OFFLINE (download para IndexedDB, por aparelho)
+// ============================================================
+
+export const VIDEO_OFFLINE = {
+  DB_NAME: 'revisaflash_videos',
+  CHUNK_SIZE_BYTES: 8 * 1024 * 1024, // 8 MB
+  PROXY_URL: import.meta.env.VITE_VIDEO_PROXY_URL || 'https://revisa-video-proxy.emyllecontas.workers.dev',
+  ALLOWED_HOST: 'github.com',
+  ALLOWED_PATH_PREFIX: '/emyllecontas-a11y/',
+  RELEASE_PATH_PART: '/releases/download/',
+  FREE_SPACE_MARGIN: 1.1,
+  MAX_RETRIES: 6,
+} as const;
+
+// ============================================================
 // 🔗 CONFIGURAÇÕES DO SUPABASE (opcional)
 // ============================================================
 
