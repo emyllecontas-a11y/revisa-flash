@@ -13,7 +13,7 @@ interface CriarFlashcardAulaModalProps {
 
 export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDisciplina }: CriarFlashcardAulaModalProps) {
   const { decks, createDeck, addCard } = useFlashcardContext();
-  const { showToast } = useToast();
+  const toast = useToast();
 
   const [front, setFront] = useState(aulaTitulo ? `Resumo / Pergunta sobre: ${aulaTitulo}` : "");
   const [back, setBack] = useState("");
@@ -43,7 +43,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
     if (!file) return;
 
     if (!isValidImageFile(file)) {
-      showToast("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.", "error");
+      toast.error("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.");
       return;
     }
 
@@ -57,7 +57,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
     if (!file) return;
 
     if (!isValidImageFile(file)) {
-      showToast("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.", "error");
+      toast.error("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.");
       return;
     }
 
@@ -82,7 +82,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
     if (!novoDeckNome.trim()) return;
     try {
       await createDeck(novoDeckNome.trim(), aulaDisciplina || "Aulas");
-      showToast("Baralho criado com sucesso!", "success");
+      toast.success("Baralho criado com sucesso!");
       setNovoDeckNome("");
       setShowNovaColecao(false);
       if (decks.length > 0) {
@@ -90,14 +90,14 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       }
     } catch (err) {
       console.error(err);
-      showToast("Erro ao criar baralho", "error");
+      toast.error("Erro ao criar baralho");
     }
   };
 
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!front.trim() || !back.trim()) {
-      showToast("Preencha a frente e o verso do flashcard.", "error");
+      toast.error("Preencha a frente e o verso do flashcard.");
       return;
     }
 
@@ -107,7 +107,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
     }
 
     if (!targetDeckId) {
-      showToast("Crie ou selecione um baralho primeiro.", "error");
+      toast.error("Crie ou selecione um baralho primeiro.");
       return;
     }
 
@@ -126,7 +126,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
           frontImageUrl = await compressAndUploadImage(frontImageFile, 'current-user');
         } catch (uploadError) {
           console.warn('⚠️ Falha no upload da imagem da frente, salvando apenas texto:', uploadError);
-          showToast("Aviso: imagem da frente não foi enviada, mas o flashcard será salvo.", "warning");
+          toast.warning("Aviso: imagem da frente não foi enviada, mas o flashcard será salvo.");
         }
         setIsUploadingImage(false);
       }
@@ -138,7 +138,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
           backImageUrl = await compressAndUploadImage(backImageFile, 'current-user');
         } catch (uploadError) {
           console.warn('⚠️ Falha no upload da imagem do verso, salvando apenas texto:', uploadError);
-          showToast("Aviso: imagem do verso não foi enviada, mas o flashcard será salvo.", "warning");
+          toast.warning("Aviso: imagem do verso não foi enviada, mas o flashcard será salvo.");
         }
         setIsUploadingImage(false);
       }
@@ -147,7 +147,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       // Por enquanto, vamos adicionar as imagens como parte do front/back ou como metadados
       // A implementação ideal seria passar as URLs para o addCard
       await addCard(targetDeckId, front.trim(), back.trim());
-      showToast("Flashcard criado com sucesso!", "success");
+      toast.success("Flashcard criado com sucesso!");
       setFront("");
       setBack("");
       removeFrontImage();
@@ -155,7 +155,7 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       handleClose();
     } catch (err) {
       console.error(err);
-      showToast("Erro ao salvar flashcard", "error");
+      toast.error("Erro ao salvar flashcard");
     } finally {
       setIsSaving(false);
       setIsUploadingImage(false);

@@ -23,6 +23,10 @@ export interface QuestaoBanco {
   hash_dedup: string;
   url_origem: string | null;
   arquivo_origem: string | null;
+  // Adicionados pelo getQuestoesDoCaderno (ordem do caderno)
+  numero?: number;
+  /** Alias para disciplina, usado no CadernoRevisao */
+  area?: string;
   importado_em: string;
   created_at: string;
   updated_at: string;

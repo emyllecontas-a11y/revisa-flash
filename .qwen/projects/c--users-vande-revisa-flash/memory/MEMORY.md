@@ -1,0 +1,1 @@
+- [RxDB pre-v16 migration strategy](project/rxdb-pre-v16-migration-strategy.md) — New study-plan collections (v0 in v16) have no local data to migrate; version marker forces full pull from Supabase to reconstruct state

@@ -20,7 +20,7 @@ import { enqueueOperation } from "@/services/queueService";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { PlanoDiaCard } from "@/components/PlanoDiaCard";
-import { PlanoGerenciamentoView } from "@/components/PlanoGerenciamentoView";
+import { StudyPlanHub } from "@/components/study-plan";
 import { useRevisoesSubtopico } from "@/hooks/useRevisoesSubtopico";
 
 interface Revisao {
@@ -487,11 +487,7 @@ export default function CalendarioPage() {
 
         {visao === "plano" ? (
           userId ? (
-            <PlanoGerenciamentoView 
-              userId={userId} 
-              onBackToAgenda={() => setVisao("agenda")} 
-              onPlanoAlterado={() => { /* Opcional: recarregar dados aqui */ }} 
-            />
+            <StudyPlanHub userId={userId} />
           ) : (
             <p>Carregando...</p>
           )

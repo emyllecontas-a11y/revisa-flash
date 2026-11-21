@@ -16,6 +16,25 @@ export interface Sublinhado {
   origem: 'desenho' | 'anotacao';
 }
 
+/** Trecho de texto com coordenadas exatas para associação precisa de formatação. */
+export interface TrechoComCoordenadas {
+  texto: string;
+  pagina: number;
+  x0: number;
+  x1: number;
+  yBase: number;
+  tamanho: number;
+  /** intervalo de caracteres no texto da página (inicio inclusivo, fim exclusivo) */
+  charInicio: number;
+  charFim: number;
+  bold: boolean;
+  italic: boolean;
+  /** true se este trecho for subscrito (fonte menor + deslocado para baixo) */
+  subscript: boolean;
+  /** true se este trecho for sobrescrito (fonte menor + deslocado para cima) */
+  superscript: boolean;
+}
+
 export interface ItemPos {
   str: string;
   x0: number;
@@ -64,6 +83,8 @@ export interface ImagemExtraida {
   posGlobal: number;
   origem: 'raster' | 'vetorial';
   hash: string;
+  /** Letra da alternativa logo antes da imagem (se a imagem estiver entre alternativas). Opcional. */
+  alternativaAntes?: 'A' | 'B' | 'C' | 'D' | 'E';
 }
 
 export interface OpcoesSublinhado {
@@ -76,6 +97,10 @@ export interface OpcoesImagem {
   margemInferior?: number;
   tamanhoMinimoPt?: number;
   larguraMaximaRel?: number;
+  /** Largura máxima em pixels para redimensionamento (padrão 1600) */
+  larguraMaximaPx?: number;
+  /** Qualidade JPEG mínima ao comprimir (padrão 0.5) */
+  qualidadeMinima?: number;
 }
 
 export interface FaixaQuestao {
@@ -379,6 +404,99 @@ export async function extrairItensTexto(page: PDFPageProxy): Promise<ItemPos[]> 
   return itens;
 }
 
+/**
+ * Extrai trechos de texto com coordenadas completas para associação precisa de formatação.
+ * Inclui detecção de subscript/superscript por tamanho de fonte menor e deslocamento vertical.
+ */
+export async function extrairTrechosComCoordenadas(page: PDFPageProxy): Promise<TrechoComCoordenadas[]> {
+  const vp = page.getViewport({ scale: 1 });
+  const vt = vp.transform as Mat;
+  const tc = await page.getTextContent();
+
+  // 1) Coleta nomes únicos de fonte
+  const nomesFontes = new Set<string>();
+  for (const it of tc.items as any[]) {
+    if ('str' in it && it.str && it.fontName) nomesFontes.add(it.fontName);
+  }
+
+  // 2) Carrega metadados de cada fonte
+  const metaFonte = new Map<string, { bold: boolean; italic: boolean }>();
+  for (const nome of nomesFontes) {
+    const info = await aguardarFonte(page, nome);
+    const nomeLower = String(info?.name || '').toLowerCase();
+    const bold = !!info?.bold || /bold|\bbd\b|black|heavy|semibold/i.test(nomeLower);
+    const italic = !!info?.italic || /italic|oblique|\bit\b|ital/i.test(nomeLower);
+    metaFonte.set(nome, { bold, italic });
+  }
+
+  // 3) Monta itens básicos (ItemPos)
+  const itensBasicos: ItemPos[] = [];
+  for (const it of tc.items as any[]) {
+    if (!('str' in it) || it.str === '') continue;
+    const t = mul(vt, it.transform as Mat);
+    const tam = Math.hypot(t[2], t[3]);
+    if (tam <= 0) continue;
+
+    const meta = metaFonte.get(it.fontName) || { bold: false, italic: false };
+    itensBasicos.push({
+      str: it.str,
+      x0: t[4],
+      x1: t[4] + it.width,
+      yBase: t[5],
+      tamanho: tam,
+      hasEOL: !!it.hasEOL,
+      bold: meta.bold,
+      italic: meta.italic,
+    });
+  }
+
+  if (itensBasicos.length === 0) return [];
+
+  // 4) Detecta tamanho de fonte "base" da página (mediana)
+  const tamanhos = itensBasicos.map(i => i.tamanho).sort((a, b) => a - b);
+  const tamanhoBase = tamanhos[Math.floor(tamanhos.length / 2)];
+
+  // 5) Agrupa em linhas para detectar subscript/superscript relativo à linha
+  const linhas = agruparEmLinhas(itensBasicos);
+
+  // 6) Converte para TrechoComCoordenadas com detecção de sub/super
+  const trechos: TrechoComCoordenadas[] = [];
+  let charOffsetPagina = 0;
+
+  for (const linha of linhas) {
+    // Calcula yBase médio e tamanho médio da linha
+    const yBaseLinha = linha.reduce((s, it) => s + it.yBase, 0) / linha.length;
+    const tamanhoLinha = linha.reduce((s, it) => s + it.tamanho, 0) / linha.length;
+
+    for (const it of linha) {
+      // Detecta subscript: fonte menor (≤70% do tamanho da linha) E deslocado para BAIXO
+      const isSubscript = it.tamanho <= tamanhoLinha * 0.7 && it.yBase > yBaseLinha + tamanhoLinha * 0.15;
+      // Detecta superscript: fonte menor (≤70% do tamanho da linha) E deslocado para CIMA
+      const isSuperscript = it.tamanho <= tamanhoLinha * 0.7 && it.yBase < yBaseLinha - tamanhoLinha * 0.15;
+
+      const trecho: TrechoComCoordenadas = {
+        texto: it.str,
+        pagina: page.pageNumber,
+        x0: it.x0,
+        x1: it.x1,
+        yBase: it.yBase,
+        tamanho: it.tamanho,
+        charInicio: charOffsetPagina,
+        charFim: charOffsetPagina + it.str.length,
+        bold: it.bold,
+        italic: it.italic,
+        subscript: isSubscript,
+        superscript: isSuperscript,
+      };
+      trechos.push(trecho);
+      charOffsetPagina += it.str.length;
+      if (it.hasEOL) charOffsetPagina++; // conta o \n
+    }
+  }
+
+  return trechos;
+}
+
 let _ctxMedida: Ctx | null = null;
 function medir(texto: string, tam: number): number {
   if (!_ctxMedida) _ctxMedida = ctx2d(criarCanvas(1, 1));
@@ -523,6 +641,23 @@ export function construirLinhas(
 export async function extrairLinhas(page: PDFPageProxy, opc: OpcoesSublinhado = {}): Promise<LinhaPDF[]> {
   const [itens, subs] = await Promise.all([extrairItensTexto(page), extrairSublinhados(page)]);
   return construirLinhas(page.pageNumber, itens, subs, opc);
+}
+
+/**
+ * Extrai linhas COM trechos de coordenadas para associação precisa de formatação (Fase A1).
+ * Retorna tanto as LinhaPDF (para compatibilidade) quanto os TrechoComCoordenadas.
+ */
+export async function extrairLinhasComCoordenadas(page: PDFPageProxy, opc: OpcoesSublinhado = {}): Promise<{
+  linhas: LinhaPDF[];
+  trechos: TrechoComCoordenadas[];
+}> {
+  const [itens, subs, trechosCoord] = await Promise.all([
+    extrairItensTexto(page),
+    extrairSublinhados(page),
+    extrairTrechosComCoordenadas(page),
+  ]);
+  const linhas = construirLinhas(page.pageNumber, itens, subs, opc);
+  return { linhas, trechos: trechosCoord };
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -679,6 +814,8 @@ const DEF_IMG: Required<OpcoesImagem> = {
   margemInferior: 0.91,
   tamanhoMinimoPt: 40,
   larguraMaximaRel: 0.95,
+  larguraMaximaPx: 1600,
+  qualidadeMinima: 0.5,
 };
 
 function obterObjeto(page: PDFPageProxy, id: string): Promise<any | null> {
@@ -727,15 +864,46 @@ function redimensionar(c: Cv, fator: number): Cv {
   return n;
 }
 
-async function codificar(canvas: Cv, temAlpha: boolean, maxBytes: number) {
-  let fator = 1, qualidade = 0.9;
-  let tipo = temAlpha ? 'image/png' : 'image/webp';
-  for (let t = 0; t < 14; t++) {
-    const c = fator === 1 ? canvas : redimensionar(canvas, fator);
-    let blob = await paraBlob(c, tipo, qualidade);
-    if (blob && tipo === 'image/webp' && blob.type !== 'image/webp') { tipo = 'image/jpeg'; blob = await paraBlob(c, tipo, qualidade); }
-    if (blob && blob.size <= maxBytes) return { blob, largura: c.width, altura: c.height };
-    if (!temAlpha && qualidade > 0.55) qualidade -= 0.1; else fator *= 0.8;
+async function codificar(
+  canvas: Cv,
+  temAlpha: boolean,
+  maxBytes: number,
+  larguraMaximaPx: number,
+  qualidadeMinima: number,
+): Promise<{ blob: Blob; largura: number; altura: number } | null> {
+  // 1) Primeiro, redimensiona se largura excede o máximo
+  let c = canvas;
+  if (c.width > larguraMaximaPx) {
+    const fator = larguraMaximaPx / c.width;
+    c = redimensionar(canvas, fator);
+  }
+
+  let fator = 1;
+  // Qualidade inicial 0.85 para JPEG, 0.9 para WebP/PNG
+  let qualidade = temAlpha ? 0.9 : 0.85;
+  let tipo = temAlpha ? 'image/png' : 'image/jpeg';
+
+  for (let t = 0; t < 20; t++) {
+    const canvasAtual = fator === 1 ? c : redimensionar(c, fator);
+    let blob = await paraBlob(canvasAtual, tipo, qualidade);
+
+    // Se WebP não suportado, cai para JPEG
+    if (blob && tipo === 'image/webp' && blob.type !== 'image/webp') {
+      tipo = 'image/jpeg';
+      blob = await paraBlob(canvasAtual, tipo, qualidade);
+    }
+
+    if (blob && blob.size <= maxBytes) {
+      return { blob, largura: canvasAtual.width, altura: canvasAtual.height };
+    }
+
+    // Reduz qualidade até o mínimo, depois reduz escala
+    if (!temAlpha && qualidade > qualidadeMinima) {
+      qualidade -= 0.05;
+    } else {
+      fator *= 0.85;
+      if (fator < 0.1) break; // não reduz indefinidamente
+    }
   }
   return null;
 }
@@ -776,7 +944,7 @@ export async function extrairImagens(page: PDFPageProxy, opc: OpcoesImagem = {})
     if (!dados) continue;
     const conv = imagemParaCanvas(dados);
     if (!conv || conv.canvas.width < 16 || conv.canvas.height < 16) continue;
-    const enc = await codificar(conv.canvas, conv.temAlpha, o.maxBytes);
+    const enc = await codificar(conv.canvas, conv.temAlpha, o.maxBytes, o.larguraMaximaPx, o.qualidadeMinima);
     if (!enc) continue;
 
     saida.push({
@@ -797,12 +965,37 @@ export function removerDecorativas(imagens: ImagemExtraida[], minPaginas = 3): I
   return imagens.filter((i) => paginasPorHash.get(i.hash)!.size < minPaginas);
 }
 
+export interface AssociarImagemResultado {
+  mapa: Map<number, ImagemExtraida[]>;
+  avisos: string[];
+}
+
+/**
+ * Associa imagens às questões. Se uma imagem estiver entre duas alternativas,
+ * registra a letra da alternativa anterior no campo opcional `alternativaAntes`.
+ */
 export function associarImagemAQuestao(
-  imagens: ImagemExtraida[], questoes: FaixaQuestao[],
-): Map<number, ImagemExtraida[]> {
+  imagens: ImagemExtraida[],
+  questoes: FaixaQuestao[],
+  linhas?: LinhaPDF[], // para detectar alternativas
+): AssociarImagemResultado {
+  const avisos: string[] = [];
   const mapa = new Map<number, ImagemExtraida[]>();
-  if (!questoes.length) return mapa;
+  if (!questoes.length) return { mapa, avisos };
   const ordenadas = [...questoes].sort((a, b) => a.posInicio - b.posInicio);
+
+  // Se temos linhas, detecta posições das alternativas (A), B), etc.)
+  const alternativasPorQuestao = new Map<number, { letra: 'A' | 'B' | 'C' | 'D' | 'E'; posGlobal: number }[]>();
+  if (linhas) {
+    for (const l of linhas) {
+      const match = l.texto.match(/^([A-E])\)\s/);
+      if (match) {
+        const letra = match[1] as 'A' | 'B' | 'C' | 'D' | 'E';
+        if (!alternativasPorQuestao.has(l.pagina)) alternativasPorQuestao.set(l.pagina, []);
+        alternativasPorQuestao.get(l.pagina)!.push({ letra, posGlobal: l.pos });
+      }
+    }
+  }
 
   const porHash = new Map<string, ImagemExtraida[]>();
   for (const img of imagens) {
@@ -812,20 +1005,41 @@ export function associarImagemAQuestao(
 
   for (const grupo of porHash.values()) {
     const ordenado = [...grupo].sort((a, b) => a.posGlobal - b.posGlobal);
-    let escolhida: { img: ImagemExtraida; alvo: FaixaQuestao } | null = null;
     for (const img of ordenado) {
       const alvo = ordenadas.find(
         (q) => img.posGlobal >= q.posInicio && img.posGlobal < q.posFim
       );
-      if (alvo) { escolhida = { img, alvo }; break; }
+      if (!alvo) continue;
+
+      // Detecta se a imagem está entre duas alternativas
+      const altsPagina = alternativasPorQuestao.get(img.pagina) || [];
+      let altAnterior: { letra: 'A' | 'B' | 'C' | 'D' | 'E'; posGlobal: number } | null = null;
+      for (const alt of altsPagina) {
+        if (alt.posGlobal < img.posGlobal) {
+          altAnterior = alt;
+        } else {
+          break;
+        }
+      }
+
+      // Se há uma alternativa anterior E a próxima alternativa está logo depois da imagem,
+      // considera que a imagem está entre alternativas
+      if (altAnterior) {
+        const idxAlt = altsPagina.findIndex(a => a.letra === altAnterior.letra);
+        const proximaAlt = idxAlt >= 0 ? altsPagina[idxAlt + 1] : null;
+        if (proximaAlt && img.posGlobal > altAnterior.posGlobal && img.posGlobal < proximaAlt.posGlobal) {
+          img.alternativaAntes = altAnterior.letra;
+          avisos.push(`Imagem na Q${alvo.numero} entre alternativas ${altAnterior.letra} e ${proximaAlt.letra}`);
+        }
+      }
+
+      if (!mapa.has(alvo.numero)) mapa.set(alvo.numero, []);
+      mapa.get(alvo.numero)!.push(img);
+      break; // usa apenas a primeira imagem do grupo (mais próxima do início da questão)
     }
-    if (!escolhida) continue;
-    const { img, alvo } = escolhida;
-    if (!mapa.has(alvo.numero)) mapa.set(alvo.numero, []);
-    mapa.get(alvo.numero)!.push(img);
   }
 
-  return mapa;
+  return { mapa, avisos };
 }
 
 export function nomeArquivoImagem(numeroQuestao: number, indice: number, mime: string, prefixo = 'q'): string {
@@ -849,7 +1063,7 @@ export async function renderizarRegiao(
   x.fillStyle = '#fff';
   x.fillRect(0, 0, c.width, c.height);
   await page.render({ canvasContext: x, canvas: c, viewport: vp, transform: [1, 0, 0, 1, -rx, -ry] } as any).promise;
-  const enc = await codificar(c, false, DEF_IMG.maxBytes);
+  const enc = await codificar(c, false, DEF_IMG.maxBytes, DEF_IMG.larguraMaximaPx, DEF_IMG.qualidadeMinima);
   return enc ? { blob: enc.blob, largura: enc.largura, altura: enc.altura } : null;
 }
 
@@ -945,7 +1159,7 @@ export async function extrairRegioesVetoriais(
     cctx.fillRect(0, 0, cw, ch);
     cctx.drawImage(full as any, cx, cy, cw, ch, 0, 0, cw, ch);
 
-    const enc = await codificar(crop, false, DEF_IMG.maxBytes);
+    const enc = await codificar(crop, false, DEF_IMG.maxBytes, DEF_IMG.larguraMaximaPx, DEF_IMG.qualidadeMinima);
     if (!enc) continue;
     const bmp = await createImageBitmap(enc.blob);
     const cvH = criarCanvas(bmp.width, bmp.height);
@@ -986,7 +1200,7 @@ async function juntarVerticais(
   ctx.drawImage(bmpA, ax, 0);
   ctx.drawImage(bmpB, bx, bmpA.height + gapPx);
 
-  const enc = await codificar(canvas, false, DEF_IMG.maxBytes);
+  const enc = await codificar(canvas, false, DEF_IMG.maxBytes, DEF_IMG.larguraMaximaPx, DEF_IMG.qualidadeMinima);
   if (!enc) throw new Error('falha ao codificar imagem juntada');
 
   return {

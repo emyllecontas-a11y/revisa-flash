@@ -1,0 +1,209 @@
+============================================================
+RELATÓRIO FASE 1 — INVESTIGAÇÃO DE ESQUEMAS
+Registro Automático Plano → Agenda + Horas Efetivas vs Planejadas
+Data: 2026-11-21
+============================================================
+
+------------------------------------------------------------
+1. SCHEMA DE study_records (RxDB + Supabase)
+------------------------------------------------------------
+Fonte: src/lib/db.ts (studyRecordSchema, versão 0) + StudyContext.tsx
+
+Colunas:
+- id: string (PK, gerado por uid())
+- user_id: string (Clerk user_id, ex: "user_abc123")
+- date: string (ISO date "YYYY-MM-DD")
+- type: string ("teorico" | "pratico")
+- discipline: string (nome da disciplina, ex: "Direito Constitucional")
+- topic: string (nome do tópico/subtópico, ex: "Direitos Fundamentais")
+- duration: number (minutos, inteiro)
+- material: string (opcional, apenas tipo "teorico")
+- questionsCount: number (opcional, apenas tipo "pratico")
+- correctCount: number (opcional, apenas tipo "pratico")
+- wrongCount: number (opcional, apenas tipo "pratico")
+- source: string (opcional, ex: "manual", "simulado", "lista")
+- observations: string (opcional)
+- createdAt: string (ISO timestamp)
+- updated_at: string (ISO timestamp)
+- isDeleted: boolean (default false, soft delete)
+
+Observações:
+- A tabela no Supabase usa RPC `salvar_study_records_batch` para upsert em lote (onConflict: id).
+- Não há coluna `auto_generated` nem ligação com ocorrências do Plano de Estudos.
+- O StudyContext (Agenda) usa `addRecord`/`editRecord`/`deleteRecord` que chamam a RPC diretamente.
+- Listener reativo em `db.collections.study_records.$.subscribe()` recarrega automaticamente.
+
+------------------------------------------------------------
+2. SCHEMA DE study_occurrences (RxDB + Supabase)
+------------------------------------------------------------
+Fonte: src/lib/db.ts (studyOccurrenceSchema, versão 0) + supabase/migrations/20261119_create_study_plan.sql
+
+Colunas relevantes:
+- id: uuid (PK)
+- user_id: text (Supabase auth.jwt()->>'sub')
+- source_type: text ('block' | 'extra') — origem da ocorrência
+- source_id: uuid — ID do weekly_block ou extra_event que gerou
+- occurrence_date: date — data específica da ocorrência (YYYY-MM-DD)
+- start_time: time — HH:MM:SS
+- end_time: time — HH:MM:SS
+- task_id: uuid (FK → study_tasks, denormalizado)
+- task_name: text (denormalizado)
+- task_color: text (denormalizado)
+- task_activity_type: text ('theory'|'questions'|'review'|'cards'|'exam'|'break'|'other')
+- theme: text — tema resolvido (baseado em theme_rule + theme_timeline)
+- status: text ('pending' | 'done' | 'missed')
+- override_theme: text (nullable, override manual do tema)
+- created_at: timestamptz
+- updated_at: timestamptz
+- is_deleted: boolean (default false)
+
+Índices únicos/importantes:
+- idx_study_occurrences_user_date (user_id, occurrence_date)
+- idx_study_occurrences_source (source_type, source_id)
+- idx_study_occurrences_user_status (user_id, status)
+
+Chave composta natural de negócio: (user_id, source_type, source_id, occurrence_date)
+→ Usada em `upsertOccurrenceOverride` para evitar duplicatas.
+
+------------------------------------------------------------
+3. queueService.ts — UPSERT_CONFLICT
+------------------------------------------------------------
+Fonte: src/services/queueService.ts
+
+Mapa atual:
+```typescript
+const UPSERT_CONFLICT: Record<string, string> = {
+  progresso_simulado: 'simulado_id,user_id',
+  progresso_lista: 'lista_id,user_id',
+};
+```
+
+**study_records NÃO está no mapa** → usa upsert simples por `id` (PK).
+**study_occurrences NÃO está no mapa** → usa upsert simples por `id` (PK).
+
+Implicação: para ligação occurrence ↔ record, não podemos confiar em UPSERT_CONFLICT; precisamos de lógica explícita no service.
+
+------------------------------------------------------------
+4. study_tasks (Biblioteca) — Ligação com Agenda
+------------------------------------------------------------
+Fonte: src/types/study-plan.ts + migration
+
+Campos relevantes:
+- id: uuid (PK)
+- name: string (ex: "Teoria - Direito Constitucional")
+- activity_type: ActivityType ('theory'|'questions'|'review'|'cards'|'exam'|'break'|'other')
+- color: string (hex)
+- theme_rule: ThemeRule ('period'|'all'|'none')
+- default_duration_min: number
+
+A ocorrência (study_occurrences) já denormaliza: task_id, task_name, task_color, task_activity_type.
+O StudyTask define o "tipo de atividade" que mapeia para a Agenda:
+- theory → tipo "teorico" na Agenda
+- questions/review/cards/exam → tipo "pratico" na Agenda
+- break/other → não gera registro automático (ou "outro")
+
+Mapeamento ACTIVITY_TYPE_ROUTE_MAP (types/study-plan.ts):
+- theory: '/aulas'
+- questions: '/erros'
+- review: '/flashcards'
+- cards: '/flashcards'
+- exam: '/simulados'
+- break: null
+- other: null
+
+------------------------------------------------------------
+5. PROPOSTA DE LIGAÇÃO occurrence ↔ record
+------------------------------------------------------------
+
+Opção A — Chave estrangeira composta em study_records (RECOMENDADA)
+Adicionar colunas em study_records:
+- occurrence_source_type: text ('block' | 'extra')
+- occurrence_source_id: uuid
+- occurrence_date: date
+- auto_generated: boolean (default false)
+
+Chave de negócio para "mesma ocorrência": (user_id, occurrence_source_type, occurrence_source_id, occurrence_date)
+→ Única por ocorrência do Plano.
+
+Vantagens:
+- Permite upsert idempotente: mesmo occurrence gera/atualiza mesmo record.
+- Fácil query: "registros automáticos desta ocorrência" = filtro pelas 3 colunas.
+- Não quebra registros manuais existentes (auto_generated=false).
+
+Opção B — Tabela de ligação separada (study_occurrence_records)
+- Overkill para 1:1; adiciona complexidade de join.
+
+Opção C — Apenas occurrence_id (FK para study_occurrences.id)
+- Problema: study_occurrences pode ser recriada (nova versão da série) → id muda.
+- A chave composta (source_type, source_id, occurrence_date) é estável.
+
+DECISÃO: **Opção A** (colunas compostas + auto_generated).
+
+------------------------------------------------------------
+6. PROPOSTA DE COLUNA auto_generated
+------------------------------------------------------------
+
+**SIM, necessária.** Justificativa:
+- Requisito M1: "Não sobrescrever registros manuais".
+- Ao marcar ocorrência como 'done', criar record com auto_generated=true.
+- Ao desmarcar, remover APENAS records com auto_generated=true para aquela ocorrência.
+- Se usuário criou registro manual no mesmo dia/tópico (auto_generated=false), ele permanece intocado.
+- Permite UI futura: badge "Automático" vs "Manual", filtros, auditoria.
+
+Tipo: boolean, default false.
+Migração: `ALTER TABLE study_records ADD COLUMN auto_generated boolean DEFAULT false;`
+RxDB: bump version do schema studyRecordSchema (atual v0 → v1) + migration strategy se necessário.
+
+------------------------------------------------------------
+7. RISCOS IDENTIFICADOS
+------------------------------------------------------------
+1. **Sobrescrita acidental de registro manual**
+   - Mitigação: antes de upsert automático, verificar se existe record manual (auto_generated=false) para mesma (user_id, date, discipline, topic). Se existir, NÃO criar/atualizar automático.
+
+2. **Duplicatas por race condition (offline → online)**
+   - Mitigação: upsert por chave composta (user_id, occurrence_source_type, occurrence_source_id, occurrence_date) no service; RxDB primaryKey continua sendo `id` (uuid), mas query de existência usa a composta.
+
+3. **Pausas (ETAPA 7) suprimem ocorrências**
+   - studyPlanService já filtra ocorrências em pausa (isDeleted=true ou status suprimido).
+   - Regra: ocorrência suprimida NÃO aparece no hub → não pode ser marcada → não gera record. OK.
+
+4. **Overrides de ocorrência (ETAPA 6) alteram start_time/end_time/tema**
+   - Ao criar record automático, usar os valores ATUAIS da ocorrência (override_theme, start_time, end_time).
+   - Se override posterior mudar duração, recalcular record no próximo toggle.
+
+5. **Migração de schema RxDB (studyRecordSchema v0 → v1)**
+   - RxDB requer migration strategy para schema version bump.
+   - Campos novos são opcionais (nullable) → compatível com docs existentes.
+   - Estratégia: bump version para 1, adicionar migration function que preenche defaults.
+
+6. **Agenda (calendario.tsx) intocada**
+   - Regra de ouro: UI da Agenda (visao==="agenda") NÃO muda.
+   - Apenas service/studyPlanService cria records; StudyContext continua funcionando igual.
+
+------------------------------------------------------------
+8. RECOMENDAÇÃO FINAL
+------------------------------------------------------------
+**SEGUIR** com a implementação conforme planejado:
+
+Fase 2 (Esquema):
+1. Migração SQL aditiva para study_records: adicionar 4 colunas (occurrence_source_type, occurrence_source_id, occurrence_date, auto_generated).
+2. Atualizar RxDB studyRecordSchema version 0→1 + migration strategy.
+3. Atualizar queueService UPSERT_CONFLICT se necessário (provavelmente não, pois upsert por id funciona; a lógica de dedup fica no service).
+
+Fase 3 (Registro Automático):
+1. studyPlanService.createAutoStudyRecord / removeAutoStudyRecord.
+2. Integrar em setOccurrenceStatus: status==='done' → create; status!=='done' → remove.
+3. Lógica idempotente + preservação de manual.
+
+Fase 4 (Horas Efetivas):
+1. getStudyStatistics(userId, startDate, endDate) em studyPlanService.
+2. Hook useStudyStatistics reativo.
+3. UI na aba "Visão geral" do StudyPlanHub: cards de Aderência (efetivas/planejadas), dias com atividade.
+
+Fase 5 (Testes):
+- Vitest para registro automático + estatísticas.
+- Manter 63 testes existentes verdes.
+
+============================================================
+FIM DO RELATÓRIO FASE 1
+============================================================

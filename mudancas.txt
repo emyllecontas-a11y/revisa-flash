@@ -1,0 +1,48 @@
+ D diff-5-6.txt
+ D diff-aulaplayer.txt
+ D diff-videooffline.txt
+ M package-lock.json
+ M package.json
+ D relatorio-5-6.md
+ D relatorio-blocoA.md
+ D relatorio-blocoB.md
+ D relatorio-cache-aulas.md
+ D relatorio-correcao1.md
+ D relatorio-correcao2.md
+ D relatorio-correcao3.md
+ D relatorio-leitura-offline.md
+ D relatorio-parte0.md
+ D relatorio-parte1.md
+ D relatorio-parte1b.md
+ D relatorio-parte1c.md
+ D relatorio-player-offline.md
+ D relatorio-upload.md
+ D relatorio-upload2.md
+ D relatorio-verificacao.md
+ D relatorio-videooffline-c7.md
+ D relatorio-videooffline-correcao.md
+ D saida-build.txt
+ D saida-eslint-aulaservice.txt
+ D saida-eslint-aulaspage.txt
+ D saida-eslint-outros.txt
+ D saida-eslint.txt
+ D saida-tsc.txt
+ M src/components/RevisarImportacaoPdfModal.tsx
+ M src/lib/db.ts
+ M src/services/pdfExtracaoAvancada.ts
+ M src/services/pdfExtrasService.ts
+ M src/services/pdfImportService.ts
+?? .qwen/projects/
+?? build-log.txt
+?? debug-test.mjs
+?? mudancas.txt
+?? src/components/study-plan/
+?? src/hooks/useStudyTasks.ts
+?? src/hooks/useThemeTimeline.ts
+?? src/hooks/useWeekSchedule.ts
+?? src/services/studyPlanService.ts
+?? src/types/
+?? src/utils/generateWeekSchedule.test.ts
+?? src/utils/generateWeekSchedule.ts
+?? supabase/migrations/20261119_create_study_plan.sql
+?? tsc_output.txt

@@ -126,7 +126,9 @@ export function RevisarImportacaoPdfModal({
         const assoc = associarExtras(
           resultado.questoes,
           extracao.linhas,
-          extracao.imagens
+          extracao.imagens,
+          extracao.trechos,
+          extracao.sublinhadosBrutos
         );
 
         setExtracao(extracao);
@@ -258,7 +260,9 @@ export function RevisarImportacaoPdfModal({
           negritos_comentario: q.negritos_comentario,
           italicos_enunciado: q.italicos_enunciado,
           italicos_comentario: q.italicos_comentario,
-          alternativas: q.tipo === 'multipla_escolha' ? q.alternativas : undefined,
+          alternativas: q.tipo === 'multipla_escolha' && q.alternativas
+            ? q.alternativas.map((a) => ({ ...a, comentario: a.comentario ?? undefined }))
+            : undefined,
           correta: q.tipo === 'certo_errado' ? q.correta : undefined,
         }));
 

@@ -1,0 +1,162 @@
+# RELATÓRIO DE TRIAGEM — 83 ERROS TSC EM 26 ARQUIVOS
+# Gerado em: 2026-11-21
+# Comando: npx tsc --noEmit (executado uma vez, somente leitura)
+# Regras: FASE 1 = SOMENTE DIAGNÓSTICO, NÃO EDITAR NENHUM ARQUIVO
+
+---
+
+## 1. TABELA DE TRIAGEM COMPLETA
+
+| Arquivo | Erros | Cat. | Severidade | Runtime? | Esforço | Quick-win? | Observação |
+|---------|-------|------|------------|----------|---------|------------|------------|
+| src/routes/login.tsx | 17 | C | Alta | Sim | G | Não | Clerk v6 API mudou (isLoaded, setActive, authenticateWithRedirect, selectFirstFactor, prepareSecondFactor, attemptSecondFactor, status, createdSessionId, supportedSecondFactors). REVISAR COM CUIDADO — fluxo de auth inteiro |
+| src/routes/cadastro.tsx | 5 | C | Alta | Sim | G | Não | Mesmo problema Clerk v6 (isLoaded, setActive, authenticateWithRedirect, prepareEmailAddressVerification, attemptEmailAddressVerification). REVISAR COM CUIDADO |
+| src/services/listaService.ts | 9 | A+B | Alta | Sim | M | Parcial | CHUNK_SIZE não existe (linhas 1486-1492) → loop quebra em runtime. data/error em unknown é só tipagem (withTimeout retorna unknown). |
+| src/services/pdfExtracaoAvancada.ts | 8 | A+B | Alta | Sim | M | Cuidado | Linha 1030: img.posGlobal > altAnterior — posGlobal é string, altAnterior é number → comparação lexicográfica errada em runtime. Implicit any nas linhas 1095-1118 são ruído. |
+| src/services/queueService.ts | 1 | A | Alta | Sim | P | Sim | Chave duplicada progresso_lista: 'id' (linha 27) → sobrescreve propriedade anterior. Bug real de lógica de fila. |
+| src/services/topicService.ts | 1 | A | Alta | Sim | P | Sim | id: rev.id + ...reviewData → id sobrescrito se reviewData tiver id. Bug real. |
+| src/hooks/useSimulado.ts | 1 | A | Alta | Sim | P | Sim | finalizarSimulado chamado com 3 args, mas exige 5 (falta respostas e tempo_gasto). Crash em runtime. |
+| src/components/ShareDialog.tsx | 1 | D | Média | Sim | P | Sim | Record<ShareItemType> falta caderno_banco. Chave obrigatória ausente → erro se tipo for usado. |
+| src/routes/index.tsx | 1 | D | Média | Sim | P | Sim | <PlanoDiaCard /> sem onAbrirGerenciamento (prop obrigatória). Quebra se componente chamar a função. |
+| src/components/CadernoRevisao.tsx | 5 | D | Média | Sim | M | Sim | QuestaoBanco não exportado do cadernoService; 'caderno' vs QuestaoOrigem; onGrifar assinatura incompatível (5 vs 4 args). Contratos entre arquivos. |
+| src/components/ranking/RankingTab.tsx | 2 | D | Média | Incerto | P | Sim | RankingUser.coroa é string|null mas RankingParticipant.coroa é CrownType|null. Cast ou ajuste de tipo. |
+| src/components/RevisarImportacaoPdfModal.tsx | 1 | D | Média | Incerto | P | Sim | AlternativaLista.comentario é string|null vs AlternativaImport.comentario string|undefined. Null vs undefined. |
+| src/components/CriarFlashcardAulaModal.tsx | 1 | D | Baixa | Não | P | Sim | useToast() não tem showToast — API mudou. Só tipagem, não quebra runtime se não usado. |
+| src/contexts/FlashcardContext.tsx | 4 | B+D | Baixa | Não | M | Sim | Implicit any (linhas 359, 360, 1583) + dueDate: string|null vs string no Card. Ruído + contrato pequeno. |
+| src/routes/flashcards.tsx | 12 | B | Baixa | Não | M | Sim | RefObject<HTMLTextAreaElement|null> vs RefObject<HTMLTextAreaElement>. Puro ruído de tipagem (ref pode ser null). |
+| src/routes/listas.$id.tsx | 1 | B | Baixa | Não | P | Sim | gabarito_ce: boolean|null vs boolean|undefined. Null vs undefined. |
+| src/hooks/useFSRS.ts | 1 | B | Baixa | Não | P | Sim | new Date(c.due) onde due pode ser null. Guard necessário, mas new Date(null) → Invalid Date não crasha. |
+| src/contexts/UserContext.tsx | 1 | B | Baixa | Não | P | Sim | isSignedIn é boolean|undefined vs boolean. Guard !!isSignedIn resolve. |
+| src/routes/calendario.tsx | 2 | B | Baixa | Não | P | Sim | novaRevisao implicit any. Inicializar como null tipado resolve. |
+| src/services/rankingService.ts | 1 | B | Baixa | Não | P | Sim | Implicit any no h do map. Tipar parâmetro resolve. |
+| src/services/pdfExtrasService.ts | 1 | B/D | Baixa | Incerto | P | Sim | sublinhados não tem pagina — tipo incompleto. Verificar se campo existe no dado real. |
+| src/routes/compartilhados.tsx | 1 | B/D | Baixa | Incerto | P | Sim | destino.novoTopicoNome não existe em ResultadoEscolha. Verificar se campo existe no backend. |
+| src/routes/conteudo.tsx | 2 | B | Baixa | Não | P | Sim | new Date(a.createdAt) - new Date(b.createdAt) — Date vira number em arithmetic coercion. Funciona em runtime. |
+| src/client.tsx | 1 | C | Média | Incerto | P | Cuidado | fallbackRedirectUrl → signInFallbackRedirectUrl no Clerk v6. Mudança de prop, baixo risco se não usada. |
+| src/router.tsx | 1 | C | Baixa | Não | P | Sim | colorText não existe em Variables (React Router). Remover ou usar variável CSS válida. |
+| vite.config.ts | 2 | C | Baixa | Não | P | Sim | builder: 'rollup' e ssr: false não são opções válidas de defineConfig no Vite 5+. Config legada/incorreta. |
+
+**Total: 83 erros em 26 arquivos**
+
+---
+
+## 2. LISTA PRIORIZADA — O QUE VALE A PENA CONSERTAR AGORA
+
+### 🟢 ONDA 1 — BUGS REAIS (Categoria A) — Correção obrigatória, risco de runtime
+
+| Prioridade | Arquivo:Linha | Problema Real | Fix Sugerido |
+|------------|---------------|---------------|--------------|
+| 1 | src/hooks/useSimulado.ts:303 | finalizarSimulado chamado com 3 args, precisa 5 (respostas, tempo_gasto faltando) | Passar args corretos — crash certo em runtime |
+| 2 | src/services/listaService.ts:1486-1492 | CHUNK_SIZE não declarado → ReferenceError no loop de reparo | Declarar const CHUNK_SIZE = 100 (ou valor usado) |
+| 3 | src/services/pdfExtracaoAvancada.ts:1030 | img.posGlobal (string) > altAnterior (number) → comparação lexicográfica errada | Converter posGlobal para number: Number(img.posGlobal) |
+| 4 | src/services/queueService.ts:27 | Chave duplicada progresso_lista: 'id' sobrescreve anterior | Remover duplicata — verificar qual id é o correto |
+| 5 | src/services/topicService.ts:219-220 | id: rev.id + ...reviewData → id sobrescrito se reviewData.id existe | Mover id depois do spread ou renomear |
+
+---
+
+### 🟡 ONDA 2 — CONTRATOS ENTRE ARQUIVOS (Categoria D) — Correções pequenas e localizadas
+
+| Prioridade | Arquivo:Linha | Problema | Fix Sugerido |
+|------------|---------------|----------|--------------|
+| 6 | src/components/ShareDialog.tsx:42 | Record<ShareItemType> falta caderno_banco | Adicionar caderno_banco: 'Caderno do Banco' no objeto |
+| 7 | src/routes/index.tsx:321 | <PlanoDiaCard /> sem onAbrirGerenciamento | Passar onAbrirGerenciamento={() => ...} ou tornar prop opcional |
+| 8 | src/components/CadernoRevisao.tsx:13,38,92,102,404 | QuestaoBanco não exportado; 'caderno' vs QuestaoOrigem; onGrifar 5 vs 4 args | Exportar tipo do bancoQuestoesService; ajustar literal type; alinhar assinatura |
+| 9 | src/components/ranking/RankingTab.tsx:97,99 | coroa: string vs CrownType | Cast as CrownType ou estender tipo |
+| 10 | src/components/RevisarImportacaoPdfModal.tsx:250 | comentario: string|null vs string|undefined | Normalizar null → undefined no map |
+| 11 | src/components/CriarFlashcardAulaModal.tsx:16 | useToast() sem showToast | Usar toast.success/error direto ou verificar API do toast |
+
+---
+
+### 🔵 ONDA 3 — RUÍDO DE TIPOS OPCIONAL (Categoria B) — Limpeza, sem risco de runtime
+
+| Arquivo | Erros | Fix Rápido |
+|---------|-------|------------|
+| src/routes/flashcards.tsx | 12 | Tipar refs como RefObject<HTMLTextAreaElement \| null> na função applyFormatting |
+| src/contexts/FlashcardContext.tsx | 4 | Tipar params d, c, id; ajustar dueDate no Card type para string \| null |
+| src/hooks/useFSRS.ts:82 | 1 | Guard: c.due ? new Date(c.due) <= new Date() : false |
+| src/contexts/UserContext.tsx:95 | 1 | isSignedIn = !!isSignedIn ou isSignedIn ?? false |
+| src/routes/calendario.tsx:225,238 | 2 | let novaRevisao: TipoRevisao \| null = null |
+| src/services/rankingService.ts:273 | 1 | historico?.map((h: HistoricalItem) => ...) |
+| src/routes/listas.$id.tsx:522 | 1 | gabarito_ce: q.tipo === 'certo_errado' ? q.gabarito_ce ?? undefined : undefined |
+| src/routes/conteudo.tsx:181 | 2 | Number(new Date(a.createdAt)) - Number(new Date(b.createdAt)) ou (+new Date(...)) |
+| src/services/pdfExtrasService.ts:125 | 1 | Verificar se sublinhados tem pagina no runtime; se não, remover filtro ou tipar any |
+| src/routes/compartilhados.tsx:433 | 1 | Verificar se ResultadoEscolha tem novoTopicoNome no backend; se não, remover uso |
+
+---
+
+### 🔴 ONDA 4 — DESCASAMENTO DE DEPENDÊNCIA/CONFIG (Categoria C) — Deferir / Planejar Upgrade
+
+| Arquivo | Problema | Ação |
+|---------|----------|------|
+| src/routes/login.tsx (17 erros) | Clerk v6 API breaking changes | NÃO AUTO-CORRIGIR. Requer reescrita do fluxo de auth seguindo docs Clerk v6. Planejar migração dedicada. |
+| src/routes/cadastro.tsx (5 erros) | Clerk v6 API breaking changes | Mesmo acima — revisar com cuidado, não auto-corrigir. |
+| src/client.tsx:249 | fallbackRedirectUrl → signInFallbackRedirectUrl | Mudança simples de prop, mas testar login após. |
+| src/router.tsx:68 | colorText inválido em Variables | Remover ou mover para CSS custom properties. |
+| vite.config.ts:21,26 | builder e ssr não são opções válidas | Remover linhas 21 e 26 — Vite 5+ usa config diferente. |
+
+---
+
+## 3. PLANO DE CORREÇÃO SUGERIDO (ONDAS)
+
+### ONDA 1 — Bugs Reais (5 fixes, ~2h)
+- **Risco**: Alto se não corrigidos (crashes em runtime)
+- **Teste necessário**: Rodar fluxos afetados (simulado, reparo listas, extração PDF, fila sync, tópicos)
+- **Arquivos**: useSimulado.ts, listaService.ts, pdfExtracaoAvancada.ts, queueService.ts, topicService.ts
+
+### ONDA 2 — Contratos (6 fixes, ~1.5h)
+- **Risco**: Médio (quebra se props/tipos usados)
+- **Teste necessário**: Abrir CadernoRevisao, ShareDialog, PlanoDiaCard, RankingTab, RevisarImportacaoPdfModal, CriarFlashcardAulaModal
+- **Arquivos**: 6 componentes
+
+### ONDA 3 — Ruído Opcional (10+ fixes, ~1h)
+- **Risco**: Zero (só tipagem)
+- **Teste necessário**: npx tsc --noEmit verde; smoke test das páginas
+- **Pode ser feito em lote** com edições mecânicas
+
+### ONDA 4 — Deps/Config (4 arquivos, variável)
+- **login/cadastro**: NÃO INICIAR sem plano de migração Clerk v6 — breaking changes amplos, risco de lock-out de usuários
+- **client.tsx, router.tsx, vite.config.ts**: Fixes triviais, podem ir em Onda 3 se quiser
+
+---
+
+## 4. RESUMO EM LINGUAGEM SIMPLES
+
+| Onda | O que resolve | O que você ganha |
+|------|---------------|------------------|
+| **1 — Bugs Reais** | Corrige 5 erros que fazem o app quebrar de verdade (tela branca, função não roda, dado corrompido) | App para de travar no simulado, reparo de listas, extração de PDF, fila de sincronismo e edição de tópicos |
+| **2 — Contratos** | Ajusta 6 encaixes entre componentes (props faltando, tipos que não batem) | Telas param de dar erro de tipo e funcionam como desenhado |
+| **3 — Limpeza** | Remove 30+ avisos de "tipo implícito", "null vs undefined", "ref pode ser null" | TypeScript fica verde (tsc --noEmit passa); CI não reclama mais |
+| **4 — Auth/Config** | NÃO MEXA AGORA. O login/cadastro usa Clerk v6 que mudou tudo. Mexer sem plano pode impedir todo mundo de entrar no app. Config do Vite é só limpeza. | Quando planejar upgrade do Clerk, faz com calma e teste. O resto é cosmético. |
+
+---
+
+## 5. ERROS QUE MUDAM COMPORTAMENTO SE "CONSERTADOS" INGENUAMENTE
+
+**MARCAR COMO: "REVISAR COM CUIDADO, NÃO AUTO-CORRIGIR"**
+
+1. **src/routes/login.tsx** (17 erros) — Clerk v6: isLoaded, setActive, authenticateWithRedirect, selectFirstFactor, prepareSecondFactor, attemptSecondFactor, status, createdSessionId, supportedSecondFactors. Qualquer mudança ingênua quebra o fluxo de login/2FA inteiro.
+
+2. **src/routes/cadastro.tsx** (5 erros) — Clerk v6: isLoaded, setActive, authenticateWithRedirect, prepareEmailAddressVerification, attemptEmailAddressVerification. Mesmo risco acima.
+
+3. **src/services/listaService.ts:1486-1492** — CHUNK_SIZE: se declarar valor errado, muda performance/timeout do reparo de listas.
+
+4. **src/services/pdfExtracaoAvancada.ts:1030** — Comparação string vs number: "fix" ingênuo (ex.: String(altAnterior)) muda semântica da extração de questões.
+
+5. **src/services/queueService.ts:27** — Chave duplicada: remover a errada perde rastreamento de progresso de lista vs progresso geral.
+
+6. **src/hooks/useSimulado.ts:303** — Args faltando: passar dummy values esconde bug real de finalização de simulado.
+
+---
+
+## 6. COMANDO PARA VERIFICAÇÃO PÓS-CORREÇÃO
+
+```bash
+npx tsc --noEmit
+```
+
+Deve retornar "Found 0 errors in 0 files." após ondas 1-3 completas.
+
+---
+
+**FIM DO RELATÓRIO — FASE 1 CONCLUÍDA (SOMENTE DIAGNÓSTICO)**
+**AGUARDANDO DECISÃO: Quais ondas/grupos corrigir?**

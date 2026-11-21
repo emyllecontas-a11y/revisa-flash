@@ -216,8 +216,8 @@ export async function updateTopicStatusAndRevisions(
           const existingDoc = existingDocs.find((d: any) => d.id === rev.id);
           if (existingDoc) {
             await enqueueOperation('update', 'revisoes', {
-              id: rev.id,
               ...reviewData,
+              id: rev.id,
             });
           } else {
             await enqueueOperation('create', 'revisoes', reviewData);

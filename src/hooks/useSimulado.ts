@@ -299,6 +299,12 @@ export function useSimulado(): UseSimuladoReturn {
         tempoDecorrido: progresso.tempo_decorrido,
       };
 
+      // Build areas map from questoes (numero -> area)
+      const areas: Record<number, string> = {};
+      for (const q of questoes) {
+        areas[q.numero] = q.area || '';
+      }
+
       // Salva no banco
       const finalResult = await finalizarSimulado(
         simuladoAtual.id,
@@ -308,7 +314,9 @@ export function useSimulado(): UseSimuladoReturn {
           erros,
           naoRespondidas,
           tempoDecorrido: progresso.tempo_decorrido,
-        }
+        },
+        progresso.respostas,
+        areas
       );
 
       if (!finalResult.success) {

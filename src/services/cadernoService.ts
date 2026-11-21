@@ -2,6 +2,7 @@
 import { getDb } from '@/lib/db';
 import { enqueueOperation } from '@/services/queueService';
 import type { QuestaoBanco } from '@/services/bancoQuestoesService';
+export { type QuestaoBanco } from '@/services/bancoQuestoesService';
 
 export interface CadernoResultado {
   id: string;
@@ -203,11 +204,26 @@ export async function getQuestoesDoCaderno(cadernoId: string): Promise<{ success
   try {
     const db = await getDb();
     const links = await db.caderno_questoes.find({ selector: { caderno_id: cadernoId } }).exec();
+    // Create a map of questao_banco_id -> ordem
+    const ordemMap = new Map<string, number>();
+    for (const link of links) {
+      ordemMap.set(link.get('questao_banco_id'), link.get('ordem') ?? 0);
+    }
     const ids = links.map(l => l.get('questao_banco_id'));
     if (ids.length === 0) return { success: true, data: [] };
 
     const questoes = await db.banco_questoes.find({ selector: { id: { $in: ids }, isdeleted: false } }).exec();
-    const data = questoes.map((d: any) => d.toJSON() as QuestaoBanco);
+    const data = questoes.map((d: any) => {
+      const q = d.toJSON() as QuestaoBanco;
+      // Add numero from ordem and area alias for disciplina
+      return {
+        ...q,
+        numero: ordemMap.get(q.id) ?? 0,
+        area: q.disciplina,
+      };
+    });
+    // Sort by numero (ordem)
+    data.sort((a, b) => (a.numero || 0) - (b.numero || 0));
     return { success: true, data };
   } catch (e: any) {
     return { success: false, error: e?.message || 'Erro ao buscar questões.' };

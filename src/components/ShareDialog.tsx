@@ -37,6 +37,7 @@ const AVISO_POR_TIPO: Partial<Record<ShareItemType, string>> = {
   file: "Só este arquivo será compartilhado.",
   question_list: "Elas poderão responder a lista e ver só os próprios resultados.",
   simulado: "Elas poderão responder o simulado e ver só os próprios resultados.",
+  caderno_banco: "Elas verão as questões do caderno, mas grifos e respostas continuam só de cada uma.",
 };
 
 const NOME_DO_TIPO: Record<ShareItemType, string> = {
@@ -45,6 +46,7 @@ const NOME_DO_TIPO: Record<ShareItemType, string> = {
   file: "arquivo",
   question_list: "lista",
   simulado: "simulado",
+  caderno_banco: "Caderno do Banco",
 };
 
 function displayName(p: { name: string | null; email: string | null }): string {

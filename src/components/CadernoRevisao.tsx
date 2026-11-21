@@ -10,8 +10,9 @@ import { CadernoDetalhesModal } from "./CadernoDetalhesModal";
 import { RelatorioDesempenhoModal } from "./RelatorioDesempenhoModal";
 import { CompartilharCadernoModal } from "./CompartilharCadernoModal";
 import { PlayerLivreModal } from "./PlayerLivreModal";
-import type { Caderno, QuestaoBanco } from "@/services/cadernoService";
+import type { Caderno } from "@/services/cadernoService";
 import type { CadernoResultado, CadernoTentativa } from "@/services/cadernoService";
+import type { QuestaoBanco } from "@/services/bancoQuestoesService";
 
 type Fase = "resumo" | "lista" | "gabarito";
 
@@ -35,12 +36,12 @@ function getAlternativasView(q: QuestaoBanco): AlternativaView[] {
   if (getTipoQuestao(q) === 'certo_errado') {
     return [{ letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' }];
   }
-  return (q.alternativas || []).map(a => ({
+  return (q.alternativas || []).map((a: { letra: string; texto: string; sublinhados?: any; negritos?: any; italicos?: any }) => ({
     letra: a.letra.toUpperCase(),
     texto: a.texto,
-    sublinhados: (a as any).sublinhados,
-    negritos: (a as any).negritos,
-    italicos: (a as any).italicos
+    sublinhados: a.sublinhados,
+    negritos: a.negritos,
+    italicos: a.italicos
   }));
 }
 
@@ -98,7 +99,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleGrifar = useCallback(async (questaoId: string, campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[]) => {
+  const handleGrifar = useCallback(async (campo: CampoAlvo, cor: CorGrifo, texto: string, rects: RectGrifo[], questaoId: string) => {
     const nova = await criarAnotacao(userId, 'caderno', questaoId, campo, cor, texto, rects);
     if (!nova) return;
     setAnotacoes(prev => {
@@ -190,7 +191,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
   const respostasSalvas = resultado.respostas || {};
 
   const qAtual = fase === "gabarito" ? questoes[idxQuestao] : null;
-  const respAtual = qAtual ? respostasSalvas[qAtual.numero] : null;
+  const respAtual = qAtual ? respostasSalvas[qAtual.numero ?? 0] : null;
   const corretaAtual = qAtual ? getCorreta(qAtual) : null;
   const acertouAtual = qAtual && respAtual && corretaAtual ? respAtual.toUpperCase() === corretaAtual.toUpperCase() : false;
 
@@ -327,7 +328,8 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
               <h3 className="mb-3 font-display text-sm font-semibold">Questões do caderno</h3>
               <div className="max-h-[500px] space-y-1.5 overflow-y-auto pr-1">
                 {questoes.map((q, i) => {
-                  const resp = respostasSalvas[q.numero];
+                  const qNum = q.numero ?? 0;
+                  const resp = respostasSalvas[qNum];
                   const correta = getCorreta(q);
                   const acertou = resp === correta;
                   const status = !resp ? "nao-respondida" : acertou ? "acertou" : "errou";
@@ -346,7 +348,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
                       className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border bg-surface/40 px-3 py-2 text-left transition-colors hover:bg-surface"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs font-medium">Questão {q.numero}</div>
+                        <div className="text-xs font-medium">Questão {qNum}</div>
                         <div className="truncate text-[11px] text-muted-foreground">{q.disciplina || q.area || ""}</div>
                       </div>
                       <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pillCls}`}>
@@ -371,7 +373,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
               <button onClick={() => setFase("lista")} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs font-medium text-foreground/70 hover:bg-surface">
                 <ChevronLeft className="h-3.5 w-3.5" /> Voltar à lista
               </button>
-              <div className="text-sm font-semibold">{qAtual.numero} de {total}</div>
+              <div className="text-sm font-semibold">{(qAtual.numero ?? 0)} de {total}</div>
               <div className="flex gap-2">
                 <button onClick={() => { if (idxQuestao > 0) setIdxQuestao(idxQuestao - 1); }} disabled={idxQuestao === 0} className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground/70 hover:bg-surface-2 disabled:opacity-30">
                   <ChevronLeft className="h-4 w-4" /> Anterior
@@ -383,7 +385,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
             </div>
 
             <QuestaoCard
-              numero={qAtual.numero}
+              numero={qAtual.numero ?? 0}
               total={total}
               ano={qAtual.ano}
               area={qAtual.disciplina}
@@ -401,7 +403,7 @@ export function CadernoRevisao({ caderno, userId, onClose, onUpdate }: Props) {
               onSelecionar={() => {}}
               questaoId={qAtual.id}
               anotacoes={anotacoes.get(qAtual.id) ?? []}
-              onGrifar={handleGrifar}
+              onGrifar={(campo, cor, texto, rects) => handleGrifar(campo, cor, texto, rects, qAtual.id)}
               onRemoverGrifo={handleRemoverGrifo}
               onTrocarCorGrifo={handleTrocarCorGrifo}
               grifarAtivo={true}

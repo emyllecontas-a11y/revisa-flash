@@ -1,6 +1,6 @@
 // src/routes/index.tsx
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import {
   Clock, Flame, Target, BookOpen, AlertTriangle, RefreshCw, Loader2, Calendar, Layers
@@ -46,6 +46,11 @@ export default function DashboardPage() {
   const { getTotalErrors } = errorContext;
   const flashcardContext = useFlashcardContext();
   const { dueCards, decks } = flashcardContext;
+
+  const navigate = useNavigate();
+  const handleAbrirGerenciamento = useCallback(() => {
+    navigate("/calendario?subaba=plano");
+  }, [navigate]);
 
   const getSaudacao = () => {
     const hora = new Date().getHours();
@@ -318,7 +323,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
 
         {/* NOVO: Plano de hoje (substitui o checklist manual) */}
-        <PlanoDiaCard />
+        <PlanoDiaCard onAbrirGerenciamento={handleAbrirGerenciamento} />
 
         {/* 🔥 ADICIONADO: data-tour="inicio-flash" */}
         <section className="card-lip p-5 flex flex-col" style={{ '--lip': 'var(--primary)' } as React.CSSProperties} data-tour="inicio-flash">

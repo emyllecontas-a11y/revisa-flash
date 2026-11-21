@@ -1,6 +1,6 @@
 // src/components/ranking/RankingTab.tsx
 import { useState, useEffect } from "react";
-import type { PeriodoTipo, RankingViewState, UserIndicators, Medal } from "./types";
+import type { PeriodoTipo, RankingViewState, UserIndicators, Medal, CrownType } from "./types";
 import { RankingHeader } from "./components/RankingHeader";
 import { UserHighlightCard } from "./components/UserHighlightCard";
 import { Podium } from "./components/Podium";
@@ -11,6 +11,25 @@ import { RankingEmpty, RankingError, RankingSkeleton } from "./components/Rankin
 import { calcularRanking, getIndicadoresReais, getMedalhas, type RankingUser } from "@/services/rankingService";
 import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast"; // Importando seu sistema de notificação
+
+const CROWN_TYPES: readonly CrownType[] = ["ouro", "prata", "bronze", "rubi", "safira", "diamante"];
+
+function toParticipant(u: import("@/services/rankingService").RankingUser): import("./types").RankingParticipant {
+  const coroa = u.coroa && CROWN_TYPES.includes(u.coroa as CrownType) ? (u.coroa as CrownType) : null;
+  return {
+    id: u.id,
+    name: u.name,
+    avatar_url: u.avatar_url,
+    avatar_tipo: u.avatar_tipo,
+    avatar_id: u.avatar_id,
+    pontos: u.pontos,
+    variacao: u.variacao,
+    horasEstudadas: u.horasEstudadas,
+    questoesResolvidas: u.questoesResolvidas,
+    simuladosRealizados: u.simuladosRealizados,
+    coroa,
+  };
+}
 
 export function RankingTab() {
   const { user } = useAppUser();
@@ -94,9 +113,9 @@ export function RankingTab() {
           <UserHighlightCard user={userHighlight as any} />
           
           <div className="grid gap-5">
-            <Podium top={rankingData.slice(0, 3)} currentUserId={user?.id} />
+            <Podium top={rankingData.slice(0, 3).map(toParticipant)} currentUserId={user?.id} />
             {rankingData.length > 3 && (
-              <RankingList participants={rankingData.slice(3)} startAt={4} currentUserId={user?.id} />
+              <RankingList participants={rankingData.slice(3).map(toParticipant)} startAt={4} currentUserId={user?.id} />
             )}
           </div>
 

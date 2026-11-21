@@ -1,6 +1,6 @@
 // src/lib/anotacoes-types.ts
 
-export type QuestaoOrigem = 'lista' | 'simulado';
+export type QuestaoOrigem = 'lista' | 'simulado' | 'caderno';
 
 /** Campo onde o grifo foi feito. Alternativas usam "alternativa_A", "alternativa_B"... */
 export type CampoAlvo =

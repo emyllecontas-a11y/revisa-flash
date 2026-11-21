@@ -1,0 +1,812 @@
+/* ============================================================
+   CSS escopado para componentes do Plano de Estudos (ETAPA 4)
+   Wrapper: .study-plan-scope
+   Não altera CSS global nem design system do app.
+   ============================================================ */
+
+.study-plan-scope {
+  /* Variáveis CSS escopadas */
+  --sp-surface: var(--card, #ffffff);
+  --sp-border: var(--border, #e5e7eb);
+  --sp-muted: var(--muted-foreground, #6b7280);
+  --sp-text: var(--foreground, #111827);
+  --sp-primary: var(--primary, #FE7802);
+  --sp-primary-fg: var(--primary-foreground, #ffffff);
+  --sp-destructive: var(--destructive, #ef4444);
+  --sp-radius: var(--radius, 0.5rem);
+  --sp-radius-lg: var(--radius-lg, 0.75rem);
+  --sp-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --sp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* ============================================================
+   WEEKLY GRID EDITOR (Camada 3)
+   ============================================================ */
+
+.study-plan-scope .weekly-grid-editor {
+  display: flex;
+  gap: 1.5rem;
+  height: calc(100vh - 120px);
+  min-height: 600px;
+}
+
+/* Sidebar esquerda - Biblioteca de tarefas arrastáveis */
+.study-plan-scope .weekly-grid-editor__sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-lg);
+  padding: 1rem;
+  overflow-y: auto;
+  box-shadow: var(--sp-shadow);
+}
+
+.study-plan-scope .weekly-grid-editor__sidebar h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sp-muted);
+  margin-bottom: 0.75rem;
+}
+
+.study-plan-scope .task-draggable {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  margin-bottom: 0.5rem;
+  cursor: grab;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.study-plan-scope .task-draggable:hover {
+  border-color: var(--sp-primary);
+  box-shadow: var(--sp-shadow);
+  transform: translateY(-1px);
+}
+
+.study-plan-scope .task-draggable:active {
+  cursor: grabbing;
+}
+
+.study-plan-scope .task-draggable.dragging {
+  opacity: 0.5;
+  border-color: var(--sp-primary);
+  box-shadow: var(--sp-shadow-lg);
+}
+
+.study-plan-scope .task-draggable__color {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--sp-radius);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.study-plan-scope .task-draggable__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.study-plan-scope .task-draggable__name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--sp-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.study-plan-scope .task-draggable__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--sp-muted);
+  margin-top: 0.25rem;
+}
+
+.study-plan-scope .task-draggable__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Grade principal */
+.study-plan-scope .weekly-grid-editor__grid {
+  flex: 1;
+  min-width: 0;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.study-plan-scope .weekly-grid-editor__header {
+  display: grid;
+  grid-template-columns: 60px repeat(7, 1fr);
+  border-bottom: 1px solid var(--sp-border);
+  background: var(--muted, #f3f4f6);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.study-plan-scope .weekly-grid-editor__time-col {
+  padding: 0.5rem 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--sp-muted);
+  text-align: right;
+  border-right: 1px solid var(--sp-border);
+}
+
+.study-plan-scope .weekly-grid-editor__day-header {
+  padding: 0.5rem;
+  text-align: center;
+  border-right: 1px solid var(--sp-border);
+}
+
+.study-plan-scope .weekly-grid-editor__day-header:last-child {
+  border-right: none;
+}
+
+.study-plan-scope .weekly-grid-editor__day-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--sp-text);
+}
+
+.study-plan-scope .weekly-grid-editor__day-number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--sp-primary);
+  line-height: 1;
+}
+
+.study-plan-scope .weekly-grid-editor__day-today .weekly-grid-editor__day-name,
+.study-plan-scope .weekly-grid-editor__day-today .weekly-grid-editor__day-number {
+  color: var(--sp-primary);
+}
+
+.study-plan-scope .weekly-grid-editor__day-today {
+  background: var(--sp-primary);
+  color: var(--sp-primary-fg);
+}
+
+.study-plan-scope .weekly-grid-editor__day-today .weekly-grid-editor__day-name,
+.study-plan-scope .weekly-grid-editor__day-today .weekly-grid-editor__day-number {
+  color: var(--sp-primary-fg);
+}
+
+.study-plan-scope .weekly-grid-editor__body {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.study-plan-scope .weekly-grid-editor__rows {
+  display: grid;
+  grid-template-columns: 60px repeat(7, 1fr);
+}
+
+.study-plan-scope .weekly-grid-editor__time-label {
+  padding: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--sp-muted);
+  text-align: right;
+  border-right: 1px solid var(--sp-border);
+  border-bottom: 1px solid var(--sp-border);
+  height: 60px; /* 30min slot height */
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.study-plan-scope .weekly-grid-editor__cell {
+  border-right: 1px solid var(--sp-border);
+  border-bottom: 1px solid var(--sp-border);
+  min-height: 60px; /* 30min slot */
+  position: relative;
+  background: var(--sp-surface);
+  transition: background 0.15s ease;
+}
+
+.study-plan-scope .weekly-grid-editor__cell:last-child {
+  border-right: none;
+}
+
+.study-plan-scope .weekly-grid-editor__cell--drop-target {
+  background: var(--sp-primary);
+  opacity: 0.1;
+  border-color: var(--sp-primary);
+}
+
+.study-plan-scope .weekly-grid-editor__cell--past {
+  background: var(--muted, #f3f4f6);
+  opacity: 0.5;
+}
+
+/* Blocos de evento na grade */
+.study-plan-scope .grid-block {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  color: white;
+  cursor: pointer;
+  box-shadow: var(--sp-shadow);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  z-index: 5;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.study-plan-scope .grid-block:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sp-shadow-lg);
+  z-index: 10;
+}
+
+.study-plan-scope .grid-block__name {
+  font-weight: 600;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.study-plan-scope .grid-block__time {
+  font-size: 0.65rem;
+  opacity: 0.9;
+  margin-top: 0.125rem;
+}
+
+.study-plan-scope .grid-block__type {
+  font-size: 0.6rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* Turn labels (manhã/tarde/noite) */
+.study-plan-scope .weekly-grid-editor__shift-label {
+  position: absolute;
+  left: 60px;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
+.study-plan-scope .weekly-grid-editor__shift-label::before {
+  content: attr(data-shift);
+  position: absolute;
+  left: 0.5rem;
+  top: -0.5rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sp-muted);
+  background: var(--sp-surface);
+  padding: 0 0.375rem;
+  border-radius: 9999px;
+}
+
+/* Modal Editar Bloco */
+.study-plan-scope .block-modal {
+  max-width: 480px;
+  width: 100%;
+}
+
+.study-plan-scope .block-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.study-plan-scope .block-modal__title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--sp-text);
+}
+
+.study-plan-scope .block-modal__warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--sp-primary);
+  color: var(--sp-primary-fg);
+  border-radius: var(--sp-radius);
+  font-size: 0.8125rem;
+  margin-bottom: 1rem;
+}
+
+.study-plan-scope .block-modal__warning svg {
+  flex-shrink: 0;
+}
+
+.study-plan-scope .block-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.study-plan-scope .block-modal__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.study-plan-scope .block-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.study-plan-scope .block-modal__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--sp-text);
+}
+
+.study-plan-scope .block-modal__label--required::after {
+  content: '*';
+  color: var(--sp-destructive);
+  margin-left: 0.25rem;
+}
+
+.study-plan-scope .block-modal__input,
+.study-plan-scope .block-modal__select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.study-plan-scope .block-modal__input:focus,
+.study-plan-scope .block-modal__select:focus {
+  outline: none;
+  border-color: var(--sp-primary);
+  box-shadow: 0 0 0 2px var(--sp-primary);
+  opacity: 0.2;
+}
+
+.study-plan-scope .block-modal__weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.study-plan-scope .block-modal__weekday-btn {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.study-plan-scope .block-modal__weekday-btn:hover {
+  border-color: var(--sp-primary);
+}
+
+.study-plan-scope .block-modal__weekday-btn--selected {
+  background: var(--sp-primary);
+  border-color: var(--sp-primary);
+  color: var(--sp-primary-fg);
+}
+
+.study-plan-scope .block-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--sp-border);
+  margin-top: 0.5rem;
+}
+
+/* ============================================================
+   EXCEPTIONS MANAGER (Camada 4)
+   ============================================================ */
+
+.study-plan-scope .exceptions-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.study-plan-scope .exceptions-manager__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.study-plan-scope .exceptions-manager__month-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.study-plan-scope .exceptions-manager__month-btn {
+  padding: 0.5rem;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.study-plan-scope .exceptions-manager__month-btn:hover {
+  border-color: var(--sp-primary);
+  color: var(--sp-primary);
+}
+
+.study-plan-scope .exceptions-manager__month-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--sp-text);
+  min-width: 180px;
+  text-align: center;
+}
+
+/* Tabela "O padrão da semana neste mês" */
+.study-plan-scope .exceptions-manager__pattern-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.study-plan-scope .exceptions-manager__pattern-table th,
+.study-plan-scope .exceptions-manager__pattern-table td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-border);
+  text-align: center;
+}
+
+.study-plan-scope .exceptions-manager__pattern-table th {
+  background: var(--muted, #f3f4f6);
+  font-weight: 600;
+  color: var(--sp-text);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.study-plan-scope .exceptions-manager__pattern-table td:first-child,
+.study-plan-scope .exceptions-manager__pattern-table th:first-child {
+  text-align: left;
+  min-width: 200px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--sp-surface);
+}
+
+.study-plan-scope .exceptions-manager__pattern-table tbody tr:hover td {
+  background: var(--muted, #f3f4f6);
+}
+
+.study-plan-scope .pattern-table__block-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.study-plan-scope .pattern-table__block-color {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.study-plan-scope .pattern-table__cell--scheduled {
+  background: var(--sp-primary);
+  color: var(--sp-primary-fg);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.study-plan-scope .pattern-table__cell--empty {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+/* Formulário "Acrescentar uma tarefa só nestas semanas" */
+.study-plan-scope .exceptions-manager__extra-form {
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-lg);
+  padding: 1.5rem;
+}
+
+.study-plan-scope .exceptions-manager__extra-form h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--sp-text);
+}
+
+.study-plan-scope .exceptions-manager__extra-form .block-modal__row {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.study-plan-scope .exceptions-manager__extra-form .block-modal__weekdays {
+  margin-bottom: 0.5rem;
+}
+
+.study-plan-scope .exceptions-manager__weeks-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.study-plan-scope .exceptions-manager__week-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  background: var(--sp-surface);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.study-plan-scope .exceptions-manager__week-checkbox:hover {
+  border-color: var(--sp-primary);
+}
+
+.study-plan-scope .exceptions-manager__week-checkbox input {
+  accent-color: var(--sp-primary);
+}
+
+/* Lista de extras do mês */
+.study-plan-scope .exceptions-manager__extras-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.study-plan-scope .extra-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+}
+
+.study-plan-scope .extra-item__info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.study-plan-scope .extra-item__color {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.study-plan-scope .extra-item__details {
+  min-width: 0;
+}
+
+.study-plan-scope .extra-item__name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--sp-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.study-plan-scope .extra-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--sp-muted);
+}
+
+.study-plan-scope .extra-item__weeks {
+  font-size: 0.75rem;
+  color: var(--sp-muted);
+}
+
+/* Modal para criar nova tarefa no formulário de extras */
+.study-plan-scope .task-create-modal {
+  max-width: 440px;
+}
+
+.study-plan-scope .task-create-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ============================================================
+   UTILITÁRIOS COMPARTILHADOS
+   ============================================================ */
+
+.study-plan-scope .btn-sun {
+  padding: 0.5rem 1rem;
+  background: var(--sp-primary);
+  color: var(--sp-primary-fg);
+  border: none;
+  border-radius: var(--sp-radius);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.study-plan-scope .btn-sun:hover {
+  opacity: 0.9;
+}
+
+.study-plan-scope .btn-sun:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.study-plan-scope .btn-ghost {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: var(--sp-text);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.study-plan-scope .btn-ghost:hover {
+  background: var(--muted, #f3f4f6);
+  border-color: var(--sp-primary);
+  color: var(--sp-primary);
+}
+
+.study-plan-scope .btn-destructive {
+  padding: 0.5rem 1rem;
+  background: var(--sp-destructive);
+  color: white;
+  border: none;
+  border-radius: var(--sp-radius);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.study-plan-scope .btn-destructive:hover {
+  opacity: 0.9;
+}
+
+/* Scrollbar customizada */
+.study-plan-scope ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.study-plan-scope ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.study-plan-scope ::-webkit-scrollbar-thumb {
+  background: var(--sp-border);
+  border-radius: 4px;
+}
+
+.study-plan-scope ::-webkit-scrollbar-thumb:hover {
+  background: var(--sp-muted);
+}
+
+/* Responsivo */
+@media (max-width: 1024px) {
+  .study-plan-scope .weekly-grid-editor {
+    flex-direction: column;
+  }
+
+  .study-plan-scope .weekly-grid-editor__sidebar {
+    width: 100%;
+    max-height: 200px;
+  }
+
+  .study-plan-scope .exceptions-manager__extra-form .block-modal__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   MOBILE (< 768px) - ETAPA 7
+   ============================================================ */
+@media (max-width: 768px) {
+  /* Modais empilham/rolam */
+  .study-plan-scope .rf-card {
+    border-radius: 0.5rem;
+  }
+
+  /* OccurrenceModal - full screen no mobile */
+  .study-plan-scope .fixed.inset-0 > .rf-card {
+    max-width: 100%;
+    margin: 0;
+    border-radius: 0;
+    min-height: 100vh;
+    max-height: 100vh;
+  }
+
+  /* DailyListView - ajustes de espaçamento */
+  .study-plan-scope .rf-card {
+    margin-bottom: 0.75rem;
+  }
+
+  /* Toolbar mais compacta */
+  .study-plan-scope .flex.items-center.justify-between.mb-6 {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  /* Estatísticas em coluna única no mobile */
+  .study-plan-scope .grid.grid-cols-3 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Botões de navegação menores */
+  .study-plan-scope button.p-2 {
+    padding: 0.5rem;
+  }
+
+  /* Cards de ocorrência com touch targets maiores */
+  .study-plan-scope .group.relative.mb-1\.5 {
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  /* Checkbox maior para touch */
+  .study-plan-scope button[type="button"].mt-0\.5 {
+    padding: 0.75rem;
+  }
+
+  /* Tags de status maiores */
+  .study-plan-scope .inline-flex.items-center.gap-0\.5.px-2\.py-0\.5 {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+  }
+}

@@ -1430,11 +1430,11 @@ export async function repararVinculosListas(userId: string): Promise<{
     }).exec();
 
     let questoesEnviadas = 0;
+    const CHUNK_SIZE = 100; // usado nos 3 loops de lote abaixo
     if (localQuestoes.length > 0) {
       const qToPush = localQuestoes.map(d => d.toJSON());
       console.log(`🔧 [Reparar] Enviando ${qToPush.length} questões de questoes_lista em lotes de 100...`);
 
-      const CHUNK_SIZE = 100;
       for (let i = 0; i < qToPush.length; i += CHUNK_SIZE) {
         const chunk = qToPush.slice(i, i + CHUNK_SIZE);
         const { error } = await supabaseClient
@@ -1469,7 +1469,7 @@ export async function repararVinculosListas(userId: string): Promise<{
         for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
         return chunks;
       };
-      const chunks = chunkArray(listaIds, 100);
+      const chunks = chunkArray(listaIds, CHUNK_SIZE);
 
       let allLocalLinks: any[] = [];
       for (const chunk of chunks) {

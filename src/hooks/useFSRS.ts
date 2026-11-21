@@ -79,7 +79,7 @@ export function useFSRS(userId: string | null, version: number = 0) {
     const reviewedToday = dueCards.filter(c => 
       c.lastReview && c.lastReview.startsWith(today)
     ).length;
-    const dueCount = dueCards.filter(c => new Date(c.due) <= new Date()).length;
+    const dueCount = dueCards.filter(c => c.due ? new Date(c.due) <= new Date() : false).length;
     const avgRetrievability = dueCards.length > 0
       ? dueCards.reduce((acc, c) => acc + (c.stability > 0 ? 0.9 : 0), 0) / dueCards.length
       : 0;
