@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { ChevronDown, ChevronRight, Search, X, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
-import { getDisciplines, getTopics } from "@/lib/supabaseClient";
-
-interface TopicWithDiscipline {
-  id: string;
-  name: string;
-  discipline_id: string;
-  discipline_name: string;
-}
+import { getDb } from "@/lib/db";
 
 interface ContentTreeSelectorProps {
   userId: string;
@@ -32,7 +25,7 @@ export function ContentTreeSelector({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  // Carregar dados
+  // Carregar dados do RxDB (offline-first)
   const loadData = useCallback(async () => {
     if (!userId) return;
 
@@ -40,36 +33,37 @@ export function ContentTreeSelector({
     setError(null);
 
     try {
-      // Buscar disciplinas
-      const discResult = await getDisciplines(userId);
-      if (!discResult.success) throw new Error(discResult.error || "Erro ao buscar disciplinas");
+      const db = await getDb();
 
-      const disciplinesData = discResult.data || [];
-      setDisciplines(disciplinesData);
+      // Buscar disciplinas do usuário (não deletadas)
+      const disciplinesResult = await db.disciplines.find({
+        selector: { user_id: userId, isDeleted: { $ne: true } }
+      }).exec();
+      const disciplinesData = disciplinesResult.map((doc: any) => doc.toJSON());
+      setDisciplines(disciplinesData.map((d: any) => ({ id: d.id, name: d.name })));
 
-      // Buscar tópicos para cada disciplina em paralelo
-      const topicsPromises = disciplinesData.map(async (disc) => {
-        const topicResult = await getTopics(disc.id);
-        if (topicResult.success && topicResult.data) {
-          return { disciplineId: disc.id, topics: topicResult.data };
-        }
-        return { disciplineId: disc.id, topics: [] };
-      });
+      // Buscar todos os tópicos do usuário de uma vez (não deletados)
+      const topicsResult = await db.topics.find({
+        selector: { user_id: userId, isDeleted: { $ne: true } }
+      }).exec();
+      const topicsData = topicsResult.map((doc: any) => doc.toJSON());
 
-      const topicsResults = await Promise.all(topicsPromises);
+      // Agrupar tópicos por discipline_id em memória (evita N+1 queries)
       const topicsMap: Record<string, Array<{ id: string; name: string }>> = {};
-      topicsResults.forEach(({ disciplineId, topics }) => {
-        topicsMap[disciplineId] = topics.map((t: any) => ({ id: t.id, name: t.name }));
+      topicsData.forEach((topic: any) => {
+        const discId = topic.discipline_id;
+        if (!topicsMap[discId]) topicsMap[discId] = [];
+        topicsMap[discId].push({ id: topic.id, name: topic.name });
       });
       setTopicsByDiscipline(topicsMap);
 
       // Expandir primeiras disciplinas por padrão
       if (disciplinesData.length > 0) {
-        const initialExpanded = new Set(disciplinesData.slice(0, 3).map((d) => d.id));
+        const initialExpanded = new Set(disciplinesData.slice(0, 3).map((d: any) => d.id));
         setExpandedDisciplines(initialExpanded);
       }
     } catch (err) {
-      console.error("Erro ao carregar árvore de conteúdo:", err);
+      console.error("Erro ao carregar árvore de conteúdo do RxDB:", err);
       setError(err instanceof Error ? err.message : "Erro ao carregar disciplinas e tópicos");
     } finally {
       setLoading(false);

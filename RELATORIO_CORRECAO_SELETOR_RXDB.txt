@@ -1,0 +1,167 @@
+# RELATÓRIO DE CORREÇÃO: ContentTreeSelector - Migração para RxDB
+
+## Resumo
+Migrou o `ContentTreeSelector` (seletor de tópicos na Linha do Tempo de Temas) para ler do **RxDB local** em vez do cliente Supabase ANON, seguindo exatamente o padrão de `loadData` de `src/routes/conteudo.tsx`.
+
+---
+
+## Arquivo Alterado
+- `src/components/study-plan/ContentTreeSelector.tsx`
+
+---
+
+## Diff Completo
+
+```diff
+diff --git a/src/components/study-plan/ContentTreeSelector.tsx b/src/components/study-plan/ContentTreeSelector.tsx
+index 05ceb23e..7f0e89f1 100644
+--- a/src/components/study-plan/ContentTreeSelector.tsx
++++ b/src/components/study-plan/ContentTreeSelector.tsx
+@@ -1,14 +1,7 @@
+ import { useState, useEffect, useCallback, useMemo } from "react";
+ import { ChevronDown, ChevronRight, Search, X, Loader2 } from "lucide-react";
+ import { useToast } from "@/hooks/useToast";
+-import { getDisciplines, getTopics } from "@/lib/supabaseClient";
+-
+-interface TopicWithDiscipline {
+-  id: string;
+-  name: string;
+-  discipline_id: string;
+-  discipline_name: string;
+-}
++import { getDb } from "@/lib/db";
+ 
+ interface ContentTreeSelectorProps {
+   userId: string;
+@@ -32,7 +25,7 @@ export function ContentTreeSelector({
+   const [error, setError] = useState<string | null>(null);
+   const [retryCount, setRetryCount] = useState(0);
+ 
+-  // Carregar dados
++  // Carregar dados do RxDB (offline-first)
+   const loadData = useCallback(async () => {
+     if (!userId) return;
+ 
+@@ -40,36 +33,37 @@ export function ContentTreeSelector({
+     setError(null);
+ 
+     try {
+-      // Buscar disciplinas
+-      const discResult = await getDisciplines(userId);
+-      if (!discResult.success) throw new Error(discResult.error || "Erro ao buscar disciplinas");
++      const db = await getDb();
+ 
+-      const disciplinesData = discResult.data || [];
+-      setDisciplines(disciplinesData);
++      // Buscar disciplinas do usuário (não deletadas)
++      const disciplinesResult = await db.disciplines.find({
++        selector: { user_id: userId, isDeleted: { $ne: true } }
++      }).exec();
++      const disciplinesData = disciplinesResult.map((doc: any) => doc.toJSON());
++      setDisciplines(disciplinesData.map((d: any) => ({ id: d.id, name: d.name })));
+ 
+-      // Buscar tópicos para cada disciplina em paralelo
+-      const topicsPromises = disciplinesData.map(async (disc) => {
+-        const topicResult = await getTopics(disc.id);
+-        if (topicResult.success && topicResult.data) {
+-          return { disciplineId: disc.id, topics: topicResult.data };
+-        }
+-        return { disciplineId: disc.id, topics: [] };
+-      });
++      // Buscar todos os tópicos do usuário de uma vez (não deletados)
++      const topicsResult = await db.topics.find({
++        selector: { user_id: userId, isDeleted: { $ne: true } }
++      }).exec();
++      const topicsData = topicsResult.map((doc: any) => doc.toJSON());
+ 
+-      const topicsResults = await Promise.all(topicsPromises);
++      // Agrupar tópicos por discipline_id em memória (evita N+1 queries)
+       const topicsMap: Record<string, Array<{ id: string; name: string }>> = {};
+-      topicsResults.forEach(({ disciplineId, topics }) => {
+-        topicsMap[disciplineId] = topics.map((t: any) => ({ id: t.id, name: t.name }));
++      topicsData.forEach((topic: any) => {
++        const discId = topic.discipline_id;
++        if (!topicsMap[discId]) topicsMap[discId] = [];
++        topicsMap[discId].push({ id: topic.id, name: topic.name });
+       });
+       setTopicsByDiscipline(topicsMap);
+ 
+       // Expandir primeiras disciplinas por padrão
+       if (disciplinesData.length > 0) {
+-        const initialExpanded = new Set(disciplinesData.slice(0, 3).map((d) => d.id));
++        const initialExpanded = new Set(disciplinesData.slice(0, 3).map((d: any) => d.id));
+         setExpandedDisciplines(initialExpanded);
+       }
+     } catch (err) {
+-      console.error("Erro ao carregar árvore de conteúdo:", err);
++      console.error("Erro ao carregar árvore de conteúdo do RxDB:", err);
+       setError(err instanceof Error ? err.message : "Erro ao carregar disciplinas e tópicos");
+     } finally {
+       setLoading(false);
+```
+
+---
+
+## Confirmação do Prop `userId`
+
+**Local:** `src/components/study-plan/ThemeTimeline.tsx` (linha 257)
+
+```tsx
+<ContentTreeSelector
+  userId={userId}
+  selectedTopicIds={selectedTopicIds}
+  onChange={handleTopicChange}
+  allowMultiple={true}
+/>
+```
+
+O `ThemeTimeline` recebe `userId` como prop obrigatória (`{ userId }: { userId: string }`) e a repassa corretamente. O guard `if (!userId) return` no `loadData` do `ContentTreeSelector` já cobre o caso de `userId` vazio/undefined no primeiro render.
+
+---
+
+## Verificações (sem rodar)
+
+| Verificação | Esperado |
+|-------------|----------|
+| `npx vitest run` | 93/93 testes verdes |
+| `npm run build` | Build bem-sucedido (verde) |
+| `npx tsc --noEmit` | 65 erros/16 arquivos (dívida antiga); **ZERO novos erros nos nossos arquivos** |
+| `git diff src/routes/calendario.tsx` | **Vazio** (protegido) |
+| `git diff src/lib/db.ts` | **Vazio** (protegido) |
+| `git diff src/services/studyPlanService.ts` | **Vazio** (protegido) |
+
+---
+
+## Smoke Test Manual (descrição)
+
+1. **Plano de Estudos → Linha do Tempo de Temas → + Tema** → seletor abre e mostra as 20 disciplinas com seus tópicos (incluindo os 7 legados com `isdeleted` NULL que o RxDB já sincronizou).
+2. Selecionar 2 tópicos de disciplinas diferentes → Confirmar → nomes aparecem como chips na timeline.
+3. Reabrir o período → tópicos pré-selecionados.
+4. **Offline test** (DevTools → Network → Offline): seletor ainda mostra dados (RxDB local).
+5. Aba **Conteúdos** continua normal (sem regressão — usa o mesmo padrão RxDB).
+
+---
+
+## Próximos Passos (para o usuário executar)
+
+```bash
+# 1. Verificar TypeScript (esperado: 65 erros antigos, 0 novos)
+npx tsc --noEmit
+
+# 2. Rodar testes
+npx vitest run
+
+# 3. Build de produção
+npm run build
+```
+
+---
+
+## Notas Técnicas
+
+- **Padrão seguido:** Igual ao `loadData` de `src/routes/conteudo.tsx` (linhas 665-715 aprox.)
+- **Filtro `isDeleted: { $ne: true }`:** Inclui os 7 registros legados que têm `isdeleted` NULL no Supabase (o RxDB já os sincronizou corretamente).
+- **Single query para tópicos:** Busca todos os tópicos do usuário de uma vez e agrupa em memória (`topicsMap`), evitando N+1 queries.
+- **Offline-first:** Funciona sem token de autenticação; dados vêm do IndexedDB via RxDB.
+- **Props públicas mantidas:** `userId`, `selectedTopicIds`, `onChange`, `allowMultiple` inalteradas.
+- **Não alterado:** `getDisciplines`/`getTopics` em `supabaseClient.ts` (outros consumidores podem depender).
