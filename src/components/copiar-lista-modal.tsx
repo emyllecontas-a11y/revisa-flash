@@ -42,7 +42,7 @@ export function CopiarListaModal({
           .from('disciplines')
           .select('id, name')
           .eq('user_id', userId)
-          .eq('isDeleted', false)
+          .neq('isdeleted', true)
           .order('name', { ascending: true });
         if (error) throw error;
         if (!ativo) return;

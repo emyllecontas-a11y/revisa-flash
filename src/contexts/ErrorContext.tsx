@@ -124,7 +124,7 @@ export const ErrorProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         .from('disciplines')
         .select('id, name')
         .eq('user_id', uidStr)
-        .eq('isDeleted', false)
+        .neq('isdeleted', true)
         .order('name', { ascending: true });
 
       if (error) throw error;

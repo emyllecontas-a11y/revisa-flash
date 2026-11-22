@@ -68,7 +68,7 @@ async function getDisciplinesAuth(userId: string) {
     const client = await getSupabaseWithToken();
     const { data, error } = await client
       .from('disciplines').select('*')
-      .eq('user_id', userId).eq('isDeleted', false)
+      .eq('user_id', userId).neq('isdeleted', true)
       .order('name', { ascending: true });
     if (error) throw error;
     return { success: true, data: (data || []) as Discipline[] };

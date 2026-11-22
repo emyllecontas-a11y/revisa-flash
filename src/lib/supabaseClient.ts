@@ -177,6 +177,7 @@ export const getDisciplines = async (userId: string) => {
       .from('disciplines')
       .select('*')
       .eq('user_id', userId)
+      .neq('isdeleted', true)
       .order('createdAt', { ascending: true });
 
     if (error) throw error;
@@ -252,6 +253,7 @@ export const getTopics = async (disciplineId: string) => {
       .from('topics')
       .select('*')
       .eq('discipline_id', disciplineId)
+      .neq('isdeleted', true)
       .order('createdAt', { ascending: true });
 
     if (error) throw error;

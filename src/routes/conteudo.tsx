@@ -723,10 +723,10 @@ export default function ConteudoPage() {
 
       try {
         const supabaseClient = await getSupabaseWithToken();
-        await supabaseClient.from('disciplines').update({ isDeleted: true, updated_at: now }).eq('id', id);
-        await supabaseClient.from('errors').update({ isDeleted: true, updated_at: now }).eq('discipline_id', id);
+        await supabaseClient.from('disciplines').update({ isdeleted: true, updated_at: now }).eq('id', id);
+        await supabaseClient.from('errors').update({ isdeleted: true, updated_at: now }).eq('discipline_id', id);
         for (const tid of topicIds) {
-          await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', tid);
+          await supabaseClient.from('topics').update({ isdeleted: true, updated_at: now }).eq('id', tid);
         }
         if (userId) {
           const { error: rpcErr } = await supabaseClient.rpc('excluir_disciplina_conteudo', { p_discipline_id: id, p_user_id: userId });
@@ -774,7 +774,7 @@ export default function ConteudoPage() {
 
         try {
           const supabaseClient = await getSupabaseWithToken();
-          await supabaseClient.from('topics').update({ isDeleted: true, updated_at: now }).eq('id', id);
+          await supabaseClient.from('topics').update({ isdeleted: true, updated_at: now }).eq('id', id);
           for (const r of revisoesTopico) {
             await supabaseClient.from('revisoes').delete().eq('id', r.id);
           }

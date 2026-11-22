@@ -1,0 +1,116 @@
+# RELATÓRIO DE CORREÇÃO: Filtro isdeleted NULL (Dados Legados)
+
+## Resumo
+Corrigido filtro `.eq('isdeleted', false)` → `.neq('isdeleted', true)` nas queries da hierarquia de conteúdo (disciplines, topics) para incluir registros legados com `isdeleted = NULL`.
+
+**Causa raiz**: A coluna `isdeleted` (sem underscore) no Supabase tem registros legados com `NULL`. O filtro `.eq('isdeleted', false)` exclui `NULL` (pois `NULL != false` no SQL). A solução `.neq('isdeleted', true)` inclui tanto `false` quanto `NULL` (trata NULL como "não deletado").
+
+---
+
+## Colunas Reais no Supabase (Evidência)
+
+| Tabela | Coluna no DB | Tipo | Observação |
+|--------|--------------|------|------------|
+| `disciplines` | `isdeleted` | boolean | Sem underscore, lowercase |
+| `topics` | `isdeleted` | boolean | Sem underscore, lowercase |
+| `subtopicos` | (RxDB local) | boolean | Usa `isDeleted` camelCase no RxDB; sincroniza via queue |
+
+**Confirmação**: 
+- `createDiscipline`/`createTopic` em `supabaseClient.ts` inserem `created_at`/`updated_at` mas **não** setam `isdeleted`
+- Schemas RxDB em `db.ts`: `disciplines`/`topics` usam `isDeleted` (camelCase) localmente
+- Queries diretas no Supabase usam `isdeleted` (lowercase)
+
+---
+
+## Arquivos Alterados
+
+### 1. `src/lib/supabaseClient.ts`
+**Funções**: `getDisciplines`, `getTopics`
+- **Antes**: Sem filtro `isdeleted`
+- **Depois**: Adicionado `.neq('isdeleted', true)` após filtro de usuário/disciplina
+- **Diff**:
+```diff
+ export const getDisciplines = async (userId: string) => {
+   try {
+     const { data, error } = await supabase
+       .from('disciplines')
+       .select('*')
+       .eq('user_id', userId)
++      .neq('isdeleted', true)
+       .order('createdAt', { ascending: true });
+```
+
+```diff
+ export const getTopics = async (disciplineId: string) => {
+   try {
+     const { data, error } = await supabase
+       .from('topics')
+       .select('*')
+       .eq('discipline_id', disciplineId)
++      .neq('isdeleted', true)
+       .order('createdAt', { ascending: true });
+```
+
+### 2. `src/contexts/ErrorContext.tsx` (linha 127)
+- **Antes**: `.eq('isDeleted', false)` (camelCase errado)
+- **Depois**: `.neq('isdeleted', true)` (coluna real + lógica correta)
+
+### 3. `src/components/copiar-lista-modal.tsx` (linha 45)
+- **Antes**: `.eq('isDeleted', false)` (camelCase errado)
+- **Depois**: `.neq('isdeleted', true)`
+
+### 4. `src/components/RevisarImportacaoPdfModal.tsx` (linha 71)
+- **Antes**: `.eq('isDeleted', false)` (camelCase errado)
+- **Depois**: `.neq('isdeleted', true)`
+
+### 5. `src/routes/conteudo.tsx` (linhas 726, 729, 777)
+- **Antes**: `update({ isDeleted: true, ... })` (camelCase errado no objeto de update)
+- **Depois**: `update({ isdeleted: true, ... })` (coluna real do Supabase)
+- **Escopo**: Soft-delete de disciplines, topics, errors via Supabase direto
+
+---
+
+## Fora do Escopo (NÃO alterados)
+Conforme instruções, **não** foram tocadas queries em:
+- `study_*` (Plano de Estudos — protegido)
+- `listas`, `questoes_lista`, `simulados`, `questoes`, `alternativas` (outros módulos)
+- `src/lib/db.ts` (sync RxDB — usa `isDeleted` camelCase local)
+- `src/hooks/useToast.ts`, `src/routes/calendario.tsx`, `WeeklyGridEditor.tsx` (protegidos)
+
+---
+
+## Verificação (comandos para rodar)
+
+```bash
+# 1. Testes (esperado: 93/93 verdes)
+npx vitest run
+
+# 2. Build (esperado: verde)
+npm run build
+
+# 3. TypeScript (esperado: 65 erros/16 arquivos — dívida antiga; ZERO novos)
+npx tsc --noEmit
+
+# 4. Garantir que arquivos protegidos não mudaram
+git diff src/routes/calendario.tsx    # deve estar vazio
+git diff src/hooks/useToast.ts        # deve estar vazio
+```
+
+---
+
+## Smoke Manual (descrição)
+
+1. Abrir **Plano de Estudos → Linha do Tempo de Temas → + Tema → Seletor**
+   - Deve mostrar disciplinas/tópicos (incluindo os ~7 legados que antes sumiam)
+2. Selecionar um tópico legado → salvar
+   - Timeline salva com `topic_ids` preenchido
+3. Abrir aba **Conteúdos**
+   - Árvore normal (sem regressão)
+
+---
+
+## Resumo das Mudanças
+- **5 arquivos** alterados
+- **7 locais** corrigidos (2 em supabaseClient.ts, 1 em ErrorContext, 1 em copiar-lista-modal, 1 em RevisarImportacaoPdfModal, 2 em conteudo.tsx)
+- **Coluna real confirmada**: `isdeleted` (lowercase, sem underscore) nas tabelas `disciplines` e `topics`
+- **Lógica**: `.neq('isdeleted', true)` inclui `false` + `NULL` (legados)
