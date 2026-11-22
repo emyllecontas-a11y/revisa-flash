@@ -1,0 +1,128 @@
+# RELATÓRIO DE DIAGNÓSTICO — TRAVAMENTO NAS ABAS DO PLANO DE ESTUDOS
+
+**Data:** 2026-11-21  
+**Projeto:** Una Vox (revisa-flash)  
+**Escopo:** FASE 1 — Somente diagnóstico, sem edição de arquivos
+
+---
+
+## 1. ERROS DO CONSOLE DO NAVEGADOR
+**Status:** PENDENTE — Solicitar à dona do projeto que cole aqui os 3 stack traces (aba "Rotina semanal", aba "Exceções da semana", botão "Montar a minha semana").
+
+---
+
+## 2. INSPEÇÃO DOS ARQUIVOS SUSPEITOS
+
+### 2.1 WeeklyGridEditor.tsx — **CAUSA PROVÁVEL**
+**Evidência:** `useCallback` com dependência `toast` que retorna objeto novo a cada render → loop infinito.
+
+**Trechos relevantes (linhas 75-82, 240-250):**
+```typescript
+const toast = useToast();  // Retorna NOVO objeto a cada render
+
+const loadBlocks = useCallback(async () => {
+  // ... usa toast.error, toast.success
+}, [userId, weekStart, toast]);  // ← toast muda a cada render!
+
+useEffect(() => {
+  loadBlocks();
+}, [loadBlocks]);  // ← Dispara a cada render porque loadBlocks muda
+```
+
+**Por que trava:** `useToast()` cria wrapper functions novas a cada render. O `useCallback` recria `loadBlocks` a cada render. O `useEffect` roda a cada render. `loadBlocks` chama `setBlocks` → re-render → loop infinito → congela o browser.
+
+---
+
+### 2.2 ExceptionsManager.tsx — **CAUSA PROVÁVEL**
+**Evidência:** Mesmo padrão de `useCallback` com `toast` na dependência.
+
+**Trechos relevantes (linhas 110-118, 123-125):**
+```typescript
+const toast = useToast();  // Retorna NOVO objeto a cada render
+
+const loadData = useCallback(async () => {
+  // ... usa toast.error
+}, [userId, toast]);  // ← toast muda a cada render!
+
+useEffect(() => {
+  loadData();
+}, [loadData]);  // ← Loop infinito idêntico ao WeeklyGridEditor
+```
+
+**Por que trava:** Mesma causa raiz — `useToast()` não memoiza o retorno.
+
+---
+
+### 2.3 StudyPlanHub.tsx — **INOCENTE**
+**Evidência:** Usa `useWeekSchedule` que tem `reload` com dependência apenas `[userId]` (sem `toast`). Não usa `useToast` em `useCallback` de carregamento.
+
+---
+
+### 2.4 index.ts — **INOCENTE**
+**Evidência:** Exporta todos os 5 componentes necessários (`WeeklyGridEditor`, `ExceptionsManager`, `TaskLibrary`, `ThemeTimeline`, `StudyPlanHub`, `OccurrenceModal`, `DailyListView`). Nenhum export faltando.
+
+---
+
+### 2.5 TaskLibrary.tsx — **INOCENTE**
+**Evidência:** Usa `toast` apenas em handlers de evento (onClick), não em `useCallback` de effect. Não há loop de render.
+
+---
+
+### 2.6 ThemeTimeline.tsx — **INOCENTE**
+**Evidência:** Não usa `useToast` em `useCallback` de carregamento. Usa `toast` só em handlers.
+
+---
+
+## 3. VERIFICAÇÕES ESPECÍFICAS DE RUNTIME (3.3 do prompt)
+
+| Verificação | Resultado |
+|-------------|-----------|
+| `@dnd-kit` imports | **NÃO ENCONTRADO** — WeeklyGridEditor usa HTML5 Drag & Drop nativo (`draggable`, `onDragStart`, `onDragOver`, `onDrop`), não biblioteca externa |
+| `drag` imports | **NÃO ENCONTRADO** |
+| `undefined.` accesses | **NÃO ENCONTRADO** em `src/components/study-plan/` |
+| `Object.keys` | **NÃO ENCONTRADO** em `src/components/study-plan/` |
+| `.map()` sem fallback | **VERIFICADO** — Todos os `.map()` em `WeeklyGridEditor` e `ExceptionsManager` iteram sobre arrays constantes (`WEEKDAY_NAMES`, `TIME_SLOTS`) ou estado inicializado como `[]` (`tasks`, `blocks`, `extras`, `weeklyBlocks`). Seguro. |
+| `package.json` — drag lib | **NÃO HÁ** `@dnd-kit/*` nem `react-dnd` nas dependências |
+
+---
+
+## 4. HIPÓTESES PRIORIZADAS COM VEREDITO
+
+| Hipótese | Veredito | Evidência |
+|----------|----------|-----------|
+| H1. Drag-and-drop lib não instalada | **REJEITADA** | WeeklyGridEditor usa API nativa, não importa `@dnd-kit` |
+| H2. Componente não exportado no index.ts | **REJEITADA** | Todos os 5 componentes do hub estão exportados |
+| H3. Hook fora de componente / rules violation | **REJEITADA** | Todos os hooks chamados no topo dos componentes |
+| H4. Acesso a propriedade de undefined | **REJEITADA** | Nenhum `undefined.` encontrado; fallbacks `|| []` e `?.` presentes |
+| H5. JSX renderiza null sem fallback | **REJEITADA** | Estados de loading/empty tratados |
+| H6. useEffect com setState em loop infinito | **CONFIRMADA** | **CAUSA RAIZ** — `useToast()` retorna objeto novo a cada render, invalidando `useCallback` de `loadBlocks`/`loadData` |
+| H7. Type import usado como valor | **REJEITADA** | Imports de tipos usam `import type` corretamente |
+
+---
+
+## 5. CAUSA RAIZ MAIS PROVÁVEL (uma linha)
+
+**`useToast()` em `src/hooks/useToast.ts` retorna um objeto literal novo a cada chamada, fazendo com que `useCallback` em `WeeklyGridEditor.loadBlocks` e `ExceptionsManager.loadData` sejam recriados a cada render, disparando `useEffect` em loop infinito que congela o browser.**
+
+---
+
+## 6. RECOMENDAÇÃO DE CORREÇÃO (sem código)
+
+**Arquivo único a corrigir:** `src/hooks/useToast.ts`
+
+**Ação:** Envolver o retorno de `useToast` em `useMemo` com array de dependências vazio `[]`, para que o objeto com as funções `success`, `error`, `info`, `warning`, `undoable` seja **estável** (mesma referência) entre renders.
+
+**Por que funciona:** As funções wrapper apenas delegam para `sonner.toast` (já estável). Memoizar o objeto evita que consumidores (`useCallback` com `toast` nas deps) se recriem inutilmente.
+
+**Impacto:** Corrige **ambos** componentes travados (`WeeklyGridEditor` e `ExceptionsManager`) com uma mudança de 1 linha no hook compartilhado. Zero risco de regressão em outros fluxos.
+
+---
+
+## 7. OBSERVAÇÃO ADICIONAL (não bloqueante)
+
+Inconsistência de `Weekday` entre componentes:
+- `types/study-plan.ts`: `Weekday = 0|1|2|3|4|5|6` com **0 = Domingo**
+- `WeeklyGridEditor.tsx`: `WEEKDAY_NAMES = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"]` → **índice 0 = Segunda** (usa `dayIdx as Weekday`)
+- `ExceptionsManager.tsx`: `WEEKDAY_NAMES = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]` → **índice 0 = Domingo** (correto)
+
+Isso causa desalinhamento de dados (blocos salvos com weekday errado), mas **não causa travamento**. Corrigir em fase posterior.

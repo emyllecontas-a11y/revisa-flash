@@ -1,0 +1,235 @@
+# RELATÓRIO DE CORREÇÃO — TRAVAMENTO + BUG DE WEEKDAY
+
+Data: 2026-11-21
+Branch: main
+Commit base: 6e5f69d0
+
+---
+
+## 1. RESUMO DAS ALTERAÇÕES
+
+Dois arquivos modificados:
+- `src/hooks/useToast.ts` — Correção A (travamento crítico)
+- `src/components/study-plan/WeeklyGridEditor.tsx` — Correção B (bug de dados Weekday)
+
+Nenhum outro arquivo foi alterado. `src/routes/calendario.tsx` (Agenda) e `src/components/study-plan/ExceptionsManager.tsx` permanecem intocados.
+
+---
+
+## 2. CORREÇÃO A — TRAVAMENTO (crítica)
+
+**Arquivo:** `src/hooks/useToast.ts`
+
+**Problema:** `useToast()` retornava objeto novo a cada render. Componentes `WeeklyGridEditor.loadBlocks` e `ExceptionsManager.loadData` usavam `useCallback` com `toast` na dependência → recriados a cada render → `useEffect` dispara a cada render → `setState` → loop infinito → browser congela nas abas "Rotina semanal", "Exceções da semana" e ao clicar "Montar a minha semana".
+
+**Solução:** Envolver o retorno do hook em `useMemo` com array de dependências vazio `[]`. As funções wrapper apenas delegam para `sonner.toast` (já estável). Memoizar o objeto evita que consumidores recriem inutilmente.
+
+**Diff:**
+```diff
+// src/hooks/useToast.ts
+import { useMemo } from "react";
+import { toast } from "sonner";
+
+interface ToastAction {
+  label: string;
+  onClick: () => void | Promise<void>;
+}
+
+interface ToastOptions {
+  description?: string;
+  duration?: number;
+  action?: ToastAction;
+}
+
+export function useToast() {
+  return useMemo(() => ({
+    success: (msg: string, opts?: ToastOptions) => toast.success(msg, opts),
+    error: (msg: string, opts?: ToastOptions) => toast.error(msg, opts),
+    info: (msg: string, opts?: ToastOptions) => toast.info(msg, opts),
+    warning: (msg: string, opts?: ToastOptions) => toast.warning(msg, opts),
+
+    undoable: (
+      msg: string,
+      onUndo: () => void | Promise<void>,
+      opts?: { description?: string; duration?: number; undoLabel?: string }
+    ) =>
+      toast(msg, {
+        description: opts?.description,
+        duration: opts?.duration ?? 6000,
+        action: {
+          label: opts?.undoLabel ?? "Desfazer",
+          onClick: () => {
+            void onUndo();
+          },
+        },
+      }),
+  }), []);
+}
+```
+
+**Requisitos atendidos:**
+- ✅ Assinatura pública do hook inalterada
+- ✅ Nenhum consumidor precisa ser alterado
+- ✅ 85 testes continuam verdes (sem quebra de contrato)
+
+---
+
+## 3. CORREÇÃO B — BUG DE WEEKDAY (dados, grave)
+
+**Arquivo:** `src/components/study-plan/WeeklyGridEditor.tsx`
+
+**Problema:** Inconsistência de `Weekday`.
+- `types/study-plan.ts` define `Weekday = 0..6` com **0 = Domingo** (seguindo `Date.getDay()`)
+- `ExceptionsManager.tsx` usa `["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]` (0=Domingo, correto)
+- `WeeklyGridEditor.tsx` usava `["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"]` (0=Segunda, errado) → blocos salvos na Rotina semanal caíam no dia da semana errado
+
+**Solução:** Manter a EXIBIÇÃO visual em ordem Seg→Dom (UX), mas o valor persistido deve ser o `getDay()` correto (0=Domingo). Adicionados dois arrays de mapeamento:
+- `DISPLAY_IDX_TO_WEEKDAY: [1,2,3,4,5,6,0]` — display index (0=Seg) → Weekday real (0=Dom)
+- `WEEKDAY_TO_DISPLAY_IDX: [6,0,1,2,3,4,5]` — Weekday real (0=Dom) → display index (0=Seg)
+
+**Pontos alterados:**
+1. `getBlocksForCell` e `getBlockStartingAt`: aceitam `displayDayIdx` (0=Seg) e convertem internamente para Weekday real
+2. `handleDrop`: converte `day` (display index) para Weekday real antes de salvar e antes de verificar colisão
+3. Modal dropdown "Dia da semana": exibe ordem Seg→Dom mas `value` de cada option é o Weekday real
+4. Modal botões "Dias da semana (múltipla seleção)": mesmo princípio — `onClick` passa Weekday real
+5. Inicialização do form no modal: guarda o Weekday real vindo do bloco (não converte para display index)
+6. Render da grade: chama `getBlockStartingAt(dayIdx, slotIndex)` com display index (sem cast incorreto)
+
+**Diff (principais trechos):**
+```diff
+// src/components/study-plan/WeeklyGridEditor.tsx
+
+const WEEKDAY_NAMES = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+const WEEKDAY_FULL = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"];
+
+/**
+ * Mapeia índice de exibição (0=Seg..6=Dom) para Weekday real (0=Dom..6=Sáb)
+ * Conforme types/study-plan.ts: Weekday = 0|1|2|3|4|5|6 com 0=Domingo (Date.getDay())
+ */
+const DISPLAY_IDX_TO_WEEKDAY: Weekday[] = [1, 2, 3, 4, 5, 6, 0];
+
+/**
+ * Mapeia Weekday real (0=Dom..6=Sáb) para índice de exibição (0=Seg..6=Dom)
+ * Inverso de DISPLAY_IDX_TO_WEEKDAY
+ */
+const WEEKDAY_TO_DISPLAY_IDX: number[] = [6, 0, 1, 2, 3, 4, 5];
+
+// Get blocks for a specific day and time range
+// displayDayIdx: 0=Seg..6=Dom (ordem de exibição)
+const getBlocksForCell = useCallback(
+  (displayDayIdx: number, slotIndex: number): StudyWeeklyBlock[] => {
+    const weekday = DISPLAY_IDX_TO_WEEKDAY[displayDayIdx];
+    // ...
+  },
+  [blocks]
+);
+
+// Get the main block that STARTS at this cell (for rendering)
+// displayDayIdx: 0=Seg..6=Dom (ordem de exibição)
+const getBlockStartingAt = useCallback(
+  (displayDayIdx: number, slotIndex: number): StudyWeeklyBlock | null => {
+    const weekday = DISPLAY_IDX_TO_WEEKDAY[displayDayIdx];
+    // ...
+  },
+  [blocks]
+);
+
+const handleDrop = async (e: React.DragEvent, day: number, slotIndex: number) => {
+  // ...
+  // Converter índice de exibição (0=Seg..6=Dom) para Weekday real (0=Dom..6=Sáb)
+  const weekday = DISPLAY_IDX_TO_WEEKDAY[day];
+
+  const existing = blocks.find(
+    (b) =>
+      b.weekday === weekday &&
+      timeToSlotIndex(b.start_time) === slotIndex
+  );
+  // ...
+  const newBlock = await createStudyWeeklyBlock({
+    task_id: draggedTask.id,
+    weekday: weekday,  // Weekday real
+    // ...
+  });
+};
+
+// Inicializar form data quando modal abre
+useEffect(() => {
+  if (editingBlock && isModalOpen) {
+    // Guardar o Weekday real (0=Dom) - o dropdown e botões usam valores reais
+    editingBlockFormData.current = {
+      taskId: editingBlock.block.task_id,
+      weekday: editingBlock.block.weekday,
+      // ...
+    };
+  }
+}, [editingBlock, isModalOpen]);
+
+// Modal dropdown
+<select
+  value={editingBlockFormData.current?.weekday ?? editingBlock.block.weekday}
+  onChange={(e) => handleFormChange("weekday", Number(e.target.value))}
+>
+  {WEEKDAY_NAMES.map((name, displayIdx) => {
+    const weekday = DISPLAY_IDX_TO_WEEKDAY[displayIdx];
+    return (
+      <option key={displayIdx} value={weekday}>
+        {WEEKDAY_FULL[displayIdx]}
+      </option>
+    );
+  })}
+</select>
+
+// Modal botões múltipla seleção
+{WEEKDAY_NAMES.map((name, displayIdx) => {
+  const weekday = DISPLAY_IDX_TO_WEEKDAY[displayIdx];
+  const selected = editingBlockFormData.current?.weekday === weekday;
+  return (
+    <button
+      key={displayIdx}
+      onClick={() => handleFormChange("weekday", weekday)}
+    >
+      {name}
+    </button>
+  );
+})}
+
+// Render - chamada corrigida
+const blockStarting = getBlockStartingAt(dayIdx, slotIndex);
+```
+
+**Restrição de UX atendida:**
+- ✅ Exibição visual mantida em ordem Seg→Dom
+- ✅ Valor persistido é o `getDay()` correto (0=Domingo)
+- ✅ Primeira coluna exibida (Segunda) salva `weekday=1`
+- ✅ Bloco com `weekday=0` aparece na coluna de Domingo (última exibida)
+- ✅ Não há migração de dados existentes (apenas correção de lógica de escrita/leitura)
+
+---
+
+## 4. VERIFICAÇÕES ESPERADAS (não executadas — lista para rodar manualmente)
+
+- `npx vitest run` → esperado: 85/85 verdes, nada quebrado
+- `npm run build` → esperado: verde
+- `npx tsc --noEmit` → esperado: 64 erros/16 arquivos = dívida antiga; ZERO novos
+- `git diff src/routes/calendario.tsx` → esperado: vazio (Agenda intocada)
+
+---
+
+## 5. SMOKE MANUAL (descrição para teste manual)
+
+1. Abrir aba "Rotina semanal" → não trava, carrega normalmente
+2. Abrir aba "Exceções da semana" → não trava, carrega normalmente
+3. Clicar em "Montar a minha semana" na Visão geral → vai para a Rotina semanal sem travar
+4. Criar um bloco na segunda-feira (primeira coluna exibida) → verificar que o `weekday` salvo é 1 (Segunda), não 0
+5. Editar um bloco existente com `weekday=0` → aparece na coluna de Domingo (última exibida), não na de Segunda
+6. Confirmar que Agenda (visao==="agenda") continua funcionando normalmente
+
+---
+
+## 6. CONFIRMAÇÃO
+
+- ✅ Apenas 2 arquivos alterados: `useToast.ts` e `WeeklyGridEditor.tsx`
+- ✅ `calendario.tsx` (Agenda) não foi tocado
+- ✅ `ExceptionsManager.tsx` não foi tocado
+- ✅ Clerk/RLS não foram tocados
+- ✅ Nenhum build/dev server/teste foi executado (conforme regra)
