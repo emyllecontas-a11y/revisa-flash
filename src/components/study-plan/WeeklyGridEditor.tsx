@@ -22,6 +22,18 @@ const WEEKDAY_NAMES = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 const WEEKDAY_FULL = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"];
 
 /**
+ * Mapeia índice de exibição (0=Seg..6=Dom) para Weekday real (0=Dom..6=Sáb)
+ * Conforme types/study-plan.ts: Weekday = 0|1|2|3|4|5|6 com 0=Domingo (Date.getDay())
+ */
+const DISPLAY_IDX_TO_WEEKDAY: Weekday[] = [1, 2, 3, 4, 5, 6, 0];
+
+/**
+ * Mapeia Weekday real (0=Dom..6=Sáb) para índice de exibição (0=Seg..6=Dom)
+ * Inverso de DISPLAY_IDX_TO_WEEKDAY
+ */
+const WEEKDAY_TO_DISPLAY_IDX: number[] = [6, 0, 1, 2, 3, 4, 5];
+
+/**
  * Gera slots de 30 min de 06:00 a 23:30
  * Retorna array de strings "HH:MM"
  */
@@ -121,8 +133,10 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
   };
 
   // Get blocks for a specific day and time range
+  // displayDayIdx: 0=Seg..6=Dom (ordem de exibição)
   const getBlocksForCell = useCallback(
-    (weekday: Weekday, slotIndex: number): StudyWeeklyBlock[] => {
+    (displayDayIdx: number, slotIndex: number): StudyWeeklyBlock[] => {
+      const weekday = DISPLAY_IDX_TO_WEEKDAY[displayDayIdx];
       const cellTime = slotIndexToTime(slotIndex);
       return blocks.filter((b) => {
         if (b.weekday !== weekday) return false;
@@ -135,8 +149,10 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
   );
 
   // Get the main block that STARTS at this cell (for rendering)
+  // displayDayIdx: 0=Seg..6=Dom (ordem de exibição)
   const getBlockStartingAt = useCallback(
-    (weekday: Weekday, slotIndex: number): StudyWeeklyBlock | null => {
+    (displayDayIdx: number, slotIndex: number): StudyWeeklyBlock | null => {
+      const weekday = DISPLAY_IDX_TO_WEEKDAY[displayDayIdx];
       const cellTime = slotIndexToTime(slotIndex);
       return blocks.find((b) => b.weekday === weekday && timeToSlotIndex(b.start_time) === slotIndex) || null;
     },
@@ -196,10 +212,13 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
     const startTime = slotIndexToTime(slotIndex);
     const endTime = calculateEndTime(startTime, draggedTask.default_duration_min);
 
+    // Converter índice de exibição (0=Seg..6=Dom) para Weekday real (0=Dom..6=Sáb)
+    const weekday = DISPLAY_IDX_TO_WEEKDAY[day];
+
     // Verificar se já existe bloco nesse horário/dia
     const existing = blocks.find(
       (b) =>
-        b.weekday === day &&
+        b.weekday === weekday &&
         timeToSlotIndex(b.start_time) === slotIndex
     );
 
@@ -211,7 +230,7 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
     try {
       const newBlock = await createStudyWeeklyBlock({
         task_id: draggedTask.id,
-        weekday: day as Weekday,
+        weekday: weekday,
         start_time: startTime,
         end_time: endTime,
         effective_from: weekStart, // Começa nesta semana
@@ -317,6 +336,7 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
   // Inicializar form data quando modal abre
   useEffect(() => {
     if (editingBlock && isModalOpen) {
+      // Guardar o Weekday real (0=Dom) - o dropdown e botões usam valores reais
       editingBlockFormData.current = {
         taskId: editingBlock.block.task_id,
         weekday: editingBlock.block.weekday,
@@ -427,7 +447,7 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
 
                 {/* Células dos 7 dias */}
                 {WEEKDAY_NAMES.map((_, dayIdx) => {
-                  const blockStarting = getBlockStartingAt(dayIdx as Weekday, slotIndex);
+                  const blockStarting = getBlockStartingAt(dayIdx, slotIndex);
                   const blockHeight = blockStarting ? getBlockHeight(blockStarting) : 0;
                   const isDropTarget = dropTargetCell?.day === dayIdx && dropTargetCell?.slotIndex === slotIndex;
                   const cellDate = new Date(weekStartDate);
@@ -559,11 +579,14 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
                     value={editingBlockFormData.current?.weekday ?? editingBlock.block.weekday}
                     onChange={(e) => handleFormChange("weekday", Number(e.target.value))}
                   >
-                    {WEEKDAY_NAMES.map((name, idx) => (
-                      <option key={idx} value={idx}>
-                        {WEEKDAY_FULL[idx]}
-                      </option>
-                    ))}
+                    {WEEKDAY_NAMES.map((name, displayIdx) => {
+                      const weekday = DISPLAY_IDX_TO_WEEKDAY[displayIdx];
+                      return (
+                        <option key={displayIdx} value={weekday}>
+                          {WEEKDAY_FULL[displayIdx]}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -603,14 +626,15 @@ export function WeeklyGridEditor({ userId, weekStart }: WeeklyGridEditorProps) {
               <div className="block-modal__field">
                 <label className="block-modal__label">Dias da semana (múltipla seleção)</label>
                 <div className="block-modal__weekdays">
-                  {WEEKDAY_NAMES.map((name, idx) => {
-                    const selected = editingBlockFormData.current?.weekday === idx;
+                  {WEEKDAY_NAMES.map((name, displayIdx) => {
+                    const weekday = DISPLAY_IDX_TO_WEEKDAY[displayIdx];
+                    const selected = editingBlockFormData.current?.weekday === weekday;
                     return (
                       <button
-                        key={idx}
+                        key={displayIdx}
                         type="button"
                         className={`block-modal__weekday-btn ${selected ? "block-modal__weekday-btn--selected" : ""}`}
-                        onClick={() => handleFormChange("weekday", idx)}
+                        onClick={() => handleFormChange("weekday", weekday)}
                       >
                         {name}
                       </button>

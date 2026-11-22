@@ -1,4 +1,5 @@
 // src/hooks/useToast.ts
+import { useMemo } from "react";
 import { toast } from "sonner";
 
 interface ToastAction {
@@ -13,7 +14,7 @@ interface ToastOptions {
 }
 
 export function useToast() {
-  return {
+  return useMemo(() => ({
     success: (msg: string, opts?: ToastOptions) => toast.success(msg, opts),
     error: (msg: string, opts?: ToastOptions) => toast.error(msg, opts),
     info: (msg: string, opts?: ToastOptions) => toast.info(msg, opts),
@@ -38,5 +39,5 @@ export function useToast() {
           },
         },
       }),
-  };
+  }), []);
 }
