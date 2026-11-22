@@ -113,6 +113,14 @@ export function OccurrenceModal({
   const hasRoute = routeForActivity !== null;
 
   const handleStartActivity = () => {
+    // Se a ocorrência tem topic_id vinculado, navega para a página de Conteúdos
+    // filtrando pelo tópico específico
+    if (event.topicId) {
+      navigate(`/conteudo?topic_id=${event.topicId}`);
+      onClose();
+      return;
+    }
+    // Fallback: rota padrão por tipo de atividade (legado)
     if (routeForActivity) {
       navigate(routeForActivity);
       onClose();
@@ -223,6 +231,14 @@ export function OccurrenceModal({
             {event.theme && (
               <p className="text-xs text-muted-foreground mt-0.5">
                 Tema (P1): <span className="text-foreground font-medium">{event.theme}</span>
+              </p>
+            )}
+            {event.topicId && (
+              <p className="text-xs text-primary mt-0.5 flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-primary/20 flex items-center justify-center">
+                  <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+                </span>
+                Tópico vinculado: <span className="font-medium">{event.topicName ?? event.topicId.slice(0, 8) + '...'}</span>
               </p>
             )}
           </div>

@@ -1,0 +1,307 @@
+# UNA VOX — DIAGNÓSTICO: INTEGRAÇÃO DO PLANO DE ESTUDOS COM A HIERARQUIA DE CONTEÚDOS
+**Data:** 2026-11-21 | **Fase:** 1 — Somente Diagnóstico (leitura, sem edições)
+
+---
+
+## 1. RESUMO DA HIERARQUIA DE CONTEÚDOS (aba "Conteúdos")
+
+### 1.1 Tabelas/Schemas no Supabase
+
+| Tabela | Colunas-chave | Ligações (FK) |
+|--------|--------------|---------------|
+| `disciplines` | `id`, `user_id`, `name`, `created_at`, `updated_at` | — |
+| `topics` | `id`, `user_id`, `discipline_id`, `name`, `status`, `planned_date`, `order`, `created_at`, `updated_at`, `is_deleted` | `discipline_id → disciplines.id` |
+| `subtopicos` | `id`, `user_id`, `topico_id`, `name`, `status`, `order`, `createdAt`, `updated_at`, `isDeleted` | `topico_id → topics.id` |
+| `aulas` | `id`, `user_id`, `titulo`, `descricao`, `terabox_url`, `disciplina` (string), `assunto` (string), `subassunto` (string), `assunto_ordem`, `ordem`, `created_at` | Campos textuais (não FK) — `disciplina`, `assunto`, `subassunto` espelham nomes |
+
+> **Observação importante:** `aulas` usa **strings livres** (`disciplina`, `assunto`, `subassunto`) para denormalização, **não chaves estrangeiras**. A hierarquia real navega-se via `disciplines → topics → subtopicos`.
+
+### 1.2 Schemas RxDB (local, `src/lib/db.ts`)
+
+| Coleção | Campos | Ligações |
+|---------|--------|----------|
+| `disciplines` | `id`, `name`, `user_id`, `createdAt`, `updated_at`, `isDeleted` | — |
+| `topics` | `id`, `name`, `discipline_id`, `user_id`, `status`, `planned_date`, `order`, `createdAt`, `updated_at`, `isDeleted` | `discipline_id` |
+| `subtopicos` | `id`, `user_id`, `topico_id`, `name`, `status`, `order`, `createdAt`, `updated_at`, `isDeleted` | `topico_id` |
+| `aulas` | **Não existe schema RxDB** — acesso direto via `aulaService.getAulasDoUsuario()` (Supabase + cache localStorage) | — |
+
+### 1.3 Serviços de Consulta (Supabase Client)
+
+- `getDisciplines(userId)` — lista disciplinas do usuário
+- `getTopics(disciplineId)` — lista tópicos de uma disciplina
+- **Não há** `getSubtopicos(topicId)` exposto no `supabaseClient.ts` (existe schema RxDB mas sem wrapper Supabase)
+- `getAulasDoUsuario(userId)` — retorna todas as aulas com campos `disciplina`, `assunto`, `subassunto` como strings
+
+### 1.4 Como o app monta a árvore hoje
+- Componente "Conteúdos" busca `disciplines` → para cada disciplina busca `topics` → para cada tópico busca `subtopicos` (lado RxDB)
+- Aulas são listadas planas via `getAulasDoUsuario()` e agrupadas em memória por `disciplina` → `assunto` → `subassunto` (strings)
+
+---
+
+## 2. ESTADO ATUAL DO PLANO DE ESTUDOS
+
+### 2.1 Tabelas Supabase (Migração `20261119_create_study_plan.sql` + posteriores)
+
+| Tabela | Colunas relevantes | Status da ligação com conteúdo |
+|--------|-------------------|--------------------------------|
+| `study_tasks` | `id`, `user_id`, `name`, `activity_type`, `color`, `theme_rule`, `default_duration_min`, `created_at`, `updated_at`, `is_deleted` | ❌ **ZERO ligação** — apenas nome livre (`name`) e `theme_rule` |
+| `study_theme_timelines` | `id`, `user_id`, `period_type` (month/week), `period_start`, `themes` (text[]), `created_at`, `updated_at`, `is_deleted` | ❌ **String livre** — `themes` = array de nomes (ex: `["Direito Constitucional", "Português"]`) |
+| `study_weekly_blocks` | `id`, `user_id`, `task_id`, `weekday`, `start_time`, `end_time`, `effective_from`, `effective_until`, ... | Liga apenas a `study_tasks` (task_id) |
+| `study_extra_events` | `id`, `user_id`, `task_id`, `weekdays`, `start_time`, `end_time`, `week_starts`, ... | Liga apenas a `study_tasks` |
+| `study_occurrences` | `id`, `user_id`, `source_type`, `source_id`, `occurrence_date`, `start_time`, `end_time`, `task_id`, `task_name`, `task_color`, `task_activity_type`, `theme` (string), `status`, `override_theme`, ... | `theme` = string resolvida dinamicamente (não ID) |
+| `study_plan_pauses` | `id`, `user_id`, `start_date`, `end_date`, `reason`, ... | Independente de conteúdo |
+
+### 2.2 Schemas RxDB (`src/lib/db.ts` linhas 1006-1130)
+Mesma estrutura, adaptada para camelCase. **Nenhum campo `discipline_id`, `topic_id`, `subtopic_id`** em nenhuma das 5 coleções do Plano.
+
+### 2.3 Tipos TypeScript (`src/types/study-plan.ts`)
+
+```typescript
+// StudyTask — biblioteca de atividades (Camada 2)
+export interface StudyTask {
+  id: string;
+  user_id: string;
+  name: string;                    // ex: "Teoria - Direito Constitucional"
+  activity_type: ActivityType;     // theory | questions | review | cards | exam | break | other
+  color: string;
+  theme_rule: ThemeRule;           // 'period' | 'all' | 'none'
+  default_duration_min: number;
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+  // ❌ NÃO TEM: discipline_id, topic_id, subtopic_id
+}
+
+// StudyThemeTimeline — linha do tempo de temas (Camada 1)
+export interface StudyThemeTimeline {
+  id: string;
+  user_id: string;
+  period_type: PeriodType;         // 'month' | 'week'
+  period_start: string;            // ISO date
+  themes: string[];                // ❌ Array de STRINGS livres
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+
+// StudyOccurrence — ocorrência individual (motor)
+export interface StudyOccurrence {
+  // ...
+  theme: string;                   // ❌ Tema resolvido como STRING
+  override_theme?: string | null;  // ❌ Override também string
+  // ❌ NÃO TEM: discipline_id, topic_id, subtopic_id
+}
+```
+
+### 2.4 O que **FALTA** hoje para fazer a ligação
+1. **`study_tasks`** — sem `discipline_id`, `topic_id`, `subtopic_id` (opcionais)
+2. **`study_theme_timelines`** — `themes` é `string[]`; precisaria virar `topic_id[]` ou `subtopic_id[]` (ou manter string + adicionar IDs paralelos)
+3. **`study_occurrences`** — guarda `theme` como string resolvida; precisaria de `topic_id`/`subtopic_id` para saber "onde" a ocorrência acontece
+4. **UI** — `TaskLibrary` e `ThemeTimeline` usam inputs de texto livre; precisam de **Seletor de Conteúdo em Árvore** (Disciplina → Assunto → Subassunto)
+5. **Botão "Iniciar atividade"** — navega para rota genérica (`/aulas`, `/erros`, etc.) sem passar `discipline_id`/`topic_id` no estado/URL
+
+---
+
+## 3. FLUXO DE "INICIAR ATIVIDADE" HOJE
+
+### 3.1 `OccurrenceModal` (`src/components/study-plan/OccurrenceModal.tsx`)
+- Botão **"Iniciar atividade"** chama `handleStartActivity()`:
+```typescript
+const routeForActivity = ACTIVITY_TYPE_ROUTE_MAP[event.activityType] ?? null;
+if (routeForActivity) {
+  navigate(routeForActivity);  // ex: navigate('/aulas')
+  onClose();
+}
+```
+- **Nenhum ID de conteúdo** é passado na navegação nem no estado.
+
+### 3.2 `ACTIVITY_TYPE_ROUTE_MAP` (`src/types/study-plan.ts` linhas 235-247)
+```typescript
+export const ACTIVITY_TYPE_ROUTE_MAP: Record<ActivityType, string | null> = {
+  theory: '/aulas',          // abre lista genérica de aulas
+  questions: '/erros',       // banco de questões / fixação
+  review: '/flashcards',     // flashcards
+  cards: '/flashcards',      // flashcards
+  exam: '/simulados',        // simulados
+  break: null,
+  other: null,
+};
+```
+
+### 3.3 Consequência prática
+- Usuário clica "Iniciar" numa ocorrência "Teoria - Direito Constitucional" → abre `/aulas` **sem filtro**
+- Precisa navegar manualmente: Disciplina → Assunto → Aula
+- Registro automático na Agenda (`study_records`) salva `discipline` e `topic` como **strings** vindas do `event.theme` (resolvido na geração), não IDs confiáveis
+
+---
+
+## 4. OPÇÕES DE INTEGRAÇÃO — ANÁLISE COMPARATIVA
+
+### OPÇÃO A — Vínculo na Tarefa (`study_tasks` ganha IDs de conteúdo)
+| Aspecto | Detalhes |
+|---------|----------|
+| **Mudança no Schema** | Adicionar `discipline_id?`, `topic_id?`, `subtopic_id?` em `study_tasks` (Supabase + RxDB v1+) |
+| **UI** | `TaskLibrary` ganha "Seletor de Conteúdo em Árvore" ao criar/editar tarefa. Opcional — tarefa pode ficar genérica. |
+| **ThemeTimeline** | Inalterada (continua strings). Motor `resolveThemeForOccurrence` passa a **priorizar** `task.topic_id` se `theme_rule === 'period'` e houver timeline para aquele tópico. |
+| **Ocorrência** | Herda `topic_id`/`subtopic_id` da task (denormalizado). `theme` string ainda resolvido para exibição. |
+| **Iniciar Atividade** | `OccurrenceModal` passa `topic_id` na navegação: `navigate(\`/aulas?topic=\${topicId}\`)`. Página `/aulas` filtra automaticamente. |
+| **Registro Automático** | `createAutoStudyRecord` usa `topic_id` real (não string) → Agenda fica consistente. |
+| **Migração de dados** | **Complexa** — tarefas existentes sem ID. Exige heurística: match `task.name` + `theme` com `topics.name`/`disciplines.name`. Pode gerar falsos positivos. |
+| **Prós** | Ligação direta e simples; tarefa "sabe" seu conteúdo; botão "Iniciar" funciona imediato. |
+| **Contras** | Polui biblioteca de tarefas genéricas com dados específicos; uma tarefa "Teoria" não pode servir a múltiplos assuntos; migração arriscada. |
+| **Esforço** | **G** (Grande) — schema, migração, UI seletor árvore, motor, navegação, testes. |
+
+---
+
+### OPÇÃO B — Vínculo no Tema/Cronograma (`study_theme_timelines` aponta para IDs)
+| Aspecto | Detalhes |
+|---------|----------|
+| **Mudança no Schema** | `study_theme_timelines.themes` vira `topic_ids` (uuid[]) **ou** adiciona coluna paralela `topic_ids` mantendo `themes` para exibição legada. `study_tasks` inalterada. |
+| **UI** | `ThemeTimeline` ganha "Seletor de Conteúdo em Árvore" ao adicionar tema (em vez de input texto). Mostra nome do tópico, salva ID. |
+| **Motor** | `resolveThemeForOccurrence` recebe `topic_ids` do período → busca nomes para exibição (`theme` string) E passa `topic_id` para a ocorrência gerada. |
+| **Ocorrência** | `study_occurrences` ganha `topic_id` (denormalizado) + mantém `theme` string para UI. |
+| **Iniciar Atividade** | `OccurrenceModal` lê `event.topic_id` (novo campo em `StudyPlanEvent`) e passa na navegação. |
+| **Registro Automático** | Usa `topic_id` da ocorrência → Agenda consistente. |
+| **Migração de dados** | **Média** — para cada timeline existente, fazer match `themes[]` com `topics.name` por disciplina do usuário. Mais controlável que Opção A (menos linhas). |
+| **Prós** | Tarefas continuam genéricas/reutilizáveis ("Teoria 90min" serve para qualquer assunto); cronograma é que define o conteúdo; separação de responsabilidades clara. |
+| **Contras** | Duplicação temporária `themes` (string[]) + `topic_ids` (uuid[]) durante transição; motor mais complexo (precisa resolver nomes para UI). |
+| **Esforço** | **M** (Médio) — schema, UI seletor árvore no ThemeTimeline, motor, ocorrência, navegação. Migração mais segura. |
+
+---
+
+### OPÇÃO C — Vínculo Dinâmico na Ocorrência (resolvido na geração, sem mudar tasks/timelines)
+| Aspecto | Detalhes |
+|---------|----------|
+| **Mudança no Schema** | `study_occurrences` ganha `topic_id`, `subtopic_id` (opcionais). `study_tasks` e `study_theme_timelines` **inalteradas**. |
+| **Motor** | Na geração da semana, `generateWeekSchedule` resolve: para cada ocorrência, pega `theme` string do período → faz match fuzzy com `topics`/`subtopicos` do usuário → salva `topic_id` na ocorrência. |
+| **UI** | `ThemeTimeline` e `TaskLibrary` **inalteradas** (continuam texto livre). Opcional: adicionar "Vincular a conteúdo" no `OccurrenceModal` para correção manual. |
+| **Iniciar Atividade** | `OccurrenceModal` usa `event.topic_id` se existir, senão fallback para rota genérica. |
+| **Registro Automático** | Usa `topic_id` da ocorrência se houver, senão string `theme`. |
+| **Migração de dados** | **Zero** — roda apenas para ocorrências futuras (geradas a partir do deploy). Passado não muda. |
+| **Prós** | Zero breaking change; tarefas e timelines intactas; implementação incremental; past preservado. |
+| **Contras** | Match fuzzy pode errar (ex: "Direito Constitucional" vs "Direito Constitucional Avançado"); `topic_id` pode ficar `null` se não achar match; dependência de nomenclatura consistente. |
+| **Esforço** | **P** (Pequeno) — apenas motor + ocorrência + navegação. Sem migração, sem UI nova. |
+
+---
+
+### TABELA COMPARATIVA RESUMIDA
+
+| Critério | Opção A (Task) | Opção B (Timeline) | Opção C (Ocorrência) |
+|----------|----------------|-------------------|---------------------|
+| **Schema Supabase** | +3 colunas em `study_tasks` | +1 coluna `topic_ids` em `study_theme_timelines` | +2 colunas em `study_occurrences` |
+| **Schema RxDB** | v1+ em `study_tasks` | v1+ em `study_theme_timelines` | v1+ em `study_occurrences` |
+| **UI Nova** | Seletor árvore no TaskLibrary | Seletor árvore no ThemeTimeline | Opcional no OccurrenceModal |
+| **Motor** | Simples (herda da task) | Médio (resolve IDs → nomes) | Complexo (match fuzzy) |
+| **Migração dados** | Difícil (heurística por tarefa) | Média (por timeline, poucas linhas) | **Zero** (só futuro) |
+| **Tarefas genéricas** | ❌ Perdidas (task = 1 conteúdo) | ✅ Mantidas | ✅ Mantidas |
+| **Botão "Iniciar"** | ✅ Imediato (task sabe) | ✅ Imediato (timeline sabe) | ⚠️ Parcial (pode falhar match) |
+| **Registro Agenda** | ✅ ID confiável | ✅ ID confiável | ⚠️ Pode vir string |
+| **Esforço total** | **G** | **M** | **P** |
+| **Risco regressão** | Alto | Médio | Baixo |
+
+---
+
+## 5. RECOMENDAÇÃO DA ARQUITETA
+
+### **Opção B (Vínculo no Tema/Cronograma) — A MAIS EQUILIBRADA**
+
+**Por que não Opção A:**
+- Tarefas como "Teoria 90min", "Questões 60min", "Revisão 30min" são **genéricas por design**. Vinculá-las a um assunto específico quebra a reutilização: o usuário teria que criar "Teoria - Direito Constitucional", "Teoria - Português", "Teoria - Direito Administrativo" — explosão combinatória na biblioteca.
+- Migração de tarefas existentes é propensa a erros (match por nome livre).
+
+**Por que não Opção C:**
+- Match fuzzy (`theme` string → `topic_id`) é frágil. Nomes de temas na timeline ("Direito Constitucional") podem não bater exatamente com `topics.name` ("Direito Constitucional - Parte 1"). Resultado: `topic_id` nulo em muitas ocorrências, botão "Iniciar" cai no fallback genérico.
+- Não resolve a raiz: a **Timeline** é o local semântico correto para dizer "neste mês/semana estudo *este assunto*".
+
+**Por que Opção B vence:**
+1. **Separação de responsabilidades correta**: Task = "tipo de atividade + duração"; Timeline = "quais assuntos quando". O motor apenas conecta os dois.
+2. **Tarefas continuam reutilizáveis**: Uma "Teoria 90min" serve para qualquer assunto da timeline.
+3. **Migração controlada**: `study_theme_timelines` tem poucas linhas (uma por mês/semana). Match `themes[]` → `topics.name` por disciplina do usuário é viável e verificável.
+4. **Botão "Iniciar" funciona**: O motor propaga `topic_id` da timeline para a ocorrência. `OccurrenceModal` navega para `/aulas?topic_id=...`.
+5. **Registro Automático consistente**: `study_records` recebe `topic_id` real, não string.
+6. **Esforço médio, risco médio**: Não mexe em `study_tasks` (tabela mais usada), só em `study_theme_timelines` e downstream.
+
+### Detalhamento da implementação recomendada (Opção B)
+
+| Etapa | Ação | Arquivos principais |
+|-------|------|---------------------|
+| **1. Schema Supabase** | `ALTER TABLE study_theme_timelines ADD COLUMN topic_ids uuid[];` + comentário. Manter `themes` para compat/legado. | Nova migration SQL |
+| **2. Schema RxDB** | `studyThemeTimelineSchema` v1: adicionar `topic_ids: { type: 'array', items: { type: 'string' }, default: [] }` | `src/lib/db.ts` |
+| **3. TypeScript** | `StudyThemeTimeline.topic_ids?: string[]` | `src/types/study-plan.ts` |
+| **4. Seletor de Conteúdo em Árvore** | Novo componente `ContentTreeSelector` (Disciplina → Tópico → Subtópico) reutilizável. Usa `getDisciplines`, `getTopics`, (futuro) `getSubtopicos`. | `src/components/study-plan/ContentTreeSelector.tsx` (novo) |
+| **5. ThemeTimeline UI** | Substituir input texto por `ContentTreeSelector` no modal de adicionar tema. Salva `topic_ids` + mantém `themes` (nomes) para exibição. | `src/components/study-plan/ThemeTimeline.tsx` |
+| **6. Motor `resolveThemeForOccurrence`** | Recebe `topic_ids` do período → busca nomes para `theme` string (UI) E retorna `topic_id` principal para a ocorrência. | `src/utils/generateWeekSchedule.ts` + `src/services/studyPlanService.ts` |
+| **7. Ocorrência** | `StudyOccurrence` + `StudyPlanEvent` ganham `topic_id?: string`. `generateWeekSchedule` preenche. | `src/types/study-plan.ts`, `src/utils/generateWeekSchedule.ts` |
+| **8. OccurrenceModal** | `handleStartActivity` passa `topic_id` na URL: `navigate(\`/aulas?topic_id=\${event.topic_id}\`)`. | `src/components/study-plan/OccurrenceModal.tsx` |
+| **9. Página `/aulas`** | Ler `topic_id` da query string → filtrar `getAulasDoUsuario` por `assunto` correspondente (ou buscar topic nome e filtrar). | `src/pages/AulasPage.tsx` (ou hook) |
+| **10. Registro Automático** | `createAutoStudyRecord` usa `occurrence.topic_id` → busca nome do topic → salva em `study_records.topic` (string) + novo campo `topic_id` (uuid) se quiser. | `src/services/studyPlanService.ts` |
+| **11. Migração de dados** | Script one-off: para cada `study_theme_timelines` do usuário, match `themes[]` com `topics.name` (por `discipline_id` do usuário) → preenche `topic_ids`. Rodar no Supabase pós-deploy. | SQL migration ou script Node |
+
+---
+
+## 6. PRÓXIMOS PASSOS — O QUE O PROMPT DE IMPLEMENTAÇÃO DEVE CONTER
+
+1. **Nova migration SQL** (`supabase/migrations/20261123_theme_timeline_topic_ids.sql`):
+   - `ALTER TABLE study_theme_timelines ADD COLUMN topic_ids uuid[];`
+   - Índice GIN opcional: `CREATE INDEX idx_study_theme_timelines_topic_ids ON study_theme_timelines USING GIN (topic_ids);`
+   - Função `salvar_study_theme_timelines_batch` atualizada para aceitar `topic_ids`.
+
+2. **RxDB schema version bump** (`src/lib/db.ts`):
+   - `studyThemeTimelineSchema.version = 1`
+   - Adicionar `topic_ids` no properties.
+
+3. **Tipo TypeScript** (`src/types/study-plan.ts`):
+   - `export interface StudyThemeTimeline { ..., topic_ids?: string[] }`
+   - `export interface StudyOccurrence { ..., topic_id?: string }`
+   - `export interface StudyPlanEvent { ..., topic_id?: string }`
+
+4. **Componente `ContentTreeSelector`** (novo arquivo):
+   - Props: `userId`, `selectedTopicIds`, `onChange(topicIds: string[])`, `allowMultiple?`
+   - Busca `disciplines` → `topics` → (opcional) `subtopicos`
+   - Render: accordion/tree com checkboxes.
+
+5. **Atualizar `ThemeTimeline.tsx`**:
+   - Modal de adicionar tema usa `ContentTreeSelector`.
+   - `upsert` envia `topic_ids` + `themes` (nomes para exibição legada).
+
+6. **Atualizar motor `generateWeekSchedule.ts`**:
+   - `resolveThemeForOccurrence` recebe `topic_ids` do período.
+   - Retorna `{ theme: string, topic_id: string | null }`.
+   - `createStudyPlanEvent` inclui `topic_id` no evento.
+
+7. **Atualizar `OccurrenceModal.tsx`**:
+   - `handleStartActivity` passa `topic_id` na navegação.
+
+8. **Atualizar página `/aulas`** (ou hook `useAulas`):
+   - Ler `topic_id` da query string → filtrar aulas.
+
+9. **Atualizar registro automático** (`studyPlanService.ts`):
+   - `createAutoStudyRecord` usa `topic_id` da ocorrência.
+
+10. **Script de migração de dados** (SQL ou Node):
+    - Para cada usuário, cada timeline: match `themes[]` → `topics.name` (dentro das disciplinas do usuário) → preencher `topic_ids`.
+
+11. **Testes**:
+    - Unit: `resolveThemeForOccurrence` com `topic_ids`.
+    - Integração: ThemeTimeline salva `topic_ids`; motor propaga para ocorrência; modal navega com `topic_id`.
+
+---
+
+## 7. ARQUIVOS-CHAVE PARA REFERÊNCIA RÁPIDA
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `src/types/study-plan.ts` | Tipos centrais (StudyTask, StudyThemeTimeline, StudyOccurrence, ACTIVITY_TYPE_ROUTE_MAP) |
+| `src/lib/db.ts` | Schemas RxDB (linhas 1006-1130 para Plano, 182-210 para Disciplines/Topics/Subtopicos) |
+| `src/utils/generateWeekSchedule.ts` | Motor puro — `resolveThemeForOccurrence`, `generateWeekSchedule` |
+| `src/services/studyPlanService.ts` | Serviços RxDB + Supabase (create, update, delete, resolveThemeForOccurrence re-exportado) |
+| `src/components/study-plan/TaskLibrary.tsx` | UI biblioteca de tarefas (precisa seletor se Opção A) |
+| `src/components/study-plan/ThemeTimeline.tsx` | UI linha do tempo de temas (precisa seletor na Opção B) |
+| `src/components/study-plan/OccurrenceModal.tsx` | Modal de ocorrência — botão "Iniciar atividade" |
+| `src/services/aulaService.ts` | `getAulasDoUsuario` — busca aulas com `disciplina`, `assunto`, `subassunto` strings |
+| `src/lib/supabaseClient.ts` | `getDisciplines`, `getTopics` — APIs Supabase para hierarquia |
+| `supabase/migrations/20261119_create_study_plan.sql` | Schema base do Plano no Supabase |
+
+---
+
+**Fim do diagnóstico.** Aguardando análise da dona do projeto para gerar o prompt de implementação detalhado (com arquivos exatos, código pronto para colar, comandos de migration).

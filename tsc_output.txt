@@ -1,0 +1,107 @@
+src/client.tsx(249,7): error TS2322: Type '{ children: Element; publishableKey: any; localization: LocalizationResource; signInUrl: string; signUpUrl: string; fallbackRedirectUrl: string; __experimental_billing: { ...; }; appearance: {}; }' is not assignable to type 'IntrinsicAttributes & Omit<IsomorphicClerkOptions, "appearance" | "publishableKey" | keyof InternalClerkScriptProps> & { ...; }'.
+  Property 'fallbackRedirectUrl' does not exist on type 'IntrinsicAttributes & Omit<IsomorphicClerkOptions, "appearance" | "publishableKey" | keyof InternalClerkScriptProps> & { ...; }'. Did you mean 'signInFallbackRedirectUrl'?
+src/components/study-plan/ThemeTimeline.tsx(357,24): error TS2345: Argument of type 'boolean | undefined' is not assignable to parameter of type 'SetStateAction<boolean>'.
+  Type 'undefined' is not assignable to type 'SetStateAction<boolean>'.
+src/contexts/FlashcardContext.tsx(359,45): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/contexts/FlashcardContext.tsx(360,46): error TS7006: Parameter 'c' implicitly has an 'any' type.
+src/contexts/FlashcardContext.tsx(1045,24): error TS2345: Argument of type '(prev: Card[]) => { difficulty: number; stability: number; dueDate: string | null; reps: number; lapses: number; state: number; elapsed_days: number; scheduled_days: number; lastReview: string | null; ... 12 more ...; back_image_url?: string | ... 1 more ... | undefined; }[]' is not assignable to parameter of type 'SetStateAction<Card[]>'.
+  Type '(prev: Card[]) => { difficulty: number; stability: number; dueDate: string | null; reps: number; lapses: number; state: number; elapsed_days: number; scheduled_days: number; lastReview: string | null; ... 12 more ...; back_image_url?: string | ... 1 more ... | undefined; }[]' is not assignable to type '(prevState: Card[]) => Card[]'.
+    Type '{ difficulty: number; stability: number; dueDate: string | null; reps: number; lapses: number; state: number; elapsed_days: number; scheduled_days: number; lastReview: string | null; updatedAt: string; ... 11 more ...; back_image_url?: string | ... 1 more ... | undefined; }[]' is not assignable to type 'Card[]'.
+      Type '{ difficulty: number; stability: number; dueDate: string | null; reps: number; lapses: number; state: number; elapsed_days: number; scheduled_days: number; lastReview: string | null; updatedAt: string; ... 11 more ...; back_image_url?: string | null; }' is not assignable to type 'Card'.
+        Types of property 'dueDate' are incompatible.
+          Type 'string | null' is not assignable to type 'string'.
+            Type 'null' is not assignable to type 'string'.
+src/contexts/FlashcardContext.tsx(1583,59): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/contexts/UserContext.tsx(95,9): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+src/hooks/useWeekSchedule.ts(19,3): error TS2305: Module '"@/types/study-plan"' has no exported member 'Topic'.
+src/router.tsx(68,17): error TS2353: Object literal may only specify known properties, and 'colorText' does not exist in type 'Variables'.
+src/routes/cadastro.tsx(24,11): error TS2339: Property 'isLoaded' does not exist on type 'SignUpSignalValue'.
+src/routes/cadastro.tsx(24,29): error TS2339: Property 'setActive' does not exist on type 'SignUpSignalValue'.
+src/routes/cadastro.tsx(47,20): error TS2339: Property 'authenticateWithRedirect' does not exist on type 'SignUpFutureResource'.
+src/routes/cadastro.tsx(83,20): error TS2339: Property 'prepareEmailAddressVerification' does not exist on type 'SignUpFutureResource'.
+src/routes/cadastro.tsx(103,43): error TS2339: Property 'attemptEmailAddressVerification' does not exist on type 'SignUpFutureResource'.
+src/routes/calendario.tsx(225,11): error TS7034: Variable 'novaRevisao' implicitly has type 'any' in some locations where its type cannot be determined.
+src/routes/calendario.tsx(238,41): error TS7005: Variable 'novaRevisao' implicitly has an 'any' type.
+src/routes/compartilhados.tsx(433,37): error TS2339: Property 'novoTopicoNome' does not exist on type 'ResultadoEscolha'.
+src/routes/conteudo.tsx(205,74): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/routes/conteudo.tsx(205,98): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/routes/flashcards.tsx(1551,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1552,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1553,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1572,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1573,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1574,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1738,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1739,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1740,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1759,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1760,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/flashcards.tsx(1761,70): error TS2345: Argument of type 'RefObject<HTMLTextAreaElement | null>' is not assignable to parameter of type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+src/routes/listas.$id.tsx(522,9): error TS2322: Type 'boolean | null | undefined' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/routes/login.tsx(38,11): error TS2339: Property 'isLoaded' does not exist on type 'SignInSignalValue'.
+src/routes/login.tsx(38,44): error TS2339: Property 'setActive' does not exist on type 'SignInSignalValue'.
+src/routes/login.tsx(84,20): error TS2339: Property 'authenticateWithRedirect' does not exist on type 'SignInFutureResource'.
+src/routes/login.tsx(124,20): error TS2339: Property 'selectFirstFactor' does not exist on type 'SignInFutureResource'.
+src/routes/login.tsx(133,28): error TS2339: Property 'status' does not exist on type '{ error: ClerkError | null; }'.
+src/routes/login.tsx(134,53): error TS2339: Property 'createdSessionId' does not exist on type '{ error: ClerkError | null; }'.
+src/routes/login.tsx(145,68): error TS2339: Property 'supportedSecondFactors' does not exist on type 'VerificationResource'.
+src/routes/login.tsx(157,33): error TS2345: Argument of type '"email_code" | "phone_code" | "totp"' is not assignable to parameter of type 'SetStateAction<"email_code">'.
+  Type '"phone_code"' is not assignable to type 'SetStateAction<"email_code">'.
+src/routes/login.tsx(160,22): error TS2339: Property 'prepareSecondFactor' does not exist on type 'SignInFutureResource'.
+src/routes/login.tsx(228,20): error TS2339: Property 'attemptSecondFactor' does not exist on type 'SignInFutureResource'.
+src/routes/login.tsx(236,28): error TS2339: Property 'status' does not exist on type '{ error: ClerkError | null; }'.
+src/routes/login.tsx(237,53): error TS2339: Property 'createdSessionId' does not exist on type '{ error: ClerkError | null; }'.
+src/routes/login.tsx(295,20): error TS2339: Property 'prepareSecondFactor' does not exist on type 'SignInFutureResource'.
+src/routes/login.tsx(503,22): error TS2367: This comparison appears to be unintentional because the types '"email_code"' and '"phone_code"' have no overlap.
+src/routes/login.tsx(506,22): error TS2367: This comparison appears to be unintentional because the types '"email_code"' and '"totp"' have no overlap.
+src/routes/login.tsx(518,24): error TS2367: This comparison appears to be unintentional because the types '"email_code"' and '"totp"' have no overlap.
+src/routes/login.tsx(527,36): error TS2367: This comparison appears to be unintentional because the types '"email_code"' and '"totp"' have no overlap.
+src/services/listaService.ts(144,19): error TS2339: Property 'data' does not exist on type 'unknown'.
+src/services/listaService.ts(144,32): error TS2339: Property 'error' does not exist on type 'unknown'.
+src/services/listaService.ts(156,17): error TS2339: Property 'data' does not exist on type 'unknown'.
+src/services/listaService.ts(156,30): error TS2339: Property 'error' does not exist on type 'unknown'.
+src/services/listaService.ts(176,21): error TS2339: Property 'data' does not exist on type 'unknown'.
+src/services/listaService.ts(176,31): error TS2339: Property 'error' does not exist on type 'unknown'.
+src/services/pdfExtracaoAvancada.ts(1095,14): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1096,14): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1097,14): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1098,14): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1099,11): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1107,10): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/services/pdfExtracaoAvancada.ts(1118,34): error TS7006: Parameter 'c' implicitly has an 'any' type.
+src/services/pdfExtrasService.ts(125,50): error TS2339: Property 'pagina' does not exist on type '{ x0: number; x1: number; y: number; espessuraPt: number; larguraPagina: number; alturaPagina: number; }'.
+src/services/rankingService.ts(273,53): error TS7006: Parameter 'h' implicitly has an 'any' type.
+vite.config.ts(21,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' has no properties in common with type 'BuilderOptions'.
+      Type 'false' has no properties in common with type 'SSROptions'.
+vite.config.ts(26,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' has no properties in common with type 'BuilderOptions'.
+      Type 'false' has no properties in common with type 'SSROptions'.

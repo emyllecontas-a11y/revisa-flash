@@ -10,7 +10,7 @@ import {
   ArrowDownToLine, CloudOff, CloudDownload, FilterX
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { uid, gerenciarRevisao } from "@/utils/helpers";
 import { getDb } from "@/lib/db";
 import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
@@ -120,6 +120,8 @@ export default function ConteudoPage() {
     itemName: string;
   } | null>(null);
 
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
     const loadUserId = async () => {
       try {
@@ -139,6 +141,28 @@ export default function ConteudoPage() {
     };
     loadUserId();
   }, []);
+
+  // Ler topic_id da query string e selecionar o tópico correspondente
+  useEffect(() => {
+    const topicIdFromUrl = searchParams.get('topic_id');
+    if (topicIdFromUrl && userId) {
+      // Buscar o tópico no banco local para obter a disciplina
+      (async () => {
+        try {
+          const db = await getDb();
+          const topicDoc = await db.topics.findOne({ selector: { id: topicIdFromUrl, user_id: userId, isDeleted: { $ne: true } } }).exec();
+          if (topicDoc) {
+            const topicData = topicDoc.toJSON() as Topico;
+            setSelectedDisciplineId(topicData.discipline_id);
+            setSelectedTopicId(topicData.id);
+            setModo('disciplina-detalhe');
+          }
+        } catch (e) {
+          console.warn('[conteudo] Falha ao buscar tópico da URL:', e);
+        }
+      })();
+    }
+  }, [searchParams, userId]);
 
   useEffect(() => {
     (async () => {

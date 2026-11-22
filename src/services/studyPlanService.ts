@@ -665,6 +665,8 @@ export interface GeneratedOccurrenceInput {
   activityType?: ActivityType;
   theme?: string;
   status?: OccurrenceStatus;
+  topic_id?: string | null;
+  topicId?: string | null;
 }
 
 /**
@@ -728,6 +730,7 @@ export async function upsertOccurrenceOverride(
     theme: generatedOccurrence.theme ?? '',
     status: changes.status ?? generatedOccurrence.status ?? 'pending',
     override_theme: changes.override_theme !== undefined ? changes.override_theme : null,
+    topic_id: generatedOccurrence.topic_id ?? generatedOccurrence.topicId ?? null,
     created_at: now,
     updated_at: now,
     isDeleted: changes.is_deleted ?? false,

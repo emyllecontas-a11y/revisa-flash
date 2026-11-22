@@ -50,6 +50,7 @@ export interface StudyThemeTimeline {
   period_type: PeriodType; // 'month' ou 'week'
   period_start: string; // ISO date (início do período, ex: "2026-11-01")
   themes: string[]; // array de nomes de temas, ex: ["Direito Constitucional", "Português"]
+  topic_ids?: string[]; // array de UUIDs dos tópicos (integração com Conteúdos)
   created_at: string;
   updated_at: string;
   isDeleted?: boolean;
@@ -109,6 +110,7 @@ export interface StudyOccurrence {
   theme: string; // tema resolvido (baseado na theme_rule e theme_timeline)
   status: OccurrenceStatus; // 'pending' | 'done' | 'missed'
   override_theme?: string | null; // override manual do tema (opcional)
+  topic_id?: string | null; // ID do tópico vinculado (integração com Conteúdos)
   created_at: string;
   updated_at: string;
   isDeleted?: boolean;
@@ -152,6 +154,8 @@ export interface StudyPlanEvent {
   sourceId: string;
   isOverride?: boolean;
   isExtra?: boolean;
+  topicId?: string | null; // ID do tópico vinculado (integração com Conteúdos)
+  topicName?: string | null; // Nome legível do tópico (resolvido via topics table)
 }
 
 /**

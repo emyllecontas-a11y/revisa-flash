@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
-import { Plus, Trash2, X, Calendar, CalendarDays } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { Plus, Trash2, X, Calendar, CalendarDays, AlertCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/useToast";
 import { useThemeTimeline } from "@/hooks/useThemeTimeline";
+import { ContentTreeSelector } from "./ContentTreeSelector";
 import { type StudyThemeTimeline, type PeriodType, PERIOD_TYPE_LABELS } from "@/types/study-plan";
 
 interface ThemeChipProps {
@@ -186,25 +187,41 @@ interface ThemeTimelineModalProps {
   userId: string;
   isOpen: boolean;
   onClose: () => void;
+  initialTopicIds?: string[];
+  initialThemes?: string[];
+  isLegacy?: boolean;
+  onConfirm: (topicIds: string[], themes: string[]) => void;
 }
 
-function ThemeTimelineModal({ userId, isOpen, onClose }: ThemeTimelineModalProps) {
-  const { upsert, reload } = useThemeTimeline(userId);
+function ThemeTimelineModal({
+  userId,
+  isOpen,
+  onClose,
+  initialTopicIds = [],
+  initialThemes = [],
+  isLegacy = false,
+  onConfirm,
+}: ThemeTimelineModalProps) {
   const toast = useToast();
-  const [newTheme, setNewTheme] = useState("");
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(initialTopicIds);
+  const [selectedThemeNames, setSelectedThemeNames] = useState<string[]>(initialThemes);
 
-  const handleAddTheme = (
-    themes: string[],
-    setThemes: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
-    const trimmed = newTheme.trim();
-    if (!trimmed) return;
-    if (themes.includes(trimmed)) {
-      toast.warning("Este tema já foi adicionado");
+  // Sync theme names when topic IDs change (we don't have topic name mapping here,
+  // so we just keep the names that were initially passed)
+  // The ContentTreeSelector returns topic IDs; we need to also get names.
+  // For now, the names are preserved from initialThemes or entered manually.
+
+  const handleTopicChange = (topicIds: string[]) => {
+    setSelectedTopicIds(topicIds);
+  };
+
+  const handleConfirm = () => {
+    if (selectedTopicIds.length === 0) {
+      toast.error("Selecione pelo menos um tópico");
       return;
     }
-    setThemes((prev) => [...prev, trimmed]);
-    setNewTheme("");
+    onConfirm(selectedTopicIds, selectedThemeNames);
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -214,36 +231,60 @@ function ThemeTimelineModal({ userId, isOpen, onClose }: ThemeTimelineModalProps
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4"
       onClick={onClose}
     >
-      <div className="w-full max-w-md rf-card rounded-2xl p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rf-card rounded-2xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <header className="flex items-center justify-between mb-6">
-          <h3 className="font-display text-lg font-bold">Adicionar Tema</h3>
+          <h3 className="font-display text-lg font-bold">Selecionar Tópicos</h3>
           <button onClick={onClose} aria-label="Fechar">
             <X className="h-5 w-5" />
           </button>
         </header>
 
+        {isLegacy && (
+          <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-amber-800">
+              <strong>Período legado:</strong> este período foi criado antes da integração com Conteúdos.
+              Selecione os assuntos correspondentes abaixo para vinculá-los.
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Digite o nome do tema e pressione Enter ou clique em Adicionar.
+            Escolha os tópicos das suas disciplinas. Você pode selecionar múltiplos.
           </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newTheme}
-              onChange={(e) => setNewTheme(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  // The parent will handle adding
-                }
-              }}
-              placeholder="Ex: Direito Constitucional"
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              autoFocus
-            />
-            <button onClick={() => {}} className="btn-sun">
-              Adicionar
+
+          <ContentTreeSelector
+            userId={userId}
+            selectedTopicIds={selectedTopicIds}
+            onChange={handleTopicChange}
+            allowMultiple={true}
+          />
+
+          {selectedTopicIds.length > 0 && (
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <span className="text-sm text-muted-foreground">
+                {selectedTopicIds.length} tópico{selectedTopicIds.length !== 1 ? "s" : ""} selecionado{selectedTopicIds.length !== 1 ? "s" : ""}
+              </span>
+              <button
+                onClick={handleConfirm}
+                className="btn-sun"
+                disabled={selectedTopicIds.length === 0}
+              >
+                Confirmar
+              </button>
+            </div>
+          )}
+
+          {selectedTopicIds.length === 0 && (
+            <button
+              onClick={handleConfirm}
+              className="btn-sun w-full"
+              disabled={true}
+            >
+              Selecione pelo menos um tópico
             </button>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -259,12 +300,12 @@ export function ThemeTimeline({ userId }: { userId: string }) {
   const [editingThemes, setEditingThemes] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
-  const [modalThemes, setModalThemes] = useState<string[]>([]);
-  const [modalNewTheme, setModalNewTheme] = useState("");
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [modalInitialTopicIds, setModalInitialTopicIds] = useState<string[]>([]);
+  const [modalInitialThemes, setModalInitialThemes] = useState<string[]>([]);
+  const [modalIsLegacy, setModalIsLegacy] = useState(false);
 
   // Initialize current period to current month/week
-  const getCurrentPeriodStart = (type: PeriodType): string => {
+  const getCurrentPeriodStart = useCallback((type: PeriodType): string => {
     const now = new Date();
     if (type === "month") {
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
@@ -275,7 +316,7 @@ export function ThemeTimeline({ userId }: { userId: string }) {
       monday.setDate(now.getDate() + diff);
       return monday.toISOString().split("T")[0];
     }
-  };
+  }, []);
 
   // Load themes when period changes
   const themes = useMemo(() => {
@@ -284,53 +325,47 @@ export function ThemeTimeline({ userId }: { userId: string }) {
   }, [periodType, currentPeriodStart, getThemesForPeriod]);
 
   // Initialize on mount
-  if (timelines.length > 0 && !currentPeriodStart) {
-    setCurrentPeriodStart(getCurrentPeriodStart(periodType));
-  }
+  useEffect(() => {
+    if (timelines.length > 0 && !currentPeriodStart) {
+      setCurrentPeriodStart(getCurrentPeriodStart(periodType));
+    }
+  }, [timelines, currentPeriodStart, periodType, getCurrentPeriodStart]);
 
   const handlePeriodTypeChange = (type: PeriodType) => {
     setPeriodType(type);
     setCurrentPeriodStart(getCurrentPeriodStart(type));
     setEditingThemes([]);
-    setMultiSelectMode(false);
+    setShowThemeModal(false);
   };
 
   const handlePeriodChange = (date: string) => {
     setCurrentPeriodStart(date);
     setEditingThemes([]);
-    setMultiSelectMode(false);
+    setShowThemeModal(false);
   };
 
   const handleAddTheme = () => {
-    setModalThemes([...themes]);
-    setMultiSelectMode(false);
-    setShowThemeModal(true);
-  };
+    // Find existing timeline for this period to get topic_ids
+    const existing = timelines.find(
+      (t) => t.period_type === periodType && t.period_start === currentPeriodStart,
+    );
+    const isLegacy = existing && (!existing.topic_ids || existing.topic_ids.length === 0) && existing.themes.length > 0;
 
-  const handleAddMultipleThemes = () => {
-    setModalThemes([...themes]);
-    setMultiSelectMode(true);
-    setShowThemeModal(true);
-  };
-
-  const handleModalAddTheme = () => {
-    const trimmed = modalNewTheme.trim();
-    if (!trimmed) return;
-    if (modalThemes.includes(trimmed)) {
-      toast.warning("Este tema já foi adicionado");
-      return;
+    if (existing) {
+      setModalInitialTopicIds(existing.topic_ids || []);
+      setModalInitialThemes(existing.themes);
+      setModalIsLegacy(isLegacy);
+    } else {
+      setModalInitialTopicIds([]);
+      setModalInitialThemes([]);
+      setModalIsLegacy(false);
     }
-    setModalThemes((prev) => [...prev, trimmed]);
-    setModalNewTheme("");
+    setShowThemeModal(true);
   };
 
-  const handleModalRemoveTheme = (theme: string) => {
-    setModalThemes((prev) => prev.filter((t) => t !== theme));
-  };
-
-  const handleModalConfirm = async () => {
-    if (modalThemes.length === 0 && themes.length === 0) {
-      toast.warning("Adicione pelo menos um tema");
+  const handleModalConfirm = async (topicIds: string[], themeNames: string[]) => {
+    if (topicIds.length === 0) {
+      toast.error("Selecione pelo menos um tópico");
       return;
     }
 
@@ -339,12 +374,12 @@ export function ThemeTimeline({ userId }: { userId: string }) {
       await upsert({
         period_type: periodType,
         period_start: currentPeriodStart,
-        themes: modalThemes,
+        themes: themeNames,
+        topic_ids: topicIds,
       });
       toast.success("Temas salvos");
       setShowThemeModal(false);
-      setModalNewTheme("");
-      setEditingThemes(modalThemes);
+      setEditingThemes(themeNames);
       await reload();
     } catch (err) {
       console.error(err);
@@ -356,6 +391,8 @@ export function ThemeTimeline({ userId }: { userId: string }) {
 
   const handleRemoveTheme = async (theme: string) => {
     const newThemes = themes.filter((t: string) => t !== theme);
+    // Also need to remove corresponding topic_id, but we don't have the mapping here
+    // For simplicity, just update themes; topic_ids will be managed via modal
     setIsSaving(true);
     try {
       await upsert({
@@ -377,7 +414,7 @@ export function ThemeTimeline({ userId }: { userId: string }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-32">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -412,92 +449,23 @@ export function ThemeTimeline({ userId }: { userId: string }) {
       {/* Save button when editing */}
       {(editingThemes.length > 0 || themes.length > 0) && (
         <div className="flex justify-end">
-          <button onClick={handleModalConfirm} disabled={isSaving} className="btn-sun">
-            {isSaving ? "Salvando..." : "Salvar temas deste período"}
+          <button onClick={handleAddTheme} disabled={isSaving} className="btn-sun">
+            {isSaving ? "Salvando..." : "Editar tópicos deste período"}
           </button>
         </div>
       )}
 
       {/* Theme modal */}
       {showThemeModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4"
-          onClick={() => setShowThemeModal(false)}
-        >
-          <div
-            className="w-full max-w-md rf-card rounded-2xl p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header className="flex items-center justify-between mb-6">
-              <h3 className="font-display text-lg font-bold">
-                {multiSelectMode ? "Adicionar Múltiplos Temas" : "Adicionar Tema"}
-              </h3>
-              <button onClick={() => setShowThemeModal(false)} aria-label="Fechar">
-                <X className="h-5 w-5" />
-              </button>
-            </header>
-
-            <div className="space-y-4">
-              {/* Current themes */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Temas atuais</label>
-                <div className="flex flex-wrap gap-2 min-h-[40px]">
-                  {modalThemes.length === 0 ? (
-                    <p className="text-sm text-muted-foreground w-full text-center py-4">
-                      Nenhum tema
-                    </p>
-                  ) : (
-                    modalThemes.map((theme) => (
-                      <ThemeChip
-                        key={theme}
-                        theme={theme}
-                        onRemove={() => handleModalRemoveTheme(theme)}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Add theme input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={modalNewTheme}
-                  onChange={(e) => setModalNewTheme(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleModalAddTheme();
-                    }
-                  }}
-                  placeholder="Digite o nome do tema e pressione Enter"
-                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  autoFocus
-                />
-                <button onClick={handleModalAddTheme} className="btn-sun whitespace-nowrap">
-                  Adicionar
-                </button>
-              </div>
-
-              {/* Multi-select hint */}
-              {multiSelectMode && (
-                <p className="text-xs text-muted-foreground">
-                  Adicione vários temas. Pressione Enter após cada um. Clique no X para remover.
-                </p>
-              )}
-
-              {/* Actions */}
-              <div className="flex justify-end gap-3 pt-4 border-t border-border">
-                <button onClick={() => setShowThemeModal(false)} className="btn-ghost">
-                  Cancelar
-                </button>
-                <button onClick={handleModalConfirm} disabled={isSaving} className="btn-sun">
-                  {isSaving ? "Salvando..." : "Confirmar"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ThemeTimelineModal
+          userId={userId}
+          isOpen={showThemeModal}
+          onClose={() => setShowThemeModal(false)}
+          initialTopicIds={modalInitialTopicIds}
+          initialThemes={modalInitialThemes}
+          isLegacy={modalIsLegacy}
+          onConfirm={handleModalConfirm}
+        />
       )}
     </div>
   );

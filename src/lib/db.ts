@@ -1025,7 +1025,7 @@ const studyTaskSchema = {
 
 const studyThemeTimelineSchema = {
   title: 'study theme timeline schema',
-  version: 0,
+  version: 1,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -1034,6 +1034,7 @@ const studyThemeTimelineSchema = {
     period_type: { type: 'string', enum: ['month', 'week'] },
     period_start: { type: 'string' }, // ISO date
     themes: { type: 'array', items: { type: 'string' } },
+    topic_ids: { type: 'array', items: { type: 'string' }, default: [] },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
     isDeleted: { type: 'boolean', default: false },

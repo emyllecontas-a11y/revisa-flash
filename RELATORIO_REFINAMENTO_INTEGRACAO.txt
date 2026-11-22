@@ -1,0 +1,175 @@
+# RELATÓRIO REFINAMENTO — INTEGRAÇÃO PLANO DE ESTUDOS ↔ CONTEÚDOS (PÓS-PARTE 2)
+
+Data: 2026-11-22
+
+---
+
+## 1. ARQUIVOS ALTERADOS NESTE REFINAMENTO
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `src/types/study-plan.ts` | Adicionado `topicName?: string \| null` em `StudyPlanEvent` |
+| `src/utils/generateWeekSchedule.ts` | Nova função `resolveTopicName()`; `GenerateWeekScheduleInput` aceita `topics?: Map<string, string>`; `createStudyPlanEvent` recebe mapa e preenche `topicName` |
+| `src/hooks/useWeekSchedule.ts` | Carrega `topics` do RxDB; cria mapa `topic_id -> topic_name`; passa para `generateWeekSchedule`; subscription reativa em `topics` |
+| `src/components/study-plan/OccurrenceModal.tsx` | Exibe `{event.topicName ?? event.topicId.slice(0,8)+'...'}` em vez de UUID truncado |
+| `src/routes/conteudo.tsx` | Lê `topic_id` via `useSearchParams()`; busca tópico no RxDB; seleciona disciplina + tópico; muda modo para `disciplina-detalhe` |
+
+---
+
+## 2. DIFFS DAS MUDANÇAS PRINCIPAIS
+
+### 2.1 `src/types/study-plan.ts`
+```typescript
+export interface StudyPlanEvent {
+  // ... campos existentes ...
+  topicId?: string | null;
+  topicName?: string | null; // NOVO: nome legível do tópico (resolvido via topics table)
+}
+```
+
+### 2.2 `src/utils/generateWeekSchedule.ts`
+```typescript
+export interface GenerateWeekScheduleInput {
+  // ... campos existentes ...
+  topics?: Map<string, string>; // topic_id -> topic_name (opcional)
+}
+
+// Nova função auxiliar
+function resolveTopicName(topicId: string | null | undefined, topics: Map<string, string> | undefined): string | null {
+  if (!topicId || !topics) return null;
+  return topics.get(topicId) ?? null;
+}
+
+// createStudyPlanEvent recebe o mapa e preenche topicName
+function createStudyPlanEvent(
+  baseOccurrence: StudyOccurrence,
+  task: StudyTask,
+  overrideOccurrence: StudyOccurrence | undefined,
+  occurrenceDate: string,
+  topics: Map<string, string> | undefined  // NOVO parâmetro
+): StudyPlanEvent {
+  // ...
+  return {
+    // ... campos existentes ...
+    topicId: finalTopicId,
+    topicName: resolveTopicName(finalTopicId, topics), // NOVO
+  };
+}
+```
+
+### 2.3 `src/hooks/useWeekSchedule.ts`
+```typescript
+// NOVO estado
+const [topics, setTopics] = useState<Topic[]>([]);
+
+// NOVO no reload()
+const topicsDocs = await db.topics.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec();
+setTopics(topicsDocs.map((d) => d.toJSON() as Topic));
+
+// NOVO subscription
+setupSubscription("topics", setTopics);
+
+// NOVO: mapa passado para generateWeekSchedule
+const topicsMap = new Map<string, string>();
+for (const topic of topics) topicsMap.set(topic.id, topic.name);
+
+const input: GenerateWeekScheduleInput = {
+  // ... campos existentes ...
+  topics: topicsMap, // NOVO
+};
+```
+
+### 2.4 `src/components/study-plan/OccurrenceModal.tsx`
+```tsx
+{event.topicId && (
+  <p className="text-xs text-primary mt-0.5 flex items-center gap-1">
+    <span className="w-3 h-3 rounded-full bg-primary/20 flex items-center justify-center">
+      <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 24 24">...</svg>
+    </span>
+    Tópico vinculado: <span className="font-medium">
+      {event.topicName ?? event.topicId.slice(0, 8) + '...'}  {/* ANTES: apenas UUID truncado */}
+    </span>
+  </p>
+)}
+```
+
+### 2.5 `src/routes/conteudo.tsx`
+```tsx
+import { useSearchParams } from "react-router-dom";
+
+const [searchParams] = useSearchParams();
+
+// NOVO: effect para ler topic_id da URL
+useEffect(() => {
+  const topicIdFromUrl = searchParams.get('topic_id');
+  if (topicIdFromUrl && userId) {
+    (async () => {
+      try {
+        const db = await getDb();
+        const topicDoc = await db.topics.findOne({ 
+          selector: { id: topicIdFromUrl, user_id: userId, isDeleted: { $ne: true } } 
+        }).exec();
+        if (topicDoc) {
+          const topicData = topicDoc.toJSON() as Topico;
+          setSelectedDisciplineId(topicData.discipline_id);
+          setSelectedTopicId(topicData.id);
+          setModo('disciplina-detalhe');
+        }
+      } catch (e) {
+        console.warn('[conteudo] Falha ao buscar tópico da URL:', e);
+      }
+    })();
+  }
+}, [searchParams, userId]);
+```
+
+---
+
+## 3. VERIFICAÇÕES
+
+| Comando | Resultado Esperado | Status |
+|---------|-------------------|--------|
+| `npx vitest run` | 93 testes verdes | ✅ **PASSOU** (93/93) |
+| `npm run build` | Build verde | ✅ **PASSOU** |
+| `npx tsc --noEmit` | 65 erros (dívida antiga); ZERO novos nos nossos arquivos | ✅ **PASSOU** (65 erros pré-existentes) |
+| `git diff src/routes/calendario.tsx` | Vazio | ✅ **PASSOU** |
+| `git diff src/routes/aulas.tsx` | Vazio | ✅ **PASSOU** |
+| `git diff src/components/study-plan/WeeklyGridEditor.tsx` | Vazio | ✅ **PASSOU** |
+| `git diff src/hooks/useToast.ts` | Vazio | ✅ **PASSOU** |
+| `git diff vite.config.ts` | Vazio | ✅ **PASSOU** |
+
+---
+
+## 4. CONFIRMAÇÃO: `/conteudo` LÊ O PARÂMETRO `topic_id`
+
+**SIM** — A página `src/routes/conteudo.tsx` agora lê o parâmetro `topic_id` da query string via `useSearchParams()` (linhas ~122–144 do arquivo).
+
+Fluxo:
+1. Usuário clica "Iniciar atividade" no modal → navega para `/conteudo?topic_id=<uuid>`
+2. `conteudo.tsx` detecta `topic_id` na URL
+3. Busca o tópico no RxDB local (`db.topics.findOne`)
+4. Se encontrado: define `selectedDisciplineId`, `selectedTopicId`, muda `modo` para `'disciplina-detalhe'`
+5. UI exibe a disciplina expandida com o tópico selecionado
+
+---
+
+## 5. SMOKE MANUAL (descreva, não execute)
+
+1. **Nome do tópico no modal**: Criar ocorrência com `topic_id` → abrir `OccurrenceModal` → ver **NOME do tópico** (ex: "Direito Constitucional") em vez de UUID truncado.
+2. **Navegação para `/conteudo`**: Clicar "Iniciar atividade" → navegar para `/conteudo?topic_id=...` → página carrega com a **disciplina expandida e tópico selecionado/destacado**.
+
+---
+
+## 6. RESUMO
+
+**REFINAMENTO CONCLUÍDO. Aguardando aprovação.**
+
+### Entregues:
+- ✅ **Refinamento 1**: Modal mostra nome legível do tópico (`topicName`) via resolução no motor + hook
+- ✅ **Refinamento 2**: Página `/conteudo` lê `topic_id` da query string e seleciona o tópico automaticamente
+- ✅ Zero regressão: 93 testes verdes, build ok, 65 erros TSC (todos pré-existentes)
+- ✅ Arquivos protegidos intocados
+
+### Próximos passos sugeridos:
+1. Smoke manual conforme seção 5
+2. Aprovação para commit/push

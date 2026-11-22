@@ -18,6 +18,20 @@ import type {
   StudyPlanPause,
 } from "@/types/study-plan";
 
+// Topic interface (defined inline in conteudo.tsx, redefined here for RxDB subscription)
+interface Topic {
+  id: string;
+  name: string;
+  discipline_id: string;
+  user_id: string;
+  status: string;
+  planned_date: string | null;
+  createdAt: string;
+  updated_at: string;
+  isDeleted?: boolean;
+  order?: number;
+}
+
 export function useWeekSchedule(userId: string | null, weekStart: string) {
   const [blocks, setBlocks] = useState<StudyWeeklyBlock[]>([]);
   const [extras, setExtras] = useState<StudyExtraEvent[]>([]);
@@ -25,6 +39,7 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
   const [tasks, setTasks] = useState<StudyTask[]>([]);
   const [occurrences, setOccurrences] = useState<StudyOccurrence[]>([]);
   const [pauses, setPauses] = useState<StudyPlanPause[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Initial load
@@ -36,6 +51,7 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
       setTasks([]);
       setOccurrences([]);
       setPauses([]);
+      setTopics([]);
       setIsLoading(false);
       return;
     }
@@ -43,13 +59,14 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
     try {
       const db = await getDb();
 
-      const [blocksDocs, extrasDocs, timelinesDocs, tasksDocs, occurrencesDocs, pausesDocs] = await Promise.all([
+      const [blocksDocs, extrasDocs, timelinesDocs, tasksDocs, occurrencesDocs, pausesDocs, topicsDocs] = await Promise.all([
         db.study_weekly_blocks.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
         db.study_extra_events.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
         db.study_theme_timelines.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
         db.study_tasks.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
         db.study_occurrences.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
         db.study_plan_pauses.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
+        db.topics.find({ selector: { user_id: userId, isDeleted: { $ne: true } } }).exec(),
       ]);
 
       setBlocks(blocksDocs.map((d) => d.toJSON() as StudyWeeklyBlock));
@@ -58,6 +75,7 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
       setTasks(tasksDocs.map((d) => d.toJSON() as StudyTask));
       setOccurrences(occurrencesDocs.map((d) => d.toJSON() as StudyOccurrence));
       setPauses(pausesDocs.map((d) => d.toJSON() as StudyPlanPause));
+      setTopics(topicsDocs.map((d) => d.toJSON() as Topic));
     } catch (e) {
       console.error("Erro ao carregar dados do plano de estudos:", e);
     } finally {
@@ -100,6 +118,7 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
         setupSubscription("study_tasks", setTasks);
         setupSubscription("study_occurrences", setOccurrences);
         setupSubscription("study_plan_pauses", setPauses);
+        setupSubscription("topics", setTopics);
       } catch (e) {
         console.warn("Erro ao configurar subscriptions do plano de estudos:", e);
       }
@@ -116,6 +135,12 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
   const weekSchedule = useMemo((): WeekSchedule | null => {
     if (!userId || isLoading) return null;
 
+    // Criar mapa topic_id -> topic_name para resolução de nomes
+    const topicsMap = new Map<string, string>();
+    for (const topic of topics) {
+      topicsMap.set(topic.id, topic.name);
+    }
+
     const input: GenerateWeekScheduleInput = {
       weekStart,
       blocks,
@@ -124,10 +149,11 @@ export function useWeekSchedule(userId: string | null, weekStart: string) {
       tasks,
       occurrences,
       pauses,
+      topics: topicsMap,
     };
 
     return generateWeekSchedule(input);
-  }, [userId, isLoading, weekStart, blocks, extras, timelines, tasks, occurrences, pauses]);
+  }, [userId, isLoading, weekStart, blocks, extras, timelines, tasks, occurrences, pauses, topics]);
 
   return { weekSchedule, isLoading, reload };
 }

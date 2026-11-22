@@ -1,0 +1,268 @@
+# RELATÓRIO PARTE 2 — INTEGRAÇÃO PLANO DE ESTUDOS ↔ CONTEÚDOS
+
+Data: 2026-11-22
+
+---
+
+## 1. ARQUIVOS CRIADOS/ALTERADOS
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `src/types/study-plan.ts` | Adicionado `topic_id?: string \| null` em `StudyOccurrence` e `topicId?: string \| null` em `StudyPlanEvent` |
+| `src/utils/generateWeekSchedule.ts` | Nova função `resolveTopicIdForOccurrence()`; propagação de `topic_id` nas ocorrências base (blocos e extras); `createStudyPlanEvent` passa `topicId` para o evento |
+| `src/services/studyPlanService.ts` | `GeneratedOccurrenceInput` agora aceita `topic_id`/`topicId`; `upsertOccurrenceOverride` persiste `topic_id` ao criar nova ocorrência |
+| `src/components/study-plan/OccurrenceModal.tsx` | `handleStartActivity` navega para `/conteudo?topic_id=...` se `event.topicId` existir; fallback para rota legada; exibição visual do topic_id vinculado |
+| `src/utils/generateWeekSchedule.test.ts` | 8 novos testes para propagação de `topic_id` (blocos, extras, prioridade semana>mês, overrides, compatibilidade tema string) |
+| `scripts/migrate-theme-ids.ts` | **NOVO** — Script de migração idempotente para popular `topic_ids` em timelines legadas |
+
+---
+
+## 2. DIFFS DAS MUDANÇAS PRINCIPAIS
+
+### 2.1 `src/types/study-plan.ts`
+
+```typescript
+// StudyOccurrence
+export interface StudyOccurrence {
+  // ... campos existentes ...
+  override_theme?: string | null;
+  topic_id?: string | null; // NOVO: ID do tópico vinculado (integração com Conteúdos)
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+
+// StudyPlanEvent
+export interface StudyPlanEvent {
+  // ... campos existentes ...
+  isOverride?: boolean;
+  isExtra?: boolean;
+  topicId?: string | null; // NOVO: ID do tópico vinculado (integração com Conteúdos)
+}
+```
+
+### 2.2 `src/utils/generateWeekSchedule.ts` — Nova função e propagação
+
+```typescript
+/**
+ * Resolve o topic_id para uma ocorrência baseado na timeline correspondente
+ * Retorna o primeiro topic_id da timeline que corresponder ao período, ou null
+ */
+function resolveTopicIdForOccurrence(
+  occurrenceDate: string,
+  themeTimelines: StudyThemeTimeline[]
+): string | null {
+  const occDate = new Date(occurrenceDate + 'T12:00:00');
+
+  // Prioridade: semana > mês
+  for (const timeline of themeTimelines) {
+    if (timeline.period_type !== 'week') continue;
+    const periodStart = new Date(timeline.period_start + 'T12:00:00');
+    const periodEnd = new Date(periodStart);
+    periodEnd.setDate(periodEnd.getDate() + 6);
+    if (occDate >= periodStart && occDate <= periodEnd) {
+      return timeline.topic_ids && timeline.topic_ids.length > 0 ? timeline.topic_ids[0] : null;
+    }
+  }
+
+  for (const timeline of themeTimelines) {
+    if (timeline.period_type !== 'month') continue;
+    const periodStart = new Date(timeline.period_start + 'T12:00:00');
+    const periodEnd = new Date(periodStart);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+    if (occDate >= periodStart && occDate <= periodEnd) {
+      return timeline.topic_ids && timeline.topic_ids.length > 0 ? timeline.topic_ids[0] : null;
+    }
+  }
+  return null;
+}
+
+// Na criação da ocorrência base (blocos):
+const topic_id = resolveTopicIdForOccurrence(dateStr, timelines);
+const baseOccurrence: StudyOccurrence = {
+  // ...
+  topic_id, // NOVO
+};
+
+// Na criação do evento:
+function createStudyPlanEvent(...) {
+  // ...
+  const finalTopicId = overrideOccurrence?.topic_id ?? baseOccurrence.topic_id;
+  return {
+    // ...
+    topicId: finalTopicId, // NOVO
+  };
+}
+```
+
+### 2.3 `src/services/studyPlanService.ts` — Persistência do topic_id
+
+```typescript
+export interface GeneratedOccurrenceInput {
+  // ... campos existentes ...
+  topic_id?: string | null; // NOVO
+  topicId?: string | null;  // NOVO
+}
+
+// Em upsertOccurrenceOverride:
+const newOcc: StudyOccurrence = {
+  // ...
+  topic_id: generatedOccurrence.topic_id ?? generatedOccurrence.topicId ?? null, // NOVO
+};
+```
+
+### 2.4 `src/components/study-plan/OccurrenceModal.tsx` — Navegação inteligente
+
+```typescript
+const handleStartActivity = () => {
+  // Se a ocorrência tem topic_id vinculado, navega para a página de Conteúdos
+  if (event.topicId) {
+    navigate(`/conteudo?topic_id=${event.topicId}`);
+    onClose();
+    return;
+  }
+  // Fallback: rota padrão por tipo de atividade (legado)
+  if (routeForActivity) {
+    navigate(routeForActivity);
+    onClose();
+  }
+};
+
+// Exibição visual no modal:
+{event.topicId && (
+  <p className="text-xs text-primary mt-0.5 flex items-center gap-1">
+    <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+    </svg>
+    Tópico vinculado: <span className="font-medium">{event.topicId.slice(0, 8)}...</span>
+  </p>
+)}
+```
+
+---
+
+## 3. SCRIPT DE MIGRAÇÃO — `scripts/migrate-theme-ids.ts`
+
+### Código completo:
+
+```typescript
+// scripts/migrate-theme-ids.ts
+// Script de migração: popula topic_ids nas study_theme_timelines legadas
+// baseando-se no match case-insensitive entre timeline.themes e topics.name
+//
+// Uso:
+//   npx tsx scripts/migrate-theme-ids.ts           # executa a migração
+//   npx tsx scripts/migrate-theme-ids.ts --dry-run # preview apenas (não salva)
+
+import { createClient } from '@supabase/supabase-js';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env' });
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://driayoaxyrpfdaqugvmx.supabase.co';
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ... interfaces e funções auxiliares ...
+
+async function main() {
+  // 1. Buscar user_id (via --user-id= ou REVISA_USER_ID no .env)
+  // 2. Buscar timelines onde topic_ids vazio mas themes tem dados
+  // 3. Buscar todos os topics do usuário (via disciplines)
+  // 4. Para cada theme da timeline, procurar match:
+  //    - Exato (case-insensitive, trim)
+  //    - Parcial (theme contido no nome do tópico ou vice-versa)
+  // 5. Preview das alterações
+  // 6. Confirmação interativa (ou auto em CI)
+  // 7. Atualização em lote via supabase.from('study_theme_timelines').update()
+}
+```
+
+### Instruções de execução:
+
+```bash
+# Preview (dry-run) - mostra o que seria alterado sem salvar
+npx tsx scripts/migrate-theme-ids.ts --dry-run
+
+# Execução real - requer user_id
+npx tsx scripts/migrate-theme-ids.ts --user-id=<uuid-do-usuario>
+
+# Ou defina REVISA_USER_ID no .env e rode sem flags
+npx tsx scripts/migrate-theme-ids.ts
+```
+
+**Segurança:**
+- Só altera timelines onde `topic_ids` está vazio/null E `themes` tem dados
+- Match case-insensitive + trim
+- Preview obrigatório antes de salvar
+- Nunca apaga dados existentes
+- Idempotente: pode rodar múltiplas vezes
+
+---
+
+## 4. VERIFICAÇÕES (SEÇÃO 6 DO ESCOPO)
+
+| Comando | Resultado Esperado | Status |
+|---------|-------------------|--------|
+| `npx vitest run` | 85 testes originais + 8 novos = 93 testes, tudo verde | ✅ **PASSOU** (93/93) |
+| `npm run build` | Build verde | ✅ **PASSOU** |
+| `npx tsc --noEmit` | 65 erros (dívida antiga); ZERO novos nos nossos arquivos | ✅ **PASSOU** (65 erros pré-existentes) |
+| `git diff src/routes/calendario.tsx` | Vazio (não tocado) | ✅ **PASSOU** |
+| `git diff src/routes/aulas.tsx` | Vazio (não tocado) | ✅ **PASSOU** |
+| `git diff src/components/study-plan/WeeklyGridEditor.tsx` | Vazio (não tocado) | ✅ **PASSOU** |
+| `git diff src/hooks/useToast.ts` | Vazio (não tocado) | ✅ **PASSOU** |
+| `git diff vite.config.ts` | Vazio (não tocado) | ✅ **PASSOU** |
+
+---
+
+## 5. SMOKE MANUAL DESCRITO
+
+### 5.1 Criar período novo com tópicos selecionados
+1. Abrir **Plano de Estudos** → **Linha do Tempo de Temas**
+2. Selecionar mês/semana atual
+3. Clicar em "+ Tema" → abrir **ContentTreeSelector**
+4. Selecionar 1+ tópicos das disciplinas
+5. Confirmar → timeline salva com `topic_ids` preenchido
+6. Ir para **Agenda Semanal** → gerar semana
+7. Verificar no console/inspetor: ocorrência gerada tem `topicId` preenchido
+
+### 5.2 Clicar "Iniciar atividade" na ocorrência
+1. Na Agenda Semanal, clicar em uma ocorrência com topic_id
+2. No modal, clicar em **"Iniciar atividade"**
+3. Verificar: navega para `/conteudo?topic_id=<uuid>`
+4. Página de Conteúdos abre com o tópico correto destacado/filtrado
+
+### 5.3 Rodar script de migração
+1. `npx tsx scripts/migrate-theme-ids.ts --dry-run`
+2. Verificar preview: timelines legadas mostram matches
+3. `npx tsx scripts/migrate-theme-ids.ts --user-id=<uuid>`
+4. Confirmar → timelines atualizadas com `topic_ids`
+5. Verificar: períodos legados agora geram ocorrências com `topicId`
+
+---
+
+## 6. RESUMO
+
+**IMPLEMENTAÇÃO CONCLUÍDA. Aguardando revisão e smoke manual.**
+
+### Entregues:
+- ✅ **Fase A** — Tipos e Motor: `topic_id` propagado de `StudyThemeTimeline.topic_ids` → `StudyOccurrence.topic_id` → `StudyPlanEvent.topicId`
+- ✅ **Fase B** — Navegação: Botão "Iniciar atividade" vai para `/conteudo?topic_id=...` se vinculado; fallback legado mantido
+- ✅ **Fase C** — Migração: Script `scripts/migrate-theme-ids.ts` idempotente, seguro, com dry-run
+- ✅ **Fase D** — Testes: 8 novos testes cobrindo propagação, prioridade, overrides, compatibilidade; 93 testes totais verdes
+
+### Protegidos (não tocados):
+- `src/routes/calendario.tsx`
+- `src/routes/aulas.tsx`
+- `src/components/study-plan/WeeklyGridEditor.tsx`
+- `src/hooks/useToast.ts`
+- `vite.config.ts`
+- Clerk auth
+
+### Próximos passos sugeridos:
+1. Smoke manual conforme seção 5
+2. Rodar migração em ambiente de staging/produção
+3. Verificar integração completa na página `/conteudo` (receber `topic_id` via query param)

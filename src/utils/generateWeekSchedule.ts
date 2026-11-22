@@ -31,6 +31,7 @@ export interface GenerateWeekScheduleInput {
   tasks: StudyTask[];
   occurrences: StudyOccurrence[]; // overrides individuais (status, override_theme, exclusão)
   pauses?: StudyPlanPause[]; // pausas do plano (ETAPA 7) - suprime ocorrências no intervalo
+  topics?: Map<string, string>; // topic_id -> topic_name (opcional, para resolver nome do tópico)
 }
 
 /**
@@ -87,6 +88,52 @@ function resolveThemeForOccurrence(
   }
 
   return matchedThemes.join(', ');
+}
+
+/**
+ * Resolve o topic_id para uma ocorrência baseado na timeline correspondente
+ * Retorna o primeiro topic_id da timeline que corresponder ao período, ou null
+ */
+function resolveTopicIdForOccurrence(
+  occurrenceDate: string,
+  themeTimelines: StudyThemeTimeline[]
+): string | null {
+  const occDate = new Date(occurrenceDate + 'T12:00:00');
+
+  // Prioridade: semana > mês (period_start == segunda da semana tem prioridade sobre mês da data)
+  
+  // 1. Procurar timeline de semana que corresponda
+  for (const timeline of themeTimelines) {
+    if (timeline.period_type !== 'week') continue;
+    const periodStart = new Date(timeline.period_start + 'T12:00:00');
+    const periodEnd = new Date(periodStart);
+    periodEnd.setDate(periodEnd.getDate() + 6);
+
+    if (occDate >= periodStart && occDate <= periodEnd) {
+      if (timeline.topic_ids && timeline.topic_ids.length > 0) {
+        return timeline.topic_ids[0];
+      }
+      return null;
+    }
+  }
+
+  // 2. Se não achou semana, procurar timeline de mês
+  for (const timeline of themeTimelines) {
+    if (timeline.period_type !== 'month') continue;
+    const periodStart = new Date(timeline.period_start + 'T12:00:00');
+    const periodEnd = new Date(periodStart);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+
+    if (occDate >= periodStart && occDate <= periodEnd) {
+      if (timeline.topic_ids && timeline.topic_ids.length > 0) {
+        return timeline.topic_ids[0];
+      }
+      return null;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -187,19 +234,29 @@ function getShift(startTime: string): 'morning' | 'afternoon' | 'evening' {
 }
 
 /**
+ * Resolve o nome do tópico a partir do topic_id usando o mapa de topics
+ */
+function resolveTopicName(topicId: string | null | undefined, topics: Map<string, string> | undefined): string | null {
+  if (!topicId || !topics) return null;
+  return topics.get(topicId) ?? null;
+}
+
+/**
  * Cria um evento de estudo planificado a partir de uma ocorrência base + overrides
  */
 function createStudyPlanEvent(
   baseOccurrence: StudyOccurrence,
   task: StudyTask,
   overrideOccurrence: StudyOccurrence | undefined,
-  occurrenceDate: string
+  occurrenceDate: string,
+  topics: Map<string, string> | undefined
 ): StudyPlanEvent {
   // Aplicar overrides da ocorrência individual (se houver)
   const finalStartTime = overrideOccurrence?.start_time ?? baseOccurrence.start_time;
   const finalEndTime = overrideOccurrence?.end_time ?? baseOccurrence.end_time;
   const finalStatus = overrideOccurrence?.status ?? baseOccurrence.status;
   const finalTheme = overrideOccurrence?.override_theme ?? baseOccurrence.theme;
+  const finalTopicId = overrideOccurrence?.topic_id ?? baseOccurrence.topic_id;
 
   // Override REAL: há diferença efetiva em relação ao padrão da série
   // (override_theme preenchido, horário alterado, ou status done/missed)
@@ -228,6 +285,8 @@ function createStudyPlanEvent(
     sourceId: baseOccurrence.source_id,
     isOverride: hasRealOverride,
     isExtra: baseOccurrence.source_type === 'extra',
+    topicId: finalTopicId,
+    topicName: resolveTopicName(finalTopicId, topics),
   };
 }
 
@@ -300,6 +359,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
       if (!task) continue;
 
       const theme = resolveThemeForOccurrence(task, dateStr, timelines);
+      const topic_id = resolveTopicIdForOccurrence(dateStr, timelines);
 
       // Criar ocorrência base
       const baseOccurrence: StudyOccurrence = {
@@ -316,6 +376,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
         task_activity_type: task.activity_type,
         theme,
         status: 'pending',
+        topic_id,
         created_at: '',
         updated_at: '',
         isDeleted: false,
@@ -326,7 +387,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
       const override = overridesByKey.get(overrideKey);
       if (override?.isDeleted) continue; // Excluído individualmente
 
-      const event = createStudyPlanEvent(baseOccurrence, task, override, dateStr);
+      const event = createStudyPlanEvent(baseOccurrence, task, override, dateStr, input.topics);
       if (!shouldSuppressByPause(event, pauses)) {
         events.push(event);
       }
@@ -340,6 +401,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
       if (!task) continue;
 
       const theme = resolveThemeForOccurrence(task, dateStr, timelines);
+      const topic_id = resolveTopicIdForOccurrence(dateStr, timelines);
 
       const baseOccurrence: StudyOccurrence = {
         id: `extra-${extra.id}-${dateStr}`,
@@ -355,6 +417,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
         task_activity_type: task.activity_type,
         theme,
         status: 'pending',
+        topic_id,
         created_at: '',
         updated_at: '',
         isDeleted: false,
@@ -364,7 +427,7 @@ export function generateWeekSchedule(input: GenerateWeekScheduleInput): WeekSche
       const override = overridesByKey.get(overrideKey);
       if (override?.isDeleted) continue; // Excluído individualmente
 
-      const event = createStudyPlanEvent(baseOccurrence, task, override, dateStr);
+      const event = createStudyPlanEvent(baseOccurrence, task, override, dateStr, input.topics);
       if (!shouldSuppressByPause(event, pauses)) {
         events.push(event);
       }

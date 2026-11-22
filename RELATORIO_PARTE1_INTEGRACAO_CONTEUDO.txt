@@ -1,0 +1,192 @@
+# RELATÓRIO PARTE 1 — INTEGRAÇÃO PLANO DE ESTUDOS ↔ CONTEÚDOS
+
+## 1. RESULTADO DA FASE A — Descoberta da Convenção Real
+
+### Assinatura REAL da função `salvar_study_theme_timelines_batch` (de supabase/migrations/20261119_create_study_plan.sql):
+
+```sql
+CREATE OR REPLACE FUNCTION public.salvar_study_theme_timelines_batch(p_records jsonb)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  INSERT INTO public.study_theme_timelines (id, user_id, period_type, period_start, themes, created_at, updated_at, is_deleted)
+  SELECT
+    r->>'id',
+    r->>'user_id',
+    r->>'period_type',
+    (r->>'period_start')::date,
+    (r->>'themes')::text[],
+    r->>'created_at',
+    r->>'updated_at',
+    COALESCE((r->>'is_deleted')::bool, false)
+  FROM jsonb_array_elements(p_records) r
+  ON CONFLICT (id) DO UPDATE SET
+    period_type = EXCLUDED.period_type,
+    period_start = EXCLUDED.period_start,
+    themes = EXCLUDED.themes,
+    updated_at = EXCLUDED.updated_at,
+    is_deleted = EXCLUDED.is_deleted;
+$$;
+```
+
+- **RETURNS**: `void`
+- **LANGUAGE**: `sql`
+- **SECURITY**: `DEFINER`
+- **search_path**: não definido (usa padrão)
+- **Uso de auth**: não usa `public.get_user_id()` nem `auth.jwt()` — confia no payload
+- **Estrutura**: INSERT direto com `jsonb_array_elements` + ON CONFLICT DO UPDATE
+- **Formato de retorno**: void (não retorna nada)
+
+### Convenção REAL das colunas de `study_theme_timelines` (do CREATE TABLE):
+
+| Coluna DB | Tipo | Payload RxDB | Mapeamento |
+|-----------|------|--------------|------------|
+| id | uuid | id | 1:1 (string) |
+| user_id | text | user_id | 1:1 (string) |
+| period_type | text | period_type | 1:1 ('month'|'week') |
+| period_start | date | period_start | 1:1 (ISO date string) |
+| themes | text[] | themes | 1:1 (string[]) |
+| created_at | timestamptz | created_at | 1:1 (ISO string) |
+| updated_at | timestamptz | updated_at | 1:1 (ISO string) |
+| is_deleted | boolean | isDeleted | camelCase→snake_case |
+
+### Mapeamento do payload RxDB → RPC:
+- O RxDB usa **camelCase** nas propriedades do documento
+- A RPC espera **exatamente os mesmos nomes** (camelCase) no JSONB
+- Exemplo: `topic_ids` no RxDB → `r->'topic_ids'` na RPC → coluna `topic_ids` no DB
+- **NÃO há tradução** camelCase ↔ snake_case — o mapeamento é 1:1 direto
+
+### Evidência do INSERT original:
+```sql
+SELECT
+  r->>'id',
+  r->>'user_id',
+  r->>'period_type',
+  (r->>'period_start')::date,
+  (r->>'themes')::text[],
+  r->>'created_at',
+  r->>'updated_at',
+  COALESCE((r->>'is_deleted')::bool, false)
+```
+Todos usam `r->>'propriedade'` — confirmando que o JSONB espera as propriedades com os mesmos nomes do RxDB.
+
+---
+
+## 2. ARQUIVOS CRIADOS/ALTERADOS
+
+| Arquivo | Tipo | Descrição |
+|---------|------|-----------|
+| `supabase/migrations/20261124_theme_timeline_topic_ids.sql` | **Criado** | Migração Supabase: adiciona coluna `topic_ids uuid[]`, índice GIN, atualiza RPC preservando assinatura |
+| `ARQUIVO_MIGRACAO_INTEGRACAO_CONTEUDO.txt` | **Criado** | Cópia exata do SQL acima para a dona rodar manualmente no Supabase |
+| `src/lib/db.ts` | **Modificado** | `studyThemeTimelineSchema`: version 0→1, adiciona `topic_ids: { type: 'array', items: { type: 'string' }, default: [] }` |
+| `src/types/study-plan.ts` | **Modificado** | `StudyThemeTimeline`: adiciona `topic_ids?: string[]` |
+| `src/components/study-plan/ContentTreeSelector.tsx` | **Criado** | Novo componente: árvore Disciplina→Tópico com checkboxes, busca, estados loading/erro/vazio, contador, acessibilidade |
+| `src/components/study-plan/index.ts` | **Modificado** | Exporta `ContentTreeSelector` |
+| `src/components/study-plan/ThemeTimeline.tsx` | **Modificado** | Substitui input texto livre por `ContentTreeSelector` no modal; envia `topic_ids` (UUIDs) + `themes` (nomes) no upsert; pré-seleciona tópicos ao editar; aviso para períodos legados; validação exige ≥1 tópico |
+
+---
+
+## 3. SQL COMPLETO DA MIGRAÇÃO
+
+```sql
+-- Migração: Adicionar topic_ids à study_theme_timelines (Integração Plano↔Conteúdos)
+-- Data: 2026-11-24
+-- Objetivo: Vincular cronograma de temas à hierarquia real de Conteúdos (topics)
+-- DECISÃO: Opção B — topic_ids na timeline (não em tasks). Tasks continuam genéricas.
+
+-- 1. Adicionar coluna topic_ids (array de UUIDs dos tópicos)
+ALTER TABLE public.study_theme_timelines
+  ADD COLUMN IF NOT EXISTS topic_ids uuid[] DEFAULT '{}';
+
+-- 2. Índice GIN para busca eficiente por tópicos
+CREATE INDEX IF NOT EXISTS idx_study_theme_timelines_topic_ids
+  ON public.study_theme_timelines USING GIN (topic_ids);
+
+-- 3. Atualizar RPC salvar_study_theme_timelines_batch preservando assinatura original
+-- Assinatura original: RETURNS void, LANGUAGE sql, SECURITY DEFINER
+-- Colunas no INSERT: id, user_id, period_type, period_start, themes, created_at, updated_at, is_deleted
+-- Adicionar topic_ids mantendo o mesmo padrão de conversão JSONB -> uuid[]
+
+CREATE OR REPLACE FUNCTION public.salvar_study_theme_timelines_batch(p_records jsonb)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  INSERT INTO public.study_theme_timelines (id, user_id, period_type, period_start, themes, topic_ids, created_at, updated_at, is_deleted)
+  SELECT
+    r->>'id',
+    r->>'user_id',
+    r->>'period_type',
+    (r->>'period_start')::date,
+    (r->>'themes')::text[],
+    COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(r->'topic_ids','[]'::jsonb)))::uuid[], '{}'),
+    r->>'created_at',
+    r->>'updated_at',
+    COALESCE((r->>'is_deleted')::bool, false)
+  FROM jsonb_array_elements(p_records) r
+  ON CONFLICT (id) DO UPDATE SET
+    period_type = EXCLUDED.period_type,
+    period_start = EXCLUDED.period_start,
+    themes = EXCLUDED.themes,
+    topic_ids = EXCLUDED.topic_ids,
+    updated_at = EXCLUDED.update_at,
+    is_deleted = EXCLUDED.is_deleted;
+$$;
+
+-- 4. Permissões (mesmo padrão das outras funções do plano)
+REVOKE EXECUTE ON FUNCTION public.salvar_study_theme_timelines_batch(jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.salvar_study_theme_timelines_batch(jsonb) TO authenticated;
+```
+
+---
+
+## 4. AMBIGUIDADES E QUERY PARA A DONA RODAR
+
+**Nenhuma ambiguidade encontrada.** A assinatura da função, convenção de colunas e mapeamento do payload foram confirmados lendo o código real. Não é necessário rodar query de verificação.
+
+Caso a dona queira confirmar no Supabase antes de aplicar:
+```sql
+SELECT pg_get_functiondef('public.salvar_study_theme_timelines_batch(jsonb)'::regprocedure);
+```
+
+---
+
+## 5. COMANDOS DE VERIFICAÇÃO (Seção 8 do Prompt)
+
+```bash
+# Testes (esperado: 85/85 verdes)
+npx vitest run
+
+# Build (esperado: verde)
+npm run build
+
+# TypeScript (esperado: 64 erros em 16 arquivos = dívida antiga; ZERO erros novos nos nossos arquivos)
+npx tsc --noEmit
+
+# Arquivos protegidos não alterados
+git diff src/routes/calendario.tsx          # → vazio
+git diff src/hooks/useToast.ts              # → vazio
+git diff src/components/study-plan/WeeklyGridEditor.tsx  # → apenas fix de weekday anterior
+```
+
+---
+
+## 6. SMOKE MANUAL DESCRITO
+
+1. Abrir **Plano de Estudos** → aba **Linha do Tempo de Temas**
+2. Clicar em **+ Tema** ou **+ Tema junto** para abrir o modal
+3. **Seletor em árvore** carrega: Disciplinas (colapsáveis) → Tópicos com checkboxes
+4. Selecionar **2 tópicos** de disciplinas diferentes
+5. Clicar **Confirmar** → toast "Temas salvos"
+6. Nomes aparecem na timeline como chips
+7. Reabrir o mesmo período → tópicos aparecem **pré-selecionados** no modal
+8. Período **legado** (criado antes da integração, só com `themes` preenchido) → abre modal com aviso amarelo "Período legado: selecione os assuntos correspondentes", permite editar normalmente sem travar
+
+---
+
+## PARADA
+
+**PARADA: aguardando revisão do SQL antes da Parte 2**
+
+A Parte 2 (motor, navegação, migração de dados legados, testes novos) só deve começar após a dona do projeto revisar e aplicar o SQL no Supabase.

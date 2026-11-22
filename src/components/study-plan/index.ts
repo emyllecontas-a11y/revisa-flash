@@ -5,5 +5,6 @@ export { ExceptionsManager } from "./ExceptionsManager";
 export { StudyPlanHub } from "./StudyPlanHub";
 export { OccurrenceModal } from "./OccurrenceModal";
 export { DailyListView } from "./DailyListView";
+export { ContentTreeSelector } from "./ContentTreeSelector";
 export { useStudyTasks } from "@/hooks/useStudyTasks";
 export { useThemeTimeline } from "@/hooks/useThemeTimeline";

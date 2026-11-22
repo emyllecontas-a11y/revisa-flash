@@ -834,4 +834,220 @@ describe('generateWeekSchedule', () => {
       expect(segundaPassadaCheck!.evening).toHaveLength(0);
     });
   });
+
+  describe('Propagação de topic_id (Integração Conteúdos)', () => {
+    it('propaga topic_id da timeline para ocorrências de bloco', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional'],
+        topic_ids: ['topic-uuid-123', 'topic-uuid-456'],
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      expect(segunda).toBeDefined();
+      expect(segunda!.evening).toHaveLength(1);
+      // Deve propagar o primeiro topic_id da timeline
+      expect(segunda!.evening[0].topicId).toBe('topic-uuid-123');
+    });
+
+    it('propaga topic_id da timeline para ocorrências de extra', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Administrativo'],
+        topic_ids: ['topic-uuid-789'],
+      });
+
+      const extra = createExtra({
+        weekdays: [2], // Terça
+        start_time: '14:00',
+        end_time: '16:00',
+        week_starts: ['2026-11-16'],
+      });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        extras: [extra],
+        timelines: [timeline],
+      }));
+
+      const terca = result.days.find((d) => d.dayName === 'Ter');
+      expect(terca).toBeDefined();
+      expect(terca!.afternoon).toHaveLength(1);
+      expect(terca!.afternoon[0].topicId).toBe('topic-uuid-789');
+    });
+
+    it('timeline sem topic_ids resulta em topicId null', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional'],
+        topic_ids: [], // vazio
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      expect(segunda!.evening[0].topicId).toBeNull();
+    });
+
+    it('timeline com topic_ids undefined resulta em topicId null', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional'],
+        // topic_ids undefined (não passado)
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      expect(segunda!.evening[0].topicId).toBeNull();
+    });
+
+    it('prioridade semana > mês também se aplica ao topic_id', () => {
+      const weekTimeline = createTimeline({
+        id: 'week-tl',
+        period_type: 'week',
+        period_start: '2026-11-16', // Segunda da semana
+        themes: ['Tema Semana'],
+        topic_ids: ['topic-week-uuid'],
+      });
+      const monthTimeline = createTimeline({
+        id: 'month-tl',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Tema Mês'],
+        topic_ids: ['topic-month-uuid'],
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [monthTimeline, weekTimeline], // ordem não importa
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      // Deve usar topic_id da timeline de semana (prioridade)
+      expect(segunda!.evening[0].topicId).toBe('topic-week-uuid');
+      // Tema também deve vir da timeline de semana
+      expect(segunda!.evening[0].theme).toBe('Tema Semana');
+    });
+
+    it('tema string continua sendo resolvido corretamente (compatibilidade UI legada)', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional', 'Direito Administrativo'],
+        topic_ids: ['topic-uuid-123'],
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      // Tema resolvido pela string (para UI legada e OccurrenceModal)
+      expect(segunda!.evening[0].theme).toBe('Direito Constitucional, Direito Administrativo');
+      // topic_id também propagado
+      expect(segunda!.evening[0].topicId).toBe('topic-uuid-123');
+    });
+
+    it('override de occurrence preserva topic_id do base', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional'],
+        topic_ids: ['topic-uuid-123'],
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      // Override sem topic_id (deve herdar do base)
+      const override = createOccurrence({
+        source_type: 'block',
+        source_id: 'block-1',
+        occurrence_date: '2026-11-16',
+        status: 'done',
+        start_time: '20:00',
+        end_time: '22:00',
+      });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+        occurrences: [override],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      expect(segunda!.evening[0].topicId).toBe('topic-uuid-123');
+      expect(segunda!.evening[0].startTime).toBe('20:00');
+    });
+
+    it('override com topic_id próprio sobrescreve o do base', () => {
+      const timeline = createTimeline({
+        id: 'timeline-1',
+        period_type: 'month',
+        period_start: '2026-11-01',
+        themes: ['Direito Constitucional'],
+        topic_ids: ['topic-base-uuid'],
+      });
+
+      const block = createBlock({ weekday: 1, start_time: '19:00', end_time: '21:00' });
+
+      // Override COM topic_id próprio
+      const override = createOccurrence({
+        source_type: 'block',
+        source_id: 'block-1',
+        occurrence_date: '2026-11-16',
+        status: 'done',
+        topic_id: 'topic-override-uuid',
+      });
+
+      const result = generateWeekSchedule(baseInput({
+        weekStart: '2026-11-16',
+        blocks: [block],
+        timelines: [timeline],
+        occurrences: [override],
+      }));
+
+      const segunda = result.days.find((d) => d.dayName === 'Seg');
+      // Deve usar topic_id do override
+      expect(segunda!.evening[0].topicId).toBe('topic-override-uuid');
+    });
+  });
 });
