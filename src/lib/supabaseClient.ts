@@ -177,7 +177,7 @@ export const getDisciplines = async (userId: string) => {
       .from('disciplines')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: true });
+      .order('createdAt', { ascending: true });
 
     if (error) throw error;
     return { success: true, data };
@@ -252,7 +252,7 @@ export const getTopics = async (disciplineId: string) => {
       .from('topics')
       .select('*')
       .eq('discipline_id', disciplineId)
-      .order('created_at', { ascending: true });
+      .order('createdAt', { ascending: true });
 
     if (error) throw error;
     return { success: true, data };
