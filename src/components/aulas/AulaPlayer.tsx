@@ -9,6 +9,10 @@ interface AulaPlayerProps {
   aulaId: string;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onPause?: () => void;
+  /** Disparado quando o vídeo chega ao fim. */
+  onEnded?: () => void;
+  /** Começa a tocar sozinho assim que o vídeo carrega (usado na lista de reprodução). */
+  autoPlay?: boolean;
   initialTime?: number;
   offlineObjectUrl?: string | null;
   isOnline?: boolean;
@@ -37,6 +41,8 @@ export function AulaPlayer({
   aulaId,
   onTimeUpdate,
   onPause,
+  onEnded,
+  autoPlay = false,
   initialTime = 0,
   offlineObjectUrl,
   isOnline = true,
@@ -49,6 +55,10 @@ export function AulaPlayer({
   onTimeUpdateRef.current = onTimeUpdate;
   const onPauseRef = useRef(onPause);
   onPauseRef.current = onPause;
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
+  const autoPlayRef = useRef(autoPlay);
+  const autoPlayFeitoRef = useRef(false);
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -112,10 +122,22 @@ export function AulaPlayer({
     if (!videoEl) return;
 
     const handleLoadedMetadata = () => {
-      if (initialTimeRef.current > 0 && !hasRestoredTime.current) {
+      // Se a aula já foi vista até o fim, recomeça do zero em vez de abrir no último segundo.
+      const duracao = videoEl.duration;
+      const jaNoFim = Number.isFinite(duracao) && duracao > 0 && initialTimeRef.current >= duracao - 3;
+      if (initialTimeRef.current > 0 && !hasRestoredTime.current && !jaNoFim) {
         videoEl.currentTime = initialTimeRef.current;
         hasRestoredTime.current = true;
       }
+      if (autoPlayRef.current && !autoPlayFeitoRef.current) {
+        autoPlayFeitoRef.current = true;
+        // O navegador pode bloquear o play automático; nesse caso o aluno aperta play.
+        videoEl.play().catch(() => {});
+      }
+    };
+
+    const handleEnded = () => {
+      onEndedRef.current?.();
     };
 
     const handleTimeUpdate = () => {
@@ -154,12 +176,17 @@ export function AulaPlayer({
     videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
     videoEl.addEventListener("timeupdate", handleTimeUpdate);
     videoEl.addEventListener("pause", handlePause);
+    videoEl.addEventListener("ended", handleEnded);
     videoEl.addEventListener("error", handleError);
+
+    // Se os metadados já chegaram antes de o ouvinte existir (vídeo salvo/em cache), aplica agora.
+    if (videoEl.readyState >= 1) handleLoadedMetadata();
 
     return () => {
       videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
       videoEl.removeEventListener("timeupdate", handleTimeUpdate);
       videoEl.removeEventListener("pause", handlePause);
+      videoEl.removeEventListener("ended", handleEnded);
       videoEl.removeEventListener("error", handleError);
     };
   }, [aulaId, fonteInicial, isOnline, teraboxUrl]);

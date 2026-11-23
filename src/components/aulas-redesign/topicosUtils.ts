@@ -94,3 +94,8 @@ export function localizarAula(
   }
   return null;
 }
+
+/** Todas as aulas do tópico, na mesma ordem de "Próxima/Anterior" (soltas primeiro, depois subtópicos). */
+export function aulasDoTopico(topico: TopicoResumo): AulaItem[] {
+  return [...topico.aulasSoltas, ...topico.subtopicos.flatMap((s) => s.aulas)];
+}

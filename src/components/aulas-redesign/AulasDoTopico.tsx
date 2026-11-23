@@ -8,8 +8,8 @@
 //   /aulas/:disciplinaId/topico/:assuntoSlug
 //   /aulas/:disciplinaId/topico/:assuntoSlug/:subSlug
 
-import { useMemo, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowDown,
   ArrowLeft,
@@ -18,13 +18,16 @@ import {
   ChevronRight,
   Heart,
   Layers,
+  ListChecks,
   Loader2,
+  Play,
   PlayCircle,
+  X,
 } from "lucide-react";
 import type { AulaItem } from "../aulas/aulasArvore";
 import { aulaEhNova, useAulasData } from "./AulasDataContext";
 import { AulasRedesignStyles } from "./AulasRedesignStyles";
-import { resumirTopicos } from "./topicosUtils";
+import { aulasDoTopico, resumirTopicos } from "./topicosUtils";
 
 // ---------- Linha de uma aula (igual à que existia na lista antiga) ----------
 function AulaLinha({
@@ -118,6 +121,42 @@ function AulaLinha({
   );
 }
 
+// ---------- Linha de aula no modo "Escolher aulas" ----------
+function AulaSelecionavel({
+  aula,
+  marcada,
+  onToggle,
+}: {
+  aula: AulaItem;
+  marcada: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={marcada}
+      className="rfx-card rfx-card-hover flex w-full items-start gap-4 p-4 text-left sm:p-5"
+      style={marcada ? { borderColor: "var(--primary)" } : undefined}
+    >
+      <span className="rfx-check mt-1 shrink-0" data-checked={marcada}>
+        {marcada && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-display text-lg font-semibold text-foreground sm:text-xl">{aula.titulo}</span>
+          {aula.concluida && (
+            <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+              estudada
+            </span>
+          )}
+        </span>
+        <span className="mt-1 line-clamp-2 block text-sm text-muted-foreground">{aula.descricao}</span>
+      </span>
+    </button>
+  );
+}
+
 function TituloSecao({ children }: { children: ReactNode }) {
   return (
     <div className="mb-3 flex items-center gap-3">
@@ -132,7 +171,16 @@ function TituloSecao({ children }: { children: ReactNode }) {
 // ---------- Tela ----------
 export function AulasDoTopico() {
   const { disciplinaId, assuntoSlug, subSlug } = useParams();
-  const { loading, getDisciplina } = useAulasData();
+  const { loading, getDisciplina, iniciarPlaylist } = useAulasData();
+  const navigate = useNavigate();
+
+  // Modo "Escolher aulas": o aluno marca as aulas e toca só elas, como numa lista de reprodução.
+  const [selecionando, setSelecionando] = useState(false);
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSelecionando(false);
+    setSelecionadas(new Set());
+  }, [disciplinaId, assuntoSlug, subSlug]);
 
   const disciplina = getDisciplina(disciplinaId);
   const topicos = useMemo(() => (disciplina ? resumirTopicos(disciplina.assuntos) : []), [disciplina]);
@@ -178,6 +226,31 @@ export function AulasDoTopico() {
   const aulasDaTela: AulaItem[] = subtopico ? subtopico.aulas : topico.aulasSoltas;
   const eyebrow = subtopico ? `${disciplina.nome} · ${topico.nome}` : disciplina.nome;
 
+  // Todas as aulas deste nível (do subtópico, ou do tópico inteiro incluindo os subtópicos).
+  const escopo: AulaItem[] = subtopico ? subtopico.aulas : aulasDoTopico(topico);
+  const gruposSelecao: { titulo: string | null; aulas: AulaItem[] }[] = subtopico
+    ? [{ titulo: null, aulas: subtopico.aulas }]
+    : [
+        ...(topico.aulasSoltas.length > 0
+          ? [{ titulo: topico.subtopicos.length > 0 ? "Aulas sem subtópico" : null, aulas: topico.aulasSoltas }]
+          : []),
+        ...topico.subtopicos.map((s) => ({ titulo: s.nome, aulas: s.aulas })),
+      ];
+
+  const tocarLista = (aulas: AulaItem[], nome: string) => {
+    if (aulas.length === 0) return;
+    iniciarPlaylist({ nome, ids: aulas.map((a) => a.id) });
+    navigate(`/aulas/${disciplina.slug}/${aulas[0].id}`, { state: { autoplay: true } });
+  };
+  const escolhidas = escopo.filter((a) => selecionadas.has(a.id)); // mantém a ordem do tópico
+  const alternar = (id: string) =>
+    setSelecionadas((prev) => {
+      const prox = new Set(prev);
+      if (prox.has(id)) prox.delete(id);
+      else prox.add(id);
+      return prox;
+    });
+
   return (
     <div className="mx-auto w-full max-w-5xl py-2 sm:py-4" data-tone={disciplina.tone}>
       <AulasRedesignStyles />
@@ -202,8 +275,87 @@ export function AulasDoTopico() {
             {aberto.percentual}% estudado
           </span>
         </div>
+
+        {escopo.length > 0 && !selecionando && (
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => tocarLista(escopo, aberto.nome)}
+              className="btn-sun inline-flex items-center gap-2 px-5 py-2.5 text-sm"
+            >
+              <Play className="h-4 w-4" /> Reproduzir tudo
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelecionando(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-surface-2"
+            >
+              <ListChecks className="h-4 w-4 text-primary" /> Escolher aulas
+            </button>
+          </div>
+        )}
+
+        {selecionando && (
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-sm font-semibold text-foreground">
+              {escolhidas.length} {escolhidas.length === 1 ? "aula escolhida" : "aulas escolhidas"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelecionadas(new Set(escopo.map((a) => a.id)))}
+              className="rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-foreground hover:bg-surface-2"
+            >
+              Selecionar todas
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelecionadas(new Set())}
+              disabled={escolhidas.length === 0}
+              className="rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-foreground hover:bg-surface-2 disabled:opacity-40"
+            >
+              Limpar
+            </button>
+            <button
+              type="button"
+              onClick={() => tocarLista(escolhidas, `${aberto.nome} (minha lista)`)}
+              disabled={escolhidas.length === 0}
+              className="btn-sun inline-flex items-center gap-2 px-5 py-2 text-sm disabled:opacity-40"
+            >
+              <Play className="h-4 w-4" /> Reproduzir lista
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelecionando(false);
+                setSelecionadas(new Set());
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" /> Cancelar
+            </button>
+          </div>
+        )}
       </header>
 
+      {selecionando ? (
+        <div className="space-y-8">
+          {gruposSelecao.map((g, gi) => (
+            <section key={g.titulo ?? `grupo-${gi}`}>
+              {g.titulo && <TituloSecao>{g.titulo}</TituloSecao>}
+              <div className="space-y-3">
+                {g.aulas.map((a) => (
+                  <AulaSelecionavel
+                    key={a.id}
+                    aula={a}
+                    marcada={selecionadas.has(a.id)}
+                    onToggle={() => alternar(a.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
       <div className="space-y-8">
         {mostrarSubtopicos && (
           <section>
@@ -262,6 +414,7 @@ export function AulasDoTopico() {
           <p className="rfx-card p-6 text-sm text-muted-foreground">Nenhuma aula neste tópico ainda.</p>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -82,6 +82,12 @@ export interface DisciplinaResumo {
   progresso: number; // 0 a 100
 }
 
+/** Lista de reprodução ativa: nome + ids das aulas, na ordem em que vão tocar. */
+export interface Playlist {
+  nome: string;
+  ids: string[];
+}
+
 interface AulasDataValue {
   loading: boolean;
   isOnline: boolean;
@@ -95,6 +101,11 @@ interface AulasDataValue {
   downloadProgress: Record<string, DownloadState>;
   tempos: Record<string, { current: number; total: number }>;
   toggleConcluida: (id: string) => void;
+  /** Marca como "Estudei" (nunca desmarca). Usada quando o vídeo termina. */
+  marcarConcluida: (id: string) => void;
+  playlist: Playlist | null;
+  iniciarPlaylist: (playlist: Playlist) => void;
+  encerrarPlaylist: () => void;
   toggleFavorita: (id: string) => void;
   handleTimeUpdate: (id: string, current: number, total: number) => void;
   gravarProgressoAgora: (id: string) => void;
@@ -139,6 +150,9 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
   const storageKeyFavoritas = `unavox_aulas_favoritas_${user?.id || "anon"}`;
   const storageKeyProgresso = `unavox_aulas_progresso_${user?.id || "anon"}`;
 
+  const storageKeyPlaylist = `unavox_aulas_playlist_${user?.id || "anon"}`;
+
+  const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [concluidas, setConcluidas] = useState<Record<string, boolean>>({});
   const [favoritas, setFavoritas] = useState<Record<string, boolean>>({});
   const [tempos, setTempos] = useState<Record<string, { current: number; total: number }>>({});
@@ -157,6 +171,19 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
     setFavoritas(lerJson(storageKeyFavoritas, {}));
     setTempos(lerJson(storageKeyProgresso, {}));
   }, [storageKeyConcluidas, storageKeyFavoritas, storageKeyProgresso]);
+
+  // Lista de reprodução fica só nesta aba (sessionStorage): sobrevive ao F5, some ao fechar a aba.
+  useEffect(() => {
+    try {
+      const bruto = sessionStorage.getItem(storageKeyPlaylist);
+      const lida = bruto ? JSON.parse(bruto) : null;
+      const valida =
+        lida && typeof lida.nome === "string" && Array.isArray(lida.ids) && lida.ids.every((i: unknown) => typeof i === "string");
+      setPlaylist(valida ? (lida as Playlist) : null);
+    } catch {
+      setPlaylist(null);
+    }
+  }, [storageKeyPlaylist]);
 
   // IDs de aulas com vídeo baixado.
   useEffect(() => {
@@ -245,6 +272,43 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
     },
     [storageKeyConcluidas],
   );
+
+  const marcarConcluida = useCallback(
+    (id: string) => {
+      setConcluidas((prev) => {
+        if (prev[id]) return prev;
+        const updated = { ...prev, [id]: true };
+        try {
+          localStorage.setItem(storageKeyConcluidas, JSON.stringify(updated));
+        } catch {
+          /* localStorage indisponível: ignora */
+        }
+        return updated;
+      });
+    },
+    [storageKeyConcluidas],
+  );
+
+  const iniciarPlaylist = useCallback(
+    (nova: Playlist) => {
+      setPlaylist(nova);
+      try {
+        sessionStorage.setItem(storageKeyPlaylist, JSON.stringify(nova));
+      } catch {
+        /* ignora */
+      }
+    },
+    [storageKeyPlaylist],
+  );
+
+  const encerrarPlaylist = useCallback(() => {
+    setPlaylist(null);
+    try {
+      sessionStorage.removeItem(storageKeyPlaylist);
+    } catch {
+      /* ignora */
+    }
+  }, [storageKeyPlaylist]);
 
   const toggleFavorita = useCallback(
     (id: string) => {
@@ -391,6 +455,10 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
     downloadProgress,
     tempos,
     toggleConcluida,
+    marcarConcluida,
+    playlist,
+    iniciarPlaylist,
+    encerrarPlaylist,
     toggleFavorita,
     handleTimeUpdate,
     gravarProgressoAgora,

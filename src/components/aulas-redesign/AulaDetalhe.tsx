@@ -2,7 +2,7 @@
 // Tela 3 — página da aula: cabeçalho, ações, player real, vídeo/download e material de apoio.
 
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Check,
@@ -13,12 +13,15 @@ import {
   HardDrive,
   Heart,
   Layers,
+  ListVideo,
   Loader2,
   Play,
   Video,
   WifiOff,
+  X,
 } from "lucide-react";
 import { getPlayableObjectUrl } from "@/services/videoOfflineService";
+import { useToast } from "@/hooks/useToast";
 import { AulaPlayer } from "../aulas/AulaPlayer";
 import { AulaMateriais } from "../aulas/AulaMateriais";
 import { VideoOfflineButton } from "../aulas/VideoOfflineButton";
@@ -39,6 +42,8 @@ function nomeSeguroArquivo(titulo: string): string {
 export function AulaDetalhe() {
   const { disciplinaId, aulaId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const toast = useToast();
   const {
     loading,
     isOnline,
@@ -46,6 +51,9 @@ export function AulaDetalhe() {
     offlineAulaIds,
     tempos,
     toggleConcluida,
+    marcarConcluida,
+    playlist,
+    encerrarPlaylist,
     toggleFavorita,
     handleTimeUpdate,
     gravarProgressoAgora,
@@ -124,9 +132,35 @@ export function AulaDetalhe() {
   // URL do vídeo só vale para download se for http(s) de verdade.
   const videoUrl = aula.terabox_url && /^https?:\/\//i.test(aula.terabox_url) ? aula.terabox_url : null;
   const nomeVideo = nomeSeguroArquivo(aula.titulo);
-  const anterior = index > 0 ? disciplina.aulas[index - 1] : null;
-  const proxima = index < disciplina.aulas.length - 1 ? disciplina.aulas[index + 1] : null;
-  const irPara = (id: string) => navigate(`/aulas/${disciplina.slug}/${id}`);
+
+  // Lista de reprodução: só vale se ESTA aula faz parte dela; senão Próxima/Anterior seguem a disciplina.
+  const aulasDaLista = playlist
+    ? playlist.ids
+        .map((id) => disciplina.aulas.find((a) => a.id === id))
+        .filter((a): a is NonNullable<typeof a> => !!a)
+    : [];
+  const posNaLista = aulasDaLista.findIndex((a) => a.id === aula.id);
+  const emLista = posNaLista >= 0;
+  const sequencia = emLista ? aulasDaLista : disciplina.aulas;
+  const posicao = emLista ? posNaLista : index;
+  const anterior = posicao > 0 ? sequencia[posicao - 1] : null;
+  const proxima = posicao < sequencia.length - 1 ? sequencia[posicao + 1] : null;
+  // Dentro de uma lista o vídeo seguinte já começa tocando.
+  const irPara = (id: string, tocar = emLista) =>
+    navigate(`/aulas/${disciplina.slug}/${id}`, { state: tocar ? { autoplay: true } : undefined });
+  const tocarAutomatico = location.state?.autoplay === true;
+
+  // Vídeo chegou ao fim: marca "Estudei" sozinho e, numa lista, passa para o próximo.
+  const aoTerminar = () => {
+    if (!aula.concluida) {
+      marcarConcluida(aula.id);
+      toast.success("Aula marcada como estudada.");
+    }
+    if (emLista) {
+      if (proxima) irPara(proxima.id, true);
+      else toast.success("Fim da lista de reprodução!");
+    }
+  };
 
   // "Voltar" leva para a lista onde a aula está (subtópico ou tópico); se não achar, para a disciplina.
   const local = localizarAula(resumirTopicos(disciplina.assuntos), aula);
@@ -169,6 +203,25 @@ export function AulaDetalhe() {
       >
         <ArrowLeft className="h-4 w-4" /> {voltar.rotulo}
       </Link>
+
+      {emLista && playlist && (
+        <div className="rfx-card mb-4 flex flex-wrap items-center gap-3 px-4 py-3">
+          <ListVideo className="h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-foreground">Lista: {playlist.nome}</p>
+            <p className="text-xs text-muted-foreground">
+              Aula {posNaLista + 1} de {aulasDaLista.length} · a próxima começa sozinha
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={encerrarPlaylist}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-2"
+          >
+            <X className="h-3.5 w-3.5" /> Sair da lista
+          </button>
+        </div>
+      )}
 
       <div className="rfx-topbar mb-5">
         <span style={{ width: `${aula.progresso}%` }} />
@@ -246,6 +299,8 @@ export function AulaDetalhe() {
                 initialTime={tempos[aula.id]?.current || 0}
                 onTimeUpdate={(curr, dur) => handleTimeUpdate(aula.id, curr, dur)}
                 onPause={() => gravarProgressoAgora(aula.id)}
+                onEnded={aoTerminar}
+                autoPlay={tocarAutomatico}
                 offlineObjectUrl={offlineSource.url}
                 isOnline={isOnline}
               />
@@ -267,6 +322,29 @@ export function AulaDetalhe() {
                 </span>
               </div>
             </div>
+
+            {emLista && (
+              <div className="mt-4">
+                <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <ListVideo className="h-4 w-4 text-primary" /> Nesta lista
+                </h3>
+                <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                  {aulasDaLista.map((a, i) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      data-active={a.id === aula.id}
+                      onClick={() => a.id !== aula.id && irPara(a.id, true)}
+                      className="rfx-video flex w-full items-center gap-2.5 px-3 py-2 text-left"
+                    >
+                      <span className="w-5 shrink-0 text-xs font-semibold">{i + 1}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm">{a.titulo}</span>
+                      {a.concluida && <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={3} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
               {videoUrl ? (
