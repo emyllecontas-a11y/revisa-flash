@@ -41,7 +41,8 @@ function AulaLinha({
   grupo: AulaItem[];
   disciplinaSlug: string;
 }) {
-  const { toggleConcluida, toggleFavorita, handleMover, offlineAulaIds, downloadProgress } = useAulasData();
+  const { toggleConcluida, toggleFavorita, handleMover, offlineAulaIds, downloadProgress, isAdmin } =
+    useAulasData();
   const ok = aula.concluida;
   const baixado = offlineAulaIds.has(aula.id);
   const dl = downloadProgress[aula.id];
@@ -94,26 +95,30 @@ function AulaLinha({
           >
             <Heart className={`h-3.5 w-3.5 ${aula.favorita ? "fill-rose-500 text-rose-500" : ""}`} />
           </button>
-          <button
-            type="button"
-            onClick={() => handleMover(aula, grupo, -1)}
-            disabled={indice === 0}
-            aria-label="Mover para cima"
-            title="Mover para cima"
-            className="rfx-iconbtn"
-          >
-            <ArrowUp className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMover(aula, grupo, 1)}
-            disabled={indice === grupo.length - 1}
-            aria-label="Mover para baixo"
-            title="Mover para baixo"
-            className="rfx-iconbtn"
-          >
-            <ArrowDown className="h-3.5 w-3.5" />
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleMover(aula, grupo, -1)}
+                disabled={indice === 0}
+                aria-label="Mover para cima"
+                title="Mover para cima"
+                className="rfx-iconbtn"
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMover(aula, grupo, 1)}
+                disabled={indice === grupo.length - 1}
+                aria-label="Mover para baixo"
+                title="Mover para baixo"
+                className="rfx-iconbtn"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
       <ChevronRight className="mt-2 hidden h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1 sm:block" />

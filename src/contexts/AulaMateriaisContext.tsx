@@ -19,11 +19,14 @@ import {
   type AulaMaterial,
 } from "@/services/aulaMateriaisService";
 import { useAppUser } from "@/contexts/UserContext";
+import { useIsAppAdmin } from "@/hooks/useIsAppAdmin";
 
 interface AulaMateriaisContextType {
   materiais: AulaMaterial[];
   loading: boolean;
   userId: string | null;
+  /** Só administrador anexa e remove materiais; os demais usuários só baixam. */
+  isAdmin: boolean;
   refresh: () => Promise<void>;
   addMaterial: (aulaId: string, file: File) => Promise<AulaMaterial>;
   removeMaterial: (materialId: string, storagePath: string) => Promise<void>;
@@ -36,6 +39,7 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
   const { userId, isLoaded, isSignedIn } = useAppUser();
   const [materiais, setMateriais] = useState<AulaMaterial[]>([]);
   const [loading, setLoading] = useState(true);
+  const isAdmin = useIsAppAdmin();
 
   const loadData = useCallback(async () => {
     if (!userId) {
@@ -52,11 +56,8 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
         return;
       }
 
-      const docs = await col
-        .find({
-          selector: { user_id: userId },
-        })
-        .exec();
+      // Material de apoio é compartilhado: carrega todos (não só os do próprio usuário).
+      const docs = await col.find().exec();
 
       const loaded = docs.map((d) => d.toJSON() as unknown as AulaMaterial);
       setMateriais(loaded);
@@ -154,12 +155,13 @@ export const AulaMateriaisProvider: React.FC<{ children: ReactNode }> = ({ child
       materiais,
       loading,
       userId,
+      isAdmin,
       refresh,
       addMaterial,
       removeMaterial,
       getByAula,
     }),
-    [materiais, loading, userId, refresh, addMaterial, removeMaterial, getByAula],
+    [materiais, loading, userId, isAdmin, refresh, addMaterial, removeMaterial, getByAula],
   );
 
   return <AulaMateriaisContext.Provider value={value}>{children}</AulaMateriaisContext.Provider>;

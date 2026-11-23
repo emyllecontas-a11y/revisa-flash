@@ -33,6 +33,7 @@ import {
 } from "@/services/videoOfflineService";
 import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast";
+import { useIsAppAdmin } from "@/hooks/useIsAppAdmin";
 import {
   formatarAula,
   construirArvore,
@@ -93,6 +94,8 @@ interface AulasDataValue {
   isOnline: boolean;
   isFromCache: boolean;
   cacheSavedAt: string | null;
+  /** Administrador pode reordenar as aulas (a ordem vale para todos os usuários). */
+  isAdmin: boolean;
   disciplinas: DisciplinaResumo[];
   totalAulas: number;
   getDisciplina: (slug: string | undefined) => DisciplinaResumo | undefined;
@@ -136,6 +139,7 @@ function lerJson<T>(chave: string, padrao: T): T {
 export function AulasDataProvider({ children }: { children: ReactNode }) {
   const { user } = useAppUser();
   const toast = useToast();
+  const isAdmin = useIsAppAdmin();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -367,7 +371,8 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
   // Troca a ordem com a aula vizinha do MESMO grupo (mesmo assunto + mesmo subassunto).
   const handleMover = useCallback(
     async (aula: AulaItem, grupo: AulaItem[], direcao: -1 | 1) => {
-      if (!user?.id) return;
+      // A ordem é a mesma para todos os usuários: só administrador pode mudar.
+      if (!user?.id || !isAdmin) return;
       const posicao = grupo.findIndex((item) => item.id === aula.id);
       const vizinho = grupo[posicao + direcao];
       if (posicao < 0 || !vizinho) return;
@@ -389,7 +394,7 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
       }
       await recarregar();
     },
-    [user?.id, recarregar],
+    [user?.id, isAdmin, recarregar],
   );
 
   // Junta as aulas do banco com o estado local (concluída, favorita, progresso).
@@ -447,6 +452,7 @@ export function AulasDataProvider({ children }: { children: ReactNode }) {
     isOnline,
     isFromCache,
     cacheSavedAt,
+    isAdmin,
     disciplinas,
     totalAulas: aulas.length,
     getDisciplina,

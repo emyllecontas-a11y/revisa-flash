@@ -1,5 +1,5 @@
 // src/services/aulaService.ts
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseWithToken } from "@/lib/supabaseClient";
 
 export interface Aula {
   id: string;
@@ -69,6 +69,8 @@ export function isAulasFromCache(userId: string): boolean {
 // Tempo máximo de espera da consulta ao Supabase antes de cair no cache local.
 const TIMEOUT_BUSCA_AULAS_MS = 8000;
 
+// Aulas são COMPARTILHADAS: todo usuário logado vê todas as aulas (as regras de acesso ficam no banco).
+// O userId serve só para separar o cache offline de cada pessoa neste aparelho.
 export async function getAulasDoUsuario(userId: string): Promise<Aula[]> {
   if (!userId) {
     cacheStatusMap["anon"] = { isFromCache: false, savedAt: null };
@@ -89,10 +91,10 @@ export async function getAulasDoUsuario(userId: string): Promise<Aula[]> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   try {
+    const supabase = await getSupabaseWithToken();
     const busca = supabase
       .from("aulas")
       .select("*")
-      .eq("user_id", userId)
       .order("ordem", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
@@ -131,8 +133,10 @@ export async function getAulasDoUsuario(userId: string): Promise<Aula[]> {
   } catch (err) {
     console.error("Exceção ao buscar aulas no Supabase:", err);
     // Sem internet aparente, mas a rede caiu no meio da busca: usa o cache salvo.
+    // Sem token do Clerk (ainda carregando/sessão expirada) também cai no cache, em vez de lista vazia.
+    const semSessao = err instanceof Error && err.message === "Usuário não autenticado";
     const semConexaoReal =
-      timedOut || (typeof navigator !== "undefined" && navigator.onLine === false);
+      timedOut || semSessao || (typeof navigator !== "undefined" && navigator.onLine === false);
     if (semConexaoReal) {
       const cached = lerCacheAulas(userId);
       if (cached) {
@@ -166,6 +170,8 @@ export async function atualizarOrdemAula(
   novaOrdem: number,
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Só administrador consegue gravar (o banco recusa os demais).
+    const supabase = await getSupabaseWithToken();
     const { error } = await supabase
       .from("aulas")
       .update({ ordem: novaOrdem })

@@ -1601,7 +1601,7 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         const { data, error } = await supabaseClient
           .from('aula_materiais')
           .select('*')
-          .eq('user_id', userIdStr)
+          // Material de apoio é COMPARTILHADO: puxa os de todos (o banco já limita a usuários logados).
           .gte('created_at', pullFrom);
         if (error) {
           console.error('❌ Pull aula_materiais:', error);
@@ -1622,14 +1622,11 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           try {
             const { data: remoteIds, error: idsError } = await supabaseClient
               .from('aula_materiais')
-              .select('id')
-              .eq('user_id', userIdStr);
+              .select('id');
 
             if (!idsError && Array.isArray(remoteIds)) {
               const remoteIdSet = new Set(remoteIds.map(r => r.id));
-              const localDocs = await collection.find({
-                selector: { user_id: userIdStr }
-              }).exec();
+              const localDocs = await collection.find().exec();
 
               let removed = 0;
               for (const localDoc of localDocs) {

@@ -295,8 +295,9 @@ export async function getMaterialUrl(
 
 /**
  * Lista materiais de uma aula (do RxDB para offline, com fallback para Supabase).
+ * Material de apoio é compartilhado: traz os de qualquer autor. O userId ficou só por compatibilidade.
  */
-export async function getMateriaisByAula(aulaId: string, userId: string): Promise<AulaMaterial[]> {
+export async function getMateriaisByAula(aulaId: string, _userId?: string): Promise<AulaMaterial[]> {
   try {
     // Tenta do RxDB primeiro (offline-first)
     const db = await getDb();
@@ -305,7 +306,6 @@ export async function getMateriaisByAula(aulaId: string, userId: string): Promis
       const docs = await col
         .find({
           selector: {
-            user_id: userId,
             aula_id: aulaId,
           },
         })
@@ -324,7 +324,6 @@ export async function getMateriaisByAula(aulaId: string, userId: string): Promis
     const { data, error } = await supabase
       .from(AULA_MATERIAIS.COLECAO)
       .select("*")
-      .eq("user_id", userId)
       .eq("aula_id", aulaId)
       .order("created_at", { ascending: true });
 

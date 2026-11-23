@@ -39,7 +39,7 @@ function formatBytes(bytes: number): string {
 const LARGE_FILE_THRESHOLD_MB = 10;
 
 export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
-  const { materiais, loading, addMaterial, removeMaterial } = useAulaMateriais();
+  const { materiais, loading, addMaterial, removeMaterial, isAdmin } = useAulaMateriais();
   const confirm = useConfirm();
   const toast = useToast();
 
@@ -287,6 +287,7 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
       <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 border-b border-border p-5">
         <CardTitle className="text-sm font-semibold">Material de Apoio</CardTitle>
 
+        {isAdmin && (
         <div className="flex items-center gap-2">
           {enviando ? (
             <span className="hidden max-w-[10rem] truncate text-xs text-muted-foreground sm:inline">
@@ -323,6 +324,7 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
             tabIndex={-1}
           />
         </div>
+        )}
       </CardHeader>
 
       <CardContent className="p-0">
@@ -361,9 +363,11 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
             <p className="mt-3 text-sm text-muted-foreground">
               Nenhum material anexado a esta aula ainda.
             </p>
-            <p className="mt-1 text-xs text-muted-foreground/80">
-              Clique em Anexar PDF para adicionar.
-            </p>
+            {isAdmin && (
+              <p className="mt-1 text-xs text-muted-foreground/80">
+                Clique em Anexar PDF para adicionar.
+              </p>
+            )}
           </div>
         ) : (
           <ul role="list" className="divide-y divide-border">
@@ -424,19 +428,21 @@ export function AulaMateriais({ aulaId }: AulaMateriaisProps) {
                     <span className="hidden sm:inline">Baixar</span>
                   </Button>
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemover(material)}
-                    disabled={!isOnline}
-                    className="min-h-[36px] px-2.5 text-muted-foreground hover:text-destructive"
-                    aria-label={`Remover ${material.nome}`}
-                    title="Remover"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span className="hidden sm:inline">Remover</span>
-                  </Button>
+                  {isAdmin && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemover(material)}
+                      disabled={!isOnline}
+                      className="min-h-[36px] px-2.5 text-muted-foreground hover:text-destructive"
+                      aria-label={`Remover ${material.nome}`}
+                      title="Remover"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="hidden sm:inline">Remover</span>
+                    </Button>
+                  )}
                 </div>
               </li>
             ))}
