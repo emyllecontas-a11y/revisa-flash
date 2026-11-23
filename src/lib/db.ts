@@ -1598,11 +1598,25 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       const collection = database.collections.aula_materiais;
       if (collection) {
         const pullFrom = emptyCollections.has('aula_materiais') ? '1970-01-01T00:00:00Z' : lastSyncGlobal;
-        const { data, error } = await supabaseClient
-          .from('aula_materiais')
-          .select('*')
-          // Material de apoio é COMPARTILHADO: puxa os de todos (o banco já limita a usuários logados).
-          .gte('created_at', pullFrom);
+        // O Supabase devolve no máximo 1.000 linhas por consulta; por isso buscamos em páginas até acabar.
+        // Material de apoio é COMPARTILHADO: puxa os de todos (o banco já limita a usuários logados).
+        const data: any[] = [];
+        let error: { message: string } | null = null;
+        for (let pagina = 0; pagina < 100; pagina++) {
+          const { data: lote, error: erroLote } = await supabaseClient
+            .from('aula_materiais')
+            .select('*')
+            .gte('created_at', pullFrom)
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(data.length, data.length + 999);
+          if (erroLote) {
+            error = erroLote;
+            break;
+          }
+          if (!lote || lote.length === 0) break;
+          data.push(...lote);
+        }
         if (error) {
           console.error('❌ Pull aula_materiais:', error);
           houveErro = true;
@@ -1620,9 +1634,22 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
           // Propagação de exclusão: busca todos os IDs remotos do usuário
           // e remove do RxDB local os que não estão mais no Supabase.
           try {
-            const { data: remoteIds, error: idsError } = await supabaseClient
-              .from('aula_materiais')
-              .select('id');
+            // Também em páginas: com mais de 1.000 materiais, uma lista cortada apagaria materiais locais por engano.
+            const remoteIds: Array<{ id: string }> = [];
+            let idsError: { message: string } | null = null;
+            for (let pagina = 0; pagina < 100; pagina++) {
+              const { data: lote, error: erroLote } = await supabaseClient
+                .from('aula_materiais')
+                .select('id')
+                .order('id', { ascending: true })
+                .range(remoteIds.length, remoteIds.length + 999);
+              if (erroLote) {
+                idsError = erroLote;
+                break;
+              }
+              if (!lote || lote.length === 0) break;
+              remoteIds.push(...lote);
+            }
 
             if (!idsError && Array.isArray(remoteIds)) {
               const remoteIdSet = new Set(remoteIds.map(r => r.id));
