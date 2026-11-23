@@ -1,0 +1,96 @@
+RELATÓRIO DE DIAGNÓSTICO — Imagens nos Flashcards
+Data: 2026-11-22
+
+================================================================================
+A) O que JÁ está pronto e funcionando
+================================================================================
+
+| Item | Arquivo:Linha | Status |
+|------|---------------|--------|
+| Tipo TypeScript `Card` com campos `front_image_url` e `back_image_url` (opcionais, `string \| null`) | `src/contexts/FlashcardContext.tsx:39-40` | ✅ Existe |
+| Schema RxDB (v16) com `front_image_url` e `back_image_url` (`type: ['string', 'null'], default: null`) | `src/lib/db.ts:172-173` | ✅ Existe |
+| Serviço de upload/compressão (`compressAndUploadImage`, `deleteFlashcardImage`, `isValidImageFile`, `formatFileSize`) | `src/services/flashcardImageService.ts` | ✅ Completo |
+| - Compressão client-side (browser-image-compression) para WebP, máx 800px, 0.5 MB | Linhas 24-41 | ✅ |
+| - Upload para Supabase Storage bucket `flashcard-images` | Linhas 43-64 | ✅ |
+| - Exclusão por URL | Linhas 67-99 | ✅ |
+| - Validação de tipo (PNG, JPEG, WebP) | Linhas 102-104 | ✅ |
+| Modal de criação (`CriarFlashcardAulaModal`) com UI completa | `src/components/CriarFlashcardAulaModal.tsx` | ✅ UI pronta |
+| - Input file para frente e verso | Linhas 154-179, 205-230 | ✅ |
+| - Preview da imagem selecionada | Linhas 181-194, 232-245 | ✅ |
+| - Botão remover imagem | Linhas 188-197, 239-248 | ✅ |
+| - Estado de carregando (`isUploadingImage`) | Linha 38 | ✅ |
+| - Tratamento de erro de upload com toast | Linhas 122-142 | ✅ |
+| `addCard` e `editCard` no Context aceitam `frontImageUrl` e `backImageUrl` | `FlashcardContext.tsx:117, 121, 877, 1254` | ✅ Assinatura pronta |
+| `editCard` salva as URLs quando fornecidas (`frontImageUrl !== undefined`) | `FlashcardContext.tsx:1289-1292` | ✅ Lógica pronta |
+| CSS do StudyCard já prevê `img` no corpo da carta (`max-width: 100%; max-height: 12rem`) | `flashcards-cards.css:57` | ✅ Estilo pronto |
+| Bucket Supabase Storage configurado no serviço: `flashcard-images` | `flashcardImageService.ts:11` | ✅ Nome definido |
+
+================================================================================
+B) O que está PELA METADE (e em qual arquivo/linha)
+================================================================================
+
+| Item | Arquivo:Linha | Problema |
+|------|---------------|----------|
+| Criação não passa URLs para `addCard` | `CriarFlashcardAulaModal.tsx:148` | Após upload, `addCard(targetDeckId, front, back)` é chamado **sem** `frontImageUrl` / `backImageUrl` (comentário na linha 144-147 admite que falta) |
+| `userId` hardcoded como `'current-user'` no upload | `CriarFlashcardAulaModal.tsx:126, 138` | `compressAndUploadImage(file, 'current-user')` — não pega o `userId` real do contexto Clerk |
+| Edição de flashcard não tem UI de imagem | `flashcards.tsx:1670-1761` | Modal de editar (`isEditModalOpen`) só tem campos de texto (`editFrente`, `editVerso`, `editTopico`) — **sem input file, preview, botão remover** |
+| `StudyCard` não renderiza as imagens | `StudyCard.tsx:25-58` | Recebe `front`/`back` como `ReactNode` (texto formatado) — **não acessa `front_image_url` nem `back_image_url`** do card |
+| Lista de cards no deck (`allCardsInDeck`) não garante campos de imagem | `flashcards.tsx:668` | `getAllCardsByDeck` busca do RxDB, mas o `StudyCard` não usa os campos |
+| Sincronização Supabase — não há migração SQL para colunas `front_image_url` / `back_image_url` na tabela `flashcards` | N/A | **Não encontrei evidência** em `supabase/migrations/*.sql` — tabela provavelmente não tem as colunas no Postgres |
+| Push/Pull `flashcards` em `syncWithSupabase` — usa `pushWithConflictCheck` genérico, deve funcionar se colunas existirem no Supabase | `db.ts:1429, 1520` | Dependente da migração SQL |
+
+================================================================================
+C) O que NÃO foi feito ainda
+================================================================================
+
+1. **Migração SQL** para adicionar `front_image_url` e `back_image_url` na tabela `flashcards` do Supabase (Postgres)
+2. **Passar `userId` real** do Clerk para o upload no modal de criação (hoje é string fixa `'current-user'`)
+3. **Chamar `addCard` com as URLs** após upload bem-sucedido no modal de criação
+4. **UI de imagem no modal de edição** (`flashcards.tsx`) — input file, preview, remover, estado carregando
+5. **Chamar `editCard` com as URLs** no modal de edição
+6. **Renderizar imagens no `StudyCard`** — ler `card.front_image_url` e `card.back_image_url` e mostrar `<img>` no verso/frente conforme lado virado
+7. **Tratamento offline** — fila de upload de imagens quando sem internet (hoje falha silenciosamente com toast warning)
+8. **Exclusão de imagem** ao editar (passar `null` para remover) — `editCard` já aceita `null`, mas UI não expõe
+
+================================================================================
+D) Riscos ou dúvidas que encontrei
+================================================================================
+
+| Risco | Descrição |
+|-------|-----------|
+| Bucket `flashcard-images` não existe no Supabase | O serviço assume que existe; se não tiver sido criado no painel, upload falhará |
+| Colunas no Supabase ausentes | Sem migração SQL, o push para `flashcards` vai falhar ou ignorar as colunas (conflito de schema) |
+| `userId` hardcoded | Uploads vão para pasta `current-user/flashcards/...` no Storage — **não isola por usuário real**; precisa pegar `userId` do Clerk (`auth.userId`) |
+| Conflito de shared cards | `addCard` cria cards para múltiplos usuários (`targetUserIds` loop) — a mesma imagem seria compartilhada (OK se URL pública), mas upload é feito **uma vez só** no modal; se falhar para um usuário, não há retry por usuário |
+| Tamanho do bucket/Storage | 0.5 MB por imagem comprimida; sem política de limpeza de imagens órfãs (card deletado) |
+| Estudo offline | Imagens são URLs públicas do Supabase Storage — **não funcionam offline** (precisa cache via Service Worker ou IndexedDB blob) |
+| TypeScript errors existentes | 64 erros em 16 arquivos (maioria não relacionados a flashcards: Clerk v6 types, React refs, etc.) — não bloqueiam build, mas indicam dívida técnica |
+
+================================================================================
+E) Lista de arquivos que provavelmente precisarão ser editados no passo seguinte
+================================================================================
+
+| Arquivo | O que editar |
+|---------|--------------|
+| `supabase/migrations/YYYYMMDD_add_flashcard_images.sql` **(novo)** | `ALTER TABLE flashcards ADD COLUMN front_image_url TEXT, ADD COLUMN back_image_url TEXT;` |
+| `src/components/CriarFlashcardAulaModal.tsx` | Linha 126/138: trocar `'current-user'` por `userId` real (via `useAuth()` do Clerk); Linha 148: passar `frontImageUrl, backImageUrl` no `addCard(...)` |
+| `src/routes/flashcards.tsx` | Modal de edição: adicionar estados `editFrontImageFile`, `editBackImageFile`, previews, inputs file, botões remover; no `handleEditCard` (linha 457) passar as URLs |
+| `src/components/flashcards/StudyCard.tsx` | Receber `frontImageUrl?`, `backImageUrl?` nas props; renderizar `<img src={flipped ? backImageUrl : frontImageUrl} ...>` dentro de `rf-studycard__body` |
+| `src/contexts/FlashcardContext.tsx` | Verificar se `addCard`/`editCard` propagam as URLs para todos os usuários do deck compartilhado (hoje `cardIdsToUpdate` loop já faz) |
+| `src/lib/db.ts` | Verificar se `flashcardSchema` versão 16 já está deployada (RxDB migra automaticamente) — **não mexer**, só confirmar |
+| `public/sw.js` (se houver) | Adicionar cache de imagens do bucket `flashcard-images` para funcionar offline |
+
+================================================================================
+F) Resultado dos comandos de teste
+================================================================================
+
+| Comando | Resultado |
+|---------|-----------|
+| `npx vitest run` | ✅ **101 testes passaram** (6 suites) — nenhum teste falhou |
+| `npx tsc --noEmit` | ⚠️ **64 erros TypeScript em 16 arquivos** (baseline conhecida: 64 erros em 16 arquivos) — **nenhum erro NOVO em arquivos de flashcard** além dos 4 já existentes em `FlashcardContext.tsx` (implicit any, dueDate null) que são dívida antiga |
+
+================================================================================
+RESUMO EM UMA FRASE
+================================================================================
+
+A infraestrutura de dados (Tipos, RxDB, Service de upload, UI de criação) **já existe e está pronta**; faltam: **migração SQL no Supabase**, **passar userId real + URLs no `addCard`**, **UI de imagem na edição**, **render no `StudyCard`** e **estratégia offline para imagens**.

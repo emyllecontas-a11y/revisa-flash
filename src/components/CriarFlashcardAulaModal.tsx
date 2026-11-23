@@ -2,7 +2,8 @@ import { useState } from "react";
 import { X, Sparkles, Image, Trash2 } from "lucide-react";
 import { useFlashcardContext } from "@/contexts/FlashcardContext";
 import { useToast } from "@/hooks/useToast";
-import { compressAndUploadImage, isValidImageFile, formatFileSize } from "@/services/flashcardImageService";
+import { compressAndUploadImage, deleteFlashcardImage, isValidImageFile, formatFileSize } from "@/services/flashcardImageService";
+import { useAppUser } from "@/contexts/UserContext";
 
 interface CriarFlashcardAulaModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface CriarFlashcardAulaModalProps {
 
 export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDisciplina }: CriarFlashcardAulaModalProps) {
   const { decks, createDeck, addCard } = useFlashcardContext();
+  const { userId } = useAppUser();
   const toast = useToast();
 
   const [front, setFront] = useState(aulaTitulo ? `Resumo / Pergunta sobre: ${aulaTitulo}` : "");
@@ -101,6 +103,11 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       return;
     }
 
+    if (!userId) {
+      toast.error("Usuário não autenticado. Faça login para criar flashcards com imagem.");
+      return;
+    }
+
     let targetDeckId = deckId;
     if (!targetDeckId && decks.length > 0) {
       targetDeckId = decks[0].id;
@@ -112,21 +119,19 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
     }
 
     setIsSaving(true);
-    try {
-      let frontImageUrl: string | undefined;
-      let backImageUrl: string | undefined;
+    let frontImageUrl: string | null = null;
+    let backImageUrl: string | null = null;
 
+    try {
       // Upload da imagem da frente se houver
       if (frontImageFile) {
         setIsUploadingImage(true);
         try {
-          // Obter userId do contexto (precisamos acessar de alguma forma)
-          // Como não temos acesso direto ao userId aqui, vamos passar undefined
-          // e o addCard vai lidar com isso
-          frontImageUrl = await compressAndUploadImage(frontImageFile, 'current-user');
+          frontImageUrl = await compressAndUploadImage(frontImageFile, userId);
         } catch (uploadError) {
-          console.warn('⚠️ Falha no upload da imagem da frente, salvando apenas texto:', uploadError);
-          toast.warning("Aviso: imagem da frente não foi enviada, mas o flashcard será salvo.");
+          console.error('❌ Falha no upload da imagem da frente:', uploadError);
+          toast.error("Falha ao enviar imagem da frente. O flashcard não foi salvo.");
+          return;
         }
         setIsUploadingImage(false);
       }
@@ -135,18 +140,21 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       if (backImageFile) {
         setIsUploadingImage(true);
         try {
-          backImageUrl = await compressAndUploadImage(backImageFile, 'current-user');
+          backImageUrl = await compressAndUploadImage(backImageFile, userId);
         } catch (uploadError) {
-          console.warn('⚠️ Falha no upload da imagem do verso, salvando apenas texto:', uploadError);
-          toast.warning("Aviso: imagem do verso não foi enviada, mas o flashcard será salvo.");
+          console.error('❌ Falha no upload da imagem do verso:', uploadError);
+          // Se o upload da frente funcionou, apagar a imagem órfã
+          if (frontImageUrl) {
+            await deleteFlashcardImage(frontImageUrl);
+          }
+          toast.error("Falha ao enviar imagem do verso. O flashcard não foi salvo.");
+          return;
         }
         setIsUploadingImage(false);
       }
 
-      // Salvar o card - o addCard precisa ser atualizado para aceitar as URLs das imagens
-      // Por enquanto, vamos adicionar as imagens como parte do front/back ou como metadados
-      // A implementação ideal seria passar as URLs para o addCard
-      await addCard(targetDeckId, front.trim(), back.trim());
+      // Salvar o card com as URLs das imagens
+      await addCard(targetDeckId, front.trim(), back.trim(), undefined, frontImageUrl, backImageUrl);
       toast.success("Flashcard criado com sucesso!");
       setFront("");
       setBack("");
@@ -155,6 +163,13 @@ export function CriarFlashcardAulaModal({ open, onClose, aulaTitulo, aulaDiscipl
       handleClose();
     } catch (err) {
       console.error(err);
+      // Se salvou o card mas falhou em algo posterior, tentar limpar imagens
+      if (frontImageUrl) {
+        await deleteFlashcardImage(frontImageUrl);
+      }
+      if (backImageUrl) {
+        await deleteFlashcardImage(backImageUrl);
+      }
       toast.error("Erro ao salvar flashcard");
     } finally {
       setIsSaving(false);

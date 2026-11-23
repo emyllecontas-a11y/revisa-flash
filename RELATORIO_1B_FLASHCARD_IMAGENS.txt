@@ -1,0 +1,129 @@
+RELATÓRIO PARTE 1B — Ligar as imagens nos flashcards (criação, edição e estudo)
+=================================================================================
+
+(A) Arquivos alterados e o que mudou em cada um
+------------------------------------------------
+
+1. src/components/CriarFlashcardAulaModal.tsx
+   - Importado useAppUser do UserContext para obter o userId real do Clerk
+   - Importado deleteFlashcardImage do flashcardImageService
+   - Corrigido o upload de imagens: agora usa userId real (era 'current-user' fixo)
+   - Se userId não estiver disponível, mostra toast de erro e não salva o card
+   - Passou frontImageUrl e backImageUrl para addCard (removido comentário que admitia não passar)
+   - Se upload de QUALQUER imagem falhar, NÃO salva o card "pela metade":
+     - Mostra toast dizendo qual lado falhou
+     - Mantém o modal aberto com dados preenchidos
+     - Se frente subiu e verso falhou, apaga a imagem da frente recém-enviada (deleteFlashcardImage)
+
+2. src/routes/flashcards.tsx
+   - Importados: Image, Trash2Icon (lucide), compressAndUploadImage, deleteFlashcardImage, isValidImageFile (flashcardImageService), useAppUser, useToast
+   - Adicionados estados para imagens no modal de edição:
+     - editFrontImageFile, editBackImageFile (File | null)
+     - editFrontImagePreview, editBackImagePreview (string | null)
+     - editFrontImageUrl, editBackImageUrl (string | null) — URLs atuais do card
+     - editRemoveFrontImage, editRemoveBackImage (boolean) — flags de remoção
+     - isEditingImageUploading (boolean) — loading
+   - openEditModal e openEditFromStudy: carregam front_image_url/back_image_url do card para preview inicial
+   - UI do modal de edição: adicionados campos para FRENTE e VERSO com:
+     - input file validado com isValidImageFile
+     - preview da imagem atual ou nova selecionada
+     - botão remover (marca para exclusão, mostra "Imagem será removida ao salvar" com botão "Desfazer")
+     - estado de carregando desabilita inputs
+   - onClose do modal: revoga objectURLs e limpa todos os estados de imagem
+   - handleEditCard reescrito:
+     - Verifica userId no início (erro se não autenticado)
+     - Prepara frontImageUrl/backImageUrl: undefined=não muda, null=remove, string=atualiza
+     - Upload de nova imagem: compressAndUploadImage com userId real
+     - Remoção: extrai path da URL antiga, só chama deleteFlashcardImage se path começar com userId atual (não tenta apagar imagem de outro usuário em deck compartilhado)
+     - Se delete falhar, loga warning e continua (não trava a edição)
+     - Se upload falhar, não salva edição, avisa com toast, limpa imagem órfã se houver
+     - Passa URLs para editCard (frontImageUrl, backImageUrl)
+     - Atualiza sessaoCards com novas URLs se editFromStudy
+   - Adicionado userId na dependency array do handleEditCard
+
+3. src/components/flashcards/StudyCard.tsx
+   - Importado useState do React
+   - Adicionadas props opcionais: frontImageUrl?: string | null, backImageUrl?: string | null
+   - Estados internos: frontImageError, backImageError (boolean) para esconder img quebrada
+   - No corpo da carta (rf-studycard__body):
+     - Frente: renderiza <img> com frontImageUrl se não erro, loading="lazy", alt="Imagem da frente do flashcard", max-h-48, onError esconde
+     - Verso: renderiza <img> com backImageUrl se não erro, loading="lazy", alt="Imagem do verso do flashcard", max-h-48, onError esconde
+   - CSS existente (flashcards-cards.css linha ~57) já prevê estilo para img no corpo
+
+4. src/contexts/FlashcardContext.tsx (verificação)
+   - Confirma: addCard já grava front_image_url e back_image_url em TODOS os cards criados no loop targetUserIds (deck compartilhado)
+   - Confirma: editCard já atualiza URLs em TODOS os cards com mesmo shared_card_id (cardIdsToUpdate)
+   - Nenhuma alteração necessária — já funcionava corretamente
+
+(B) Onde o StudyCard é usado
+----------------------------
+- src/routes/flashcards.tsx:959 — único uso, na tela de estudo (modo "estudo")
+  - Passados: frontImageUrl={currentCard.front_image_url}, backImageUrl={currentCard.back_image_url}
+
+(C) Como ficou o tratamento de erro de upload
+---------------------------------------------
+Criação (CriarFlashcardAulaModal):
+- Se userId não disponível → toast "Usuário não autenticado..." e retorna sem salvar
+- Se upload frente falha → toast "Falha ao enviar imagem da frente. O flashcard não foi salvo." e retorna
+- Se upload verso falha → apaga imagem da frente se subiu (deleteFlashcardImage), toast "Falha ao enviar imagem do verso..." e retorna
+- Se addCard falhar depois dos uploads → tenta apagar ambas imagens, toast genérico
+
+Edição (flashcards.tsx handleEditCard):
+- Se userId não disponível → toast "Usuário não autenticado." e retorna
+- Upload frente falha → toast "Falha ao enviar imagem da frente. A edição não foi salva." e retorna
+- Upload verso falha → se frente subiu, apaga frente (deleteFlashcardImage), toast "Falha ao enviar imagem do verso..." e retorna
+- deleteFlashcardImage falha → console.warn apenas, continua a edição (não trava)
+- editCard falha → toast genérico
+
+(D) Como ficou a regra de exclusão para cards compartilhados
+------------------------------------------------------------
+Ao editar e clicar "Remover" em uma imagem:
+1. Extrai o path da URL antiga (remove prefixo `/flashcard-images/`)
+2. Verifica se path começa com `${userId}/` (ex: "user_abc123/flashcards/uuid.webp")
+3. Se SIM (imagem do usuário atual): chama deleteFlashcardImage → apaga do Storage
+4. Se NÃO (imagem de outro usuário no deck compartilhado): NÃO tenta apagar do Storage; apenas limpa a URL no card (passa null para editCard)
+5. Se deleteFlashcardImage falhar: loga warning no console, continua a edição normalmente
+
+Isso evita erro de permissão no Storage (políticas exigem que pasta seja do usuário) e não deixa lixo no bucket.
+
+(E) Resultado dos comandos de verificação
+-----------------------------------------
+- npx vitest run: ✅ 101 testes verdes (6 arquivos de teste)
+- npm run build: ✅ Verde (build bem-sucedido em ~11s)
+- npx tsc --noEmit: 64 erros ANTIGOS em 16 arquivos, NENHUM novo nos arquivos tocados
+- git diff src/lib/db.ts: ✅ Vazio
+- git diff src/routes/calendario.tsx: ✅ Vazio
+- git diff src/components/study-plan/WeeklyGridEditor.tsx: ✅ Vazio
+
+(F) Passo a passo para testar na prática
+----------------------------------------
+1. Abra o app no navegador (logado no Clerk)
+2. Vá em Flashcards → escolha/abra um baralho
+3. Clique em "Novo flashcard" ou "+" → abre CriarFlashcardAulaModal
+4. Preencha frente/verso, anexe imagem na frente e/ou verso (PNG/JPEG/WebP)
+5. Clique "Salvar flashcard" → deve aparecer toast "Flashcard criado com sucesso!"
+6. Abra o Supabase Dashboard → Storage → bucket "flashcard-images" → pasta com seu userId → confira arquivo .webp
+7. Volte ao app, clique no card para editar (ícone lápis)
+8. No modal de edição: veja preview das imagens atuais
+9. Teste: clique "Remover" na frente → mostra "Imagem será removida ao salvar" + "Desfazer"
+10. Teste: selecione nova imagem no verso → preview atualiza
+11. Salve → toast "Salvo", confira no Storage que:
+    - Imagem antiga da frente foi apagada (se era sua)
+    - Nova imagem do verso subiu
+12. Inicie estudo do baralho → vire o card → confira que imagem aparece no corpo da carta (frente/verso conforme lado virado)
+13. Teste erro: fique offline ou sem userId → tente criar com imagem → deve dar toast claro e não salvar pela metade
+
+(G) Riscos ou dúvidas encontradas
+---------------------------------
+1. **userId pode ser null em UserContext offline**: Tratamos com check no início de handleSalvar/handleEditCard. Em modo offline, o userId vem do localStorage (revisaflash_user_id). Se não houver, o upload falha com mensagem clara.
+
+2. **Exclusão de imagem de outro usuário**: A regra "só apaga se path começa com userId" evita erro de permissão no Storage, mas deixa o arquivo órfão no bucket se o dono original não apagar. Isso é aceitável para Parte 1B (limpeza de órfãos é Parte 1C).
+
+3. **Race condition no upload duplo**: Se usuário clicar "Salvar" rápido duas vezes, pode subir duas imagens. O addCard/editCard usa IDs únicos, então cria cards/imagens duplicadas. Mitigação: botão desabilita durante isSaving/isUploadingImage.
+
+4. **Preview com objectURL revogado**: No onClose e after save, revogamos URL.revokeObjectURL. Se usuário abrir modal, escolher imagem, fechar sem salvar, reabrir → preview some (correto, imagem não persistiu).
+
+5. **Tipos TypeScript pre-existentes**: 64 erros em 16 arquivos não relacionados a esta tarefa (Clerk v6, React refs, etc.). Nenhum novo erro introduzido.
+
+---
+Arquivo salvo em: RELATORIO_1B_FLASHCARD_IMAGENS.txt

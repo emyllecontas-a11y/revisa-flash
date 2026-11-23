@@ -1,0 +1,257 @@
+RELATÓRIO — DIAGNÓSTICO SOMENTE LEITURA: Como o app identifica o usuário logado (Clerk) nas policies do Supabase
+==============================================================================================
+Data: 2026-11-22
+
+-------------------------------------------------------------------------------------
+1. POLICIES EXISTENTES (supabase/migrations/*.sql) — Expressão usada para identificar o usuário
+-------------------------------------------------------------------------------------
+
+Todas as policies de tabelas usam **`auth.jwt() ->> 'sub'`** para comparar com a coluna `user_id` (text).
+
+Arquivo: `supabase/migrations/20261117_create_aula_materiais.sql`
+- Linha 46-49 (SELECT):
+  ```sql
+  CREATE POLICY "aula_materiais_select_own"
+    ON public.aula_materiais FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+  ```
+- Linha 52-55 (INSERT):
+  ```sql
+  CREATE POLICY "aula_materiais_insert_own"
+    ON public.aula_materiais FOR INSERT
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+  ```
+- Linha 58-62 (UPDATE):
+  ```sql
+  CREATE POLICY "aula_materiais_update_own"
+    ON public.aula_materiais FOR UPDATE
+    USING ((auth.jwt() ->> 'sub') = user_id)
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+  ```
+
+Arquivo: `supabase/migrations/20261119_create_study_plan.sql` (exemplos de 5 tabelas do Plano de Estudos)
+- Linha 37-40 (study_tasks SELECT):
+  ```sql
+  CREATE POLICY "study_tasks_select_own"
+    ON public.study_tasks FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+  ```
+- Linha 85-88 (study_theme_timelines SELECT):
+  ```sql
+  CREATE POLICY "study_theme_timelines_select_own"
+    ON public.study_theme_timelines FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+  ```
+- Linha 236-239 (study_occurrences SELECT):
+  ```sql
+  CREATE POLICY "study_occurrences_select_own"
+    ON public.study_occurrences FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+  ```
+
+Arquivo: `supabase/migrations/20261122_study_plan_pauses.sql`
+- Linha 21 (study_plan_pauses SELECT):
+  ```sql
+  CREATE POLICY "study_plan_pauses_select_own" ON public.study_plan_pauses FOR SELECT USING ((auth.jwt() ->> 'sub') = user_id);
+  ```
+
+**3 exemplos reais copiados textualmente:**
+1. `USING ((auth.jwt() ->> 'sub') = user_id)` — aula_materiais_select_own (20261117_create_aula_materiais.sql:48)
+2. `WITH CHECK ((auth.jwt() ->> 'sub') = user_id)` — study_tasks_insert_own (20261119_create_study_plan.sql:44)
+3. `USING ((auth.jwt() ->> 'sub') = user_id) WITH CHECK ((auth.jwt() ->> 'sub') = user_id)` — study_tasks_update_own (20261119_create_study_plan.sql:49-51)
+
+Observação: NÃO EXISTE uso de `auth.uid()`, `auth.jwt()->>'sub'` (sem espaço), `request.jwt.claims`, ou `current_setting` nas policies atuais. O padrão é exclusivamente `auth.jwt() ->> 'sub'`.
+
+-------------------------------------------------------------------------------------
+2. TIPO DA COLUNA user_id NAS TABELAS
+-------------------------------------------------------------------------------------
+
+A coluna `user_id` é do tipo **`text`** (Clerk ID) em todas as tabelas criadas pelas migrations do projeto.
+
+Evidências (trechos das CREATE TABLE):
+
+Arquivo: `supabase/migrations/20261117_create_aula_materiais.sql` (linha 14):
+```sql
+user_id       text        NOT NULL,
+```
+
+Arquivo: `supabase/migrations/20261119_create_study_plan.sql`:
+- study_tasks (linha 11): `user_id text NOT NULL,`
+- study_theme_timelines (linha 47): `user_id text NOT NULL,`
+- study_weekly_blocks (linha 83): `user_id text NOT NULL,`
+- study_extra_events (linha 119): `user_id text NOT NULL,`
+- study_occurrences (linha 155): `user_id text NOT NULL,`
+
+Arquivo: `supabase/migrations/20261122_study_plan_pauses.sql` (linha 12):
+```sql
+user_id text NOT NULL,
+```
+
+**Tabela flashcards:** NÃO EXISTE migration CREATE TABLE para `flashcards` no projeto (busca por "CREATE TABLE.*flashcards" retorna 0 resultados). A tabela provavelmente foi criada manualmente no painel do Supabase ou via Dashboard. O código em `src/lib/supabaseClient.ts` (linhas 425, 454, 470, 487) faz `.eq('user_id', userId)` onde `userId` é string (Clerk ID), o que é compatível com coluna `text`.
+
+-------------------------------------------------------------------------------------
+3. getSupabaseWithToken() — Como o token do Clerk é obtido e passado
+-------------------------------------------------------------------------------------
+
+Arquivo: `src/lib/supabaseClient.ts`
+
+**Obtenção do token (função `getClerkToken`, linhas 30-78):**
+1. Acessa `window.Clerk` global
+2. Pega `clerk.session` (sessão ativa)
+3. Tenta obter token com **template "supabase1"**:
+   ```typescript
+   const token = await session.getToken({ template: 'supabase1' });
+   ```
+4. Se falhar (catch), faz **fallback sem template**:
+   ```typescript
+   const fallbackToken = await session.getToken();
+   ```
+5. **SEM `skipCache: true`** (removido na correção de 2026-11-15) — o Clerk devolve o mesmo token por ~60s naturalmente.
+
+**Passagem ao client Supabase (função `getSupabaseWithToken`, linhas 80-120):**
+1. Decodifica o JWT (base64 da parte central) para ler `exp` (expiração em segundos)
+2. Converte para ms: `tokenExp = payload.exp * 1000`
+3. Cria/atualiza client autenticado **SÓ se token mudou OU expirou (30s antes) OU não tem client**:
+   ```typescript
+   cachedSupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+     auth: {
+       persistSession: false,
+       autoRefreshToken: false,
+       detectSessionInUrl: false,
+     },
+     global: {
+       headers: {
+         Authorization: `Bearer ${token}`,
+       },
+     },
+   });
+   ```
+4. O token vai no header `Authorization: Bearer <token>` do client autenticado.
+5. O client ANON (`supabase` exportado na linha 16) **NÃO** é usado para operações autenticadas.
+
+**Resumo:** Template preferido = `"supabase1"`, fallback = sem template. Header `Authorization: Bearer <jwt>` no client autenticado. Auth desligado no client autenticado para evitar GoTrueClient duplicados.
+
+-------------------------------------------------------------------------------------
+4. POLICIES DE STORAGE.OBJECTS JÁ CRIADAS (outros buckets)
+-------------------------------------------------------------------------------------
+
+Arquivo: `supabase/migrations/20261117_create_aula_materiais.sql` (bucket **`aula-materiais`**, privado)
+
+Todas usam **`(storage.foldername(name))[1] = (auth.jwt() ->> 'sub')`** — o primeiro folder do path deve ser o Clerk ID do usuário.
+
+- Linha 88-95 (SELECT):
+  ```sql
+  CREATE POLICY "aula_materiais_storage_select"
+    ON storage.objects FOR SELECT
+    USING (
+      bucket_id = 'aula-materiais'
+      AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+    );
+  ```
+
+- Linha 97-104 (INSERT):
+  ```sql
+  CREATE POLICY "aula_materiais_storage_insert"
+    ON storage.objects FOR INSERT
+    WITH CHECK (
+      bucket_id = 'aula-materiais'
+      AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+    );
+  ```
+
+- Linha 106-116 (UPDATE):
+  ```sql
+  CREATE POLICY "aula_materiais_storage_update"
+    ON storage.objects FOR UPDATE
+    USING (
+      bucket_id = 'aula-materiais'
+      AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+    )
+    WITH CHECK (
+      bucket_id = 'aula-materiais'
+      AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+    );
+  ```
+
+- Linha 119-126 (DELETE):
+  ```sql
+  CREATE POLICY "aula_materiais_storage_delete"
+    ON storage.objects FOR DELETE
+    USING (
+      bucket_id = 'aula-materiais'
+      AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+    );
+  ```
+
+**Bucket `arquivos` (usado por uploadArquivo em supabaseClient.ts:688-729):** NÃO EXISTE migration criando policies para este bucket nos arquivos do projeto. O código usa o client ANON (`supabase` exportado linha 16) para storage — **isso só funciona se o bucket for público ou se não houver RLS habilitado em storage.objects para esse bucket**.
+
+**Bucket `flashcard-images`:** NÃO EXISTE migration criando bucket nem policies (busca por "flashcard-images" nas migrations retorna 0 resultados).
+
+-------------------------------------------------------------------------------------
+5. flashcardImageService.ts — Formato do caminho no upload e extração para exclusão
+-------------------------------------------------------------------------------------
+
+Arquivo: `src/services/flashcardImageService.ts`
+
+**Upload (linhas 43-64):**
+```typescript
+const fileName = `${userId}/flashcards/${crypto.randomUUID()}.webp`;
+// Exemplo: "user_abc123/flashcards/550e8400-e29b-41d4-a716-446655440000.webp"
+
+const { data, error } = await supabaseClient.storage
+  .from(BUCKET_NAME)  // 'flashcard-images'
+  .upload(fileName, compressedFile, {
+    contentType: 'image/webp',
+    upsert: false,
+  });
+```
+
+**Formato do path no Storage:**
+`<userId>/flashcards/<uuid>.webp`
+- `userId` = Clerk ID do usuário (string, ex: "user_abc123")
+- pasta fixa: `flashcards/`
+- arquivo: UUID v4 + `.webp` (sempre WebP após compressão)
+
+**URL pública retornada (linhas 71-75):**
+```typescript
+const { data: urlData } = supabaseClient.storage
+  .from(BUCKET_NAME)
+  .getPublicUrl(data.path);
+// Formato: https://<project>.supabase.co/storage/v1/object/public/flashcard-images/<userId>/flashcards/<uuid>.webp
+```
+
+**Exclusão — extração do path da URL (linhas 86-95):**
+```typescript
+const bucketMarker = `/${BUCKET_NAME}/`;  // "/flashcard-images/"
+const index = imageUrl.indexOf(bucketMarker);
+
+if (index === -1) {
+  return { success: false, error: 'URL da imagem não reconhecida' };
+}
+
+const path = imageUrl.substring(index + bucketMarker.length);
+// path resultante: "<userId>/flashcards/<uuid>.webp"
+```
+
+**Exclusão no bucket (linhas 97-105):**
+```typescript
+const { error } = await supabaseClient.storage
+  .from(BUCKET_NAME)
+  .remove([path]);
+```
+
+-------------------------------------------------------------------------------------
+RESUMO PARA DECISÃO (bucket flashcard-images)
+-------------------------------------------------------------------------------------
+
+Para o bucket `flashcard-images` funcionar com o service atual:
+1. **Bucket deve ser PÚBLICO** — o service usa `getPublicUrl()` (linha 72) que só retorna URL acessível se bucket for público
+2. **Policies necessárias em storage.objects** (seguindo padrão do `aula-materiais`):
+   - INSERT: `WITH CHECK (bucket_id = 'flashcard-images' AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub'))`
+   - SELECT: `USING (bucket_id = 'flashcard-images')` — leitura pública (bucket público)
+   - DELETE: `USING (bucket_id = 'flashcard-images' AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub'))`
+3. **Path format compatível** — o service já usa `<userId>/flashcards/<uuid>.webp` onde `userId` = Clerk ID, compatível com `(storage.foldername(name))[1] = auth.jwt() ->> 'sub'`
+
+-------------------------------------------------------------------------------------
+FIM DO RELATÓRIO
+-------------------------------------------------------------------------------------

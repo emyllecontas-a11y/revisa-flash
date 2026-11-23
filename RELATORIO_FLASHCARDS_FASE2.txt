@@ -1,0 +1,146 @@
+========================================================================
+RELATORIO FASE 2 — RESTAURAÇÃO FLASHCARDS.TSX
+Gerado em: 23/11/2026
+========================================================================
+
+------------------------------------------------------------------------
+RESUMO EXECUTIVO
+------------------------------------------------------------------------
+O arquivo src/routes/flashcards.tsx JÁ CONTINHA as 11 funções restauradas
+com as adaptações de imagem corretas nas funções openEditFromStudy e
+openEditModal. Não foi necessário inserir código novo — apenas confirmar
+que o bloco está igual ao HEAD (exceto nas 2 funções adaptadas) e remover
+a palavra "Done" (que já não estava lá). Todas as verificações passaram.
+
+------------------------------------------------------------------------
+1) BACKUP
+------------------------------------------------------------------------
+- Arquivo atual copiado para BACKUP_flashcards_ANTES_FASE2.txt na raiz
+  (Copy-Item / copy executado com sucesso).
+- git diff --stat -- src/lib/db.ts ANTES: 1 arquivo alterado, 16
+  inserções(+), 2 remoções(-).
+
+------------------------------------------------------------------------
+2) MEDIÇÃO DE ACENTOS EMBARALHADOS (bytes 0xC3, 0xC2, 0xC5)
+------------------------------------------------------------------------
+- ANTES (arquivo atual): 601 bytes
+- DEPOIS (após conferência, sem alterações no arquivo): 601 bytes
+- NÃO AUMENTOU — OK.
+
+------------------------------------------------------------------------
+3) BLOCO DO HEAD (entre fim de handleEditCard e início da renderização)
+------------------------------------------------------------------------
+O HEAD contém exatamente 11 funções + seção de comentários:
+
+1. handleDeleteDeck (linhas ~485-503) — exclui baralho
+2. handleDeleteCard (linhas ~506-533) — exclui card
+3. handleRenameDeck (linhas ~535-564) — renomeia baralho
+4. handleAddMember (linhas ~566-617) — adiciona membro por e-mail
+5. handleRemoveMember (linhas ~619-661) — remove membro
+6. iniciarEstudo (linhas ~663-710) — inicia sessão de estudo
+7. handleRating (linhas ~712-747) — avalia card (again/hard/good/easy)
+8. voltarDaConclusao (linhas ~749-759) — volta da tela "concluído"
+9. voltarParaDecks (linhas ~761-771) — volta para lista de decks
+10. openEditFromStudy (linhas ~773-781) — abre modal a partir do estudo
+11. openEditModal (linhas ~783-793) — abre modal a partir da lista
+
+Depois: comentários "RENDERIZAÇÃO" e "let conteudo = null;".
+
+NÃO HÁ outros trechos (useEffect, useMemo, useCallback, constantes) além
+das 11 funções listadas acima.
+
+------------------------------------------------------------------------
+4) ESTADOS DE IMAGEM NO MODAL DE EDIÇÃO (handleEditCard atual + JSX)
+------------------------------------------------------------------------
+Lidos no arquivo atual (~linhas 465-635 handleEditCard; ~linhas 1640-1760
+modal):
+- editFrontImageUrl: string | null (URL da imagem da frente já salva)
+- editBackImageUrl: string | null (URL da imagem do verso já salva)
+- editFrontImageFile: File | null (novo arquivo selecionado)
+- editBackImageFile: File | null
+- editFrontImagePreview: string | null (object URL para preview)
+- editBackImagePreview: string | null
+- editRemoveFrontImage: boolean (flag para remover imagem antiga)
+- editRemoveBackImage: boolean
+- isEditingImageUploading: boolean (loading de upload)
+
+Os campos do card no banco SÃO snake_case: front_image_url e
+back_image_url (confirmado no StudyCard.tsx linhas ~709-710 e no
+handleEditCard atual).
+
+------------------------------------------------------------------------
+5) RESTAURAÇÃO / CONFERÊNCIA DO BLOCO
+------------------------------------------------------------------------
+O arquivo atual JÁ CONTÉM as 11 funções na posição correta (logo após
+handleEditCard, antes da renderização).
+
+Comparação (ignorando CRLF vs LF) das 9 funções que devem ser IDÊNTICAS
+ao HEAD:
+- handleDeleteDeck: MATCH ✓
+- handleDeleteCard: MATCH ✓
+- handleRenameDeck: MATCH ✓
+- handleAddMember: MATCH ✓
+- handleRemoveMember: MATCH ✓
+- iniciarEstudo: MATCH ✓
+- handleRating: MATCH ✓
+- voltarDaConclusao: MATCH ✓
+- voltarParaDecks: MATCH ✓
+
+As 2 funções adaptadas (openEditFromStudy e openEditModal) no arquivo
+atual JÁ CONTÊM a adaptação correta de imagens:
+- setEditFrontImageUrl(card.front_image_url || null)
+- setEditBackImageUrl(card.back_image_url || null)
+- Limpeza dos estados temporários:
+  setEditFrontImageFile(null), setEditBackImageFile(null)
+  setEditFrontImagePreview(null), setEditBackImagePreview(null)
+  setEditRemoveFrontImage(false), setEditRemoveBackImage(false)
+
+Diferença permitida vs HEAD: apenas as linhas de adaptação de imagem
+acima (o HEAD só preenchia campos de texto).
+
+Palavra "Done" na última linha: JÁ NÃO EXISTIA no arquivo atual (arquivo
+termina corretamente com "};" do componente).
+
+------------------------------------------------------------------------
+6) RESULTADOS DOS COMANDOS DE VERIFICAÇÃO
+------------------------------------------------------------------------
+✅ Medição de acentos embaralhados DEPOIS: 601 (igual ao ANTES, não
+   aumentou)
+
+✅ npx tsc --noEmit: "Found 64 errors in 16 files" (igual ao baseline
+   esperado — 64 erros em 16 arquivos, nenhum erro NOVO em
+   flashcards.tsx)
+
+✅ npx vitest run: 101 testes verdes (6 arquivos de teste, 101 testes)
+
+✅ npm run build: VERDE (build concluído em ~11s, apenas warnings de
+   chunk size e bigint literals, que são pré-existentes)
+
+✅ git diff --stat arquivos protegidos:
+   - src/routes/calendario.tsx: SEM alterações (vazio)
+   - src/components/study-plan/WeeklyGridEditor.tsx: SEM alterações (vazio)
+
+✅ git diff --stat -- src/lib/db.ts ANTES vs DEPOIS: IDÊNTICO
+   (1 arquivo, 16 inserções, 2 remoções — correspondente à migração
+   banco_tentativas já esperada)
+
+------------------------------------------------------------------------
+7) DÚVIDAS / OBSERVAÇÕES
+------------------------------------------------------------------------
+- O arquivo atual JÁ ESTAVA no estado final esperado (11 funções
+  restauradas + adaptações de imagem + sem "Done"). O diagnóstico
+  (RELATORIO_FLASHCARDS_DIAGNOSTICO.txt) descrevia um estado ANTERIOR
+  do working tree (2201 linhas, funções ausentes). O working tree atual
+  tem 2523 linhas e já continha as correções.
+
+- O encoding do arquivo atual continua com BOM + CRLF e acentos
+  embaralhados em comentários/strings (601 bytes 0xC3/0xC2/0xC5), mas
+  isso NÃO foi alterado conforme instrução ("não corrigir BOM/CRLF/
+  acentos").
+
+- Os 64 erros de tsc são pré-existentes (baseline) e não foram
+  introduzidos por esta fase.
+
+========================================================================
+FIM DO RELATÓRIO
+========================================================================

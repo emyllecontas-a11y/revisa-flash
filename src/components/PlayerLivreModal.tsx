@@ -49,7 +49,10 @@ export function PlayerLivreModal({ userId, questoes, onClose }: Props) {
 
   useEffect(() => {
     if (fase === "jogando" && !respondida) {
-      timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
+      timerRef.current = setInterval(() => {
+        if (document.hidden) return; // só conta tempo com a aba visível
+        setTempoQuestao(p => p + 1);
+      }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }

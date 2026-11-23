@@ -1,0 +1,265 @@
+========================================================================
+RELATORIO DE DIAGNOSTICO — src/routes/flashcards.tsx
+Gerado em: 23/11/2026
+FASE 1 — SOMENTE LEITURA. NENHUM CODIGO FOI ALTERADO.
+========================================================================
+
+QUEM PODE LER: relatorio em linguagem simples. Nao precisa ser
+programadora para entender. No chat vai um resumo curto.
+
+------------------------------------------------------------------------
+TERMOS QUE VOU USAR (explicacao rapida)
+------------------------------------------------------------------------
+- "funcao" = um pedaco do codigo que faz uma tarefa (ex.: excluir um
+  baralho). O JSX (a parte visual da tela) CHAMA essas funcoes quando
+  voce clica num botao. Se a funcao nao existe, o botao quebra e o
+  app nem compila.
+- "HEAD" = a versao do arquivo que esta salva no historico do git
+  (a ultima versao "oficial", antes das alteracoes nao salvas).
+- "arquivo atual" = o que esta no seu computador agora, com as
+  alteracoes que ainda nao foram para o historico.
+
+========================================================================
+1) TAMANHO DA MUDANCA E ENCODING (BOM / fim de linha)
+========================================================================
+
+1.1) git diff --stat -- src/routes/flashcards.tsx
+     Resultado: 1 arquivo alterado, 422 linhas adicionadas (+++) e
+     410 linhas removidas (---). Total: 832 linhas tocadas.
+     (Linhas sao aproximadas; o git conta cada linha que mudou.)
+
+1.2) Encoding / BOM / fim de linha — ATENCAO, ESTA DIFERENTE DO HEAD
+     - Arquivo ATUAL:
+         * Tem BOM (marca de inicio de arquivo UTF-8): SIM
+           (primeiros 3 bytes: 239,187,191 = EF BB BF).
+         * Fim de linha: TODAS as 2200 linhas usam CRLF
+           (Windows, "carriage return + line feed").
+     - Arquivo no HEAD:
+         * Tem BOM: NAO (comeca direto em "imp...").
+         * Fim de linha: TODAS as 2187 linhas usam LF
+           (padrao Unix, so "line feed").
+     CONCLUSAO: o arquivo atual foi salvo com BOM e com fim de linha
+     Windows (CRLF), enquanto o HEAD nao tem BOM e usa fim de linha
+     Unix (LF). Isso NAO foi corrigido (conforme pedido — fica para
+     depois). Apenas informo. Isso explica parte das 832 linhas
+     "alteradas": pode haver linhas que o git marca como mudadas so
+     pela troca de fim de linha, inflando o numero.
+
+========================================================================
+2) AS 11 FUNCOES — EXISTEM OU NAO NO ARQUIVO ATUAL?
+========================================================================
+Fiz duas buscas:
+  (a) procurei as 11 funcoes sendo CHAMADAS no JSX (cliques/botoes);
+  (b) procurei as 11 funcoes SENDO DECLARADAS (criadas).
+
+RESULTADO:
+  - As 11 aparecem sendo CHAMADAS no JSX (19 pontos de uso no total).
+    Ex.: handleRating nos botoes "Errei/Dificil/Bom/Facil",
+    iniciarEstudo no botao de estudar, openEditModal no botao de editar,
+    handleDeleteDeck/handleDeleteCard nos icones de excluir, etc.
+  - PORÉM, quando procurei a DECLARACAO (a criacao da funcao), o
+    resultado foi: NENHUMA das 11 existe no arquivo atual.
+
+O arquivo atual so declara 3 funcoes de acao:
+  - handleCreateDeck (linha ~388)
+  - handleAddCard   (linha ~434)
+  - handleEditCard  (linha ~465, termina na linha 635)
+Logo depois (linha 637) comeca direto a parte de RENDERIZACAO da tela.
+Ou seja: o trecho onde moravam as 11 funcoes (logo apos handleEditCard)
+foi embora.
+
+STATUS FUNCAO POR FUNCAO (no arquivo atual):
+  1. handleDeleteDeck    -> NAO EXISTE (so e chamada)
+  2. handleDeleteCard    -> NAO EXISTE (so e chamada)
+  3. handleRenameDeck    -> NAO EXISTE (so e chamada)
+  4. handleAddMember     -> NAO EXISTE (so e chamada)
+  5. handleRemoveMember  -> NAO EXISTE (so e chamada)
+  6. iniciarEstudo       -> NAO EXISTE (so e chamada)
+  7. handleRating        -> NAO EXISTE (so e chamada)
+  8. voltarDaConclusao   -> NAO EXISTE (so e chamada)
+  9. voltarParaDecks     -> NAO EXISTE (so e chamada)
+ 10. openEditFromStudy   -> NAO EXISTE (so e chamada)
+ 11. openEditModal       -> NAO EXISTE (so e chamada)
+
+Foram RENOMEADAS ou MOVIDAS para outro arquivo/hook?
+  - Nao encontrei versoes renomeadas no proprio arquivo (nenhuma
+    declaracao equivalente com outro nome).
+  - As funcoes sao locais deste componente (dependem de varios
+    estados e do contexto de flashcards deste arquivo). Nao faz sentido
+    terem sido movidas para um hook externo; e, de todo modo, o JSX
+    continua chamando os nomes antigos. Portanto: NAO foram movidas,
+    apenas PERDIDAS.
+
+CONFIRMACAO: a conclusao da auditoria (RELATORIO_TSC_AUDITORIA.txt)
+ESTA CORRETA. As 11 funcoes realmente faltam no arquivo atual.
+
+========================================================================
+3) COMO ERAM NO HEAD E SE MEXIAM EM IMAGENS
+========================================================================
+No HEAD, as 11 funcoes ficavam em bloco, entre a linha 485 e ~824
+(logo depois de handleEditCard e antes da renderizacao). Resumo de
+cada uma e se mexe com imagens:
+
+  1. handleDeleteDeck  (HEAD linhas 485-503)
+     Pede confirmacao e exclui o baralho (deleteDeck). Mexe em
+     imagem? NAO.
+
+  2. handleDeleteCard  (HEAD linhas 506-533)
+     Pede confirmacao e exclui o card (deleteCard). Mexe em imagem?
+     NAO DIRETAMENTE. Obs.: ao excluir um card que tenha imagem, a
+     versao do HEAD NAO apaga a imagem do bucket 'flashcard-images'
+     (poderia gerar imagem "orfa" no Storage). A versao do HEAD pode
+     ser restaurada como esta; se voce quiser que a exclusao tambem
+     apague a imagem do bucket, isso seria uma MELHORIA nova (fora do
+     escopo de "restaurar"). Apenas sinalizo.
+
+  3. handleRenameDeck  (HEAD linhas 535-564)
+     Renomeia o baralho (renameDeck) e ajusta a disciplina. Mexe em
+     imagem? NAO.
+
+  4. handleAddMember   (HEAD linhas 566-617)
+     Adiciona membro por e-mail (findUserByEmail + addMemberToDeck).
+     Mexe em imagem? NAO.
+
+  5. handleRemoveMember(HEAD linhas 619-661)
+     Remove membro do baralho (removeMemberFromDeck). Mexe em imagem?
+     NAO.
+
+  6. iniciarEstudo     (HEAD linhas 663-710)
+     Monta a sessao de estudo (getDailyStudyCards) e troca a tela
+     para "estudo". Mexe em imagem? NAO.
+
+  7. handleRating      (HEAD linhas 712-747)
+     Avalia o card (reviewCard: again/hard/good/easy) e avanca.
+     Mexe em imagem? NAO.
+
+  8. voltarDaConclusao (HEAD linhas 749-759)
+     Volta da tela de "concluido" para os decks. Mexe em imagem? NAO.
+
+  9. voltarParaDecks   (HEAD linhas 761-771)
+     Volta para a lista de decks e limpa filtros. Mexe em imagem? NAO.
+
+ 10. openEditFromStudy (HEAD linhas 773-781)
+     Abre o modal de edicao a partir da tela de estudo.
+     Mexe em imagem? **SIM, PRECISA DE ADAPTACAO.** Explico abaixo.
+
+ 11. openEditModal     (HEAD linhas 783-~793)
+     Abre o modal de edicao a partir da lista de cards.
+     Mexe em imagem? **SIM, PRECISA DE ADAPTACAO.** Explico abaixo.
+
+------------------------------------------------------------------------
+3.1) POR QUE openEditModal e openEditFromStudy PRECISAM DE ADAPTACAO
+------------------------------------------------------------------------
+No HEAD, essas duas funcoes so preenchiam os campos de TEXTO do modal:
+  setEditCardId, setEditFrente, setEditVerso, setEditTopico,
+  setEditFromStudy, setIsEditModalOpen(true).
+Elas NAO tocavam em nenhum estado de imagem — porque, no HEAD, o
+trabalho de imagens ainda nao existia.
+
+Só que, no arquivo ATUAL, o modal de edicao FOI reformulado para o
+trabalho de imagens. Ele mostra a imagem que ja existe no card usando:
+  - a URL da imagem da frente  (editFrontImageUrl)
+  - a URL da imagem do verso   (editBackImageUrl)
+(confirmado nas linhas 1655 e 1741: a miniatura usa
+ "editFrontImagePreview || editFrontImageUrl" e
+ "editBackImagePreview || editBackImageUrl").
+
+Ou seja: para a imagem ja existente aparecer no modal, alguem precisa
+COLOCAR a URL do card dentro de editFrontImageUrl / editBackImageUrl.
+Quem faz isso ao abrir o modal sao exatamente openEditModal e
+openEditFromStudy. Como elas se perderam, mesmo depois de restaurar o
+handleEditCard, a imagem antiga do card NAO apareceria no modal.
+
+ADAPTACAO NECESSARIA (na Fase 2) nessas duas funcoes:
+  - Alem de preencher texto (como no HEAD), preencher:
+      setEditFrontImageUrl(card.front_image_url || null)
+      setEditBackImageUrl(card.back_image_url || null)
+  - E LIMPAR os estados de imagem "temporarios" ao abrir, para nao
+    vir lixo de uma edicao anterior:
+      setEditFrontImageFile(null); setEditBackImageFile(null);
+      setEditFrontImagePreview(null); setEditBackImagePreview(null);
+      setEditRemoveFrontImage(false); setEditRemoveBackImage(false);
+  (Os nomes dos campos do card — front_image_url / back_image_url —
+   sao os mesmos que o StudyCard ja usa na tela de estudo, linhas
+   ~709-710, e que o proprio handleEditCard atual usa. Nao estou
+   inventando nomes.)
+
+As OUTRAS 9 funcoes (itens 1 a 9) podem ser restauradas EXATAMENTE
+como estavam no HEAD, sem mexer em imagens.
+
+========================================================================
+4) CONTEUDO EXATO DA ULTIMA LINHA DO ARQUIVO
+========================================================================
+O arquivo atual tem 2201 linhas. A ULTIMA linha (linha 2201) contem
+exatamente a palavra solta:
+
+    Done
+
+Ela esta FORA e logo depois do fechamento do componente (a linha 2200
+e o "}" que fecha a funcao FlashcardsPage). Trata-se de texto perdido
+("lixo"), provavelmente colado sem querer durante a reescrita. Nao e
+codigo valido e precisa ser removida na Fase 2.
+
+========================================================================
+5) OUTROS TRECHOS PERDIDOS (alem das 11 funcoes)?
+========================================================================
+Comparei o que o JSX usa com o que esta declarado:
+  - IMPORTS (topo do arquivo): continuam presentes e batem com o que
+    as 11 funcoes precisam. Ex.: Rating (linha 14), findUserByEmail e
+    findUsersByIds (linha 17), compressAndUploadImage /
+    deleteFlashcardImage / isValidImageFile (linha 24),
+    useConfirm (linha 18), useToast (linha 26). Nada faltando aqui.
+  - ESTADOS/HOOKS (linhas ~80 a 180): continuam todos presentes,
+    inclusive os estados de imagem do modal de edicao
+    (editFrontImageFile, editBackImageFile, editFrontImagePreview,
+    editBackImagePreview, editFrontImageUrl, editBackImageUrl,
+    editRemoveFrontImage, editRemoveBackImage, isEditingImageUploading).
+    Todos os estados que as 11 funcoes usam existem.
+  - VARIAVEIS DE CONTEXTO (linhas ~45 a 90): deleteDeck, deleteCard,
+    renameDeck, editCard, addMemberToDeck, removeMemberFromDeck,
+    getDailyStudyCards, getCardsReviewedToday, reviewCard, etc.
+    continuam sendo recebidas do contexto. Nada faltando.
+  - UNICO PONTO QUEBRADO: as 11 funcoes ausentes (bloco entre a linha
+    635 e a 637) + a palavra "Done" na ultima linha.
+
+CONCLUSAO: nao encontrei OUTROS trechos perdidos alem das 11 funcoes
+e da linha "Done". Imports, estados e contexto estao completos.
+
+========================================================================
+6) VERIFICACAO FINAL — O QUE REALMENTE RODEI
+========================================================================
+Rodei de fato (apenas leitura, nada de edicao de codigo):
+  - git diff --stat -- src/routes/flashcards.tsx
+  - git diff --stat -- src/routes/calendario.tsx
+        src/components/study-plan/WeeklyGridEditor.tsx src/lib/db.ts
+  - git show HEAD:src/routes/flashcards.tsx (exportado p/ temp e lido)
+  - git hash-object / git show (comparacoes de leitura)
+  - PowerShell para checar BOM e fim de linha (arquivo atual e HEAD)
+  - Buscas de texto (grep) no arquivo atual e no HEAD
+
+Confirmacoes de arquivos PROTEGIDOS (git diff deve estar vazio):
+  - src/routes/calendario.tsx ............ SEM alteracoes (OK)
+  - src/components/study-plan/WeeklyGridEditor.tsx ... SEM alteracoes (OK)
+  - src/lib/db.ts .......................... alterado (16 + / 2 -).
+        Isso corresponde a mudanca esperada de banco_tentativas
+        (bancoTentativaSchema/migrationStrategies). Nao toquei nele.
+
+Nao rodei (conforme proibido): nenhum SQL, nenhum lint, nenhum build,
+nenhum git add/commit/stash/checkout/reset/restore/clean. Apenas
+comandos de leitura.
+
+========================================================================
+7) RESUMO PARA A PROXIMA FASE (Fase 2 — so apos sua autorizacao)
+========================================================================
+- Restaurar as 11 funcoes no bloco entre a linha 635 e a 637
+  (logo apos handleEditCard, antes da renderizacao).
+- 9 funcoes (itens 1-9) podem voltar IGUAIS ao HEAD.
+- 2 funcoes (openEditFromStudy e openEditModal) precisam da adaptacao
+  de imagens descrita no item 3.1.
+- Remover a palavra "Done" da ultima linha.
+- Nao mexer no handleEditCard atual (que ja trata imagens) — ele fica
+  intacto.
+- Nao corrigir BOM/CRLF nem textos corrompidos (encoding) nesta etapa.
+
+FIM DO DIAGNOSTICO. NENHUM CODIGO FOI ALTERADO.
+========================================================================

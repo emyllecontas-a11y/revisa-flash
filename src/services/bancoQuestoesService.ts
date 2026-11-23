@@ -252,6 +252,7 @@ export async function salvarTentativaAvulsa(
       caderno_resultado_id: null,
       created_at: agora,
       updated_at: agora,
+      isdeleted: false,
     };
     await db.banco_tentativas.insert(tentativa);
     await enqueueOperation('create', 'banco_tentativas', tentativa);

@@ -1,0 +1,174 @@
+RELATÓRIO FINAL — PARTE 1A: Preparar banco de dados e armazenamento para imagens nos flashcards
+=====================================================================================
+Data: 2026-11-22
+
+-------------------------------------------------------------------------------------
+1. RESPOSTAS DA ETAPA 1 — VERIFICAR (somente leitura)
+-------------------------------------------------------------------------------------
+
+a) Qual é o nome EXATO da tabela de flashcards no Supabase?
+   Resposta: flashcards
+   Evidências:
+   - src/lib/supabaseClient.ts:425  → .from('flashcards')
+   - src/lib/supabaseClient.ts:454  → .from('flashcards')
+   - src/lib/supabaseClient.ts:470  → .from('flashcards')
+   - src/lib/supabaseClient.ts:487  → .from('flashcards')
+   - src/lib/db.ts:150  → flashcardSchema (RxDB)
+   - src/contexts/FlashcardContext.tsx:33-40  → interface Card
+
+b) O push dos flashcards envia o documento inteiro ou uma lista fixa de colunas?
+   Resposta: Envia o documento INTEIRO.
+   Evidências:
+   - src/lib/db.ts:1429 — flashcards está na lista de coleções sincronizadas
+   - src/lib/db.ts:1520 — usa pushWithConflictCheck(supabaseClient, name, collection, docsToPush)
+   - pushWithConflictCheck (linhas 48-86) faz: docsToPush.map(doc => doc.toJSON()) e depois .upsert(toUpsert)
+   - Como usa toJSON(), TODOS os campos do schema RxDB vão no upsert, incluindo front_image_url e back_image_url.
+   - Pull (src/lib/db.ts:1462-1472) usa .select('*') — traz todas as colunas da tabela.
+
+c) Existe alguma RPC ou função SQL que grava/atualiza flashcards?
+   Resposta: NÃO. Não encontrei evidência de RPC para flashcards.
+   - Busca por "salvar_flashcards" no projeto: 0 resultados
+   - Busca por "CREATE.*FUNCTION.*flashcard" nas migrations: 0 resultados
+   - A sincronização usa pushWithConflictCheck genérico + SELECT direto na tabela.
+
+d) Em src/services/flashcardImageService.ts: qual client Supabase o upload usa? A imagem é retornada como URL pública ou assinada?
+   Resposta:
+   - Client: getSupabaseWithToken() (autenticado com token do Clerk) — linha 57
+   - Retorno: URL PÚBLICA via getPublicUrl() — linhas 71-75
+   Evidências:
+   - Linha 57: const supabaseClient = await getSupabaseWithToken();
+   - Linhas 71-75: supabaseClient.storage.from(BUCKET_NAME).getPublicUrl(data.path)
+
+e) Existem arquivos .sql no projeto que já criem o bucket flashcard-images ou policies de storage.objects?
+   Resposta: NÃO. Não encontrei nenhum.
+   - Busca por "flashcard-images" nas migrations: 0 resultados
+   - Busca por "CREATE.*BUCKET" ou "storage.objects" nas migrations: 0 resultados para este bucket
+   - O bucket precisa ser criado manualmente no painel do Supabase (Storage → Buckets).
+
+-------------------------------------------------------------------------------------
+2. CONTEÚDO COMPLETO DO ARQUIVO SQL CRIADO
+-------------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261122_add_flashcard_images.sql
+
+-- Migração: Adicionar colunas para imagens nos flashcards
+-- Data: 2026-11-22
+-- Descrição: Adiciona front_image_url e back_image_url à tabela flashcards
+-- para permitir armazenar URLs de imagens de frente e verso dos cards.
+
+-- ============================================================
+-- 1. ALTERAR TABELA FLASHCARDS
+-- ============================================================
+-- Adiciona as duas colunas de texto para armazenar URLs públicas
+-- das imagens comprimidas (WebP, máx 800px, 0.5 MB) no bucket
+-- Supabase Storage 'flashcard-images'.
+-- As colunas são NULL por padrão (cards existentes sem imagem).
+ALTER TABLE public.flashcards
+  ADD COLUMN IF NOT EXISTS front_image_url TEXT,
+  ADD COLUMN IF NOT EXISTS back_image_url TEXT;
+
+-- Comentários para documentação no catálogo do Postgres
+COMMENT ON COLUMN public.flashcards.front_image_url IS 'URL pública da imagem da frente do flashcard (bucket flashcard-images)';
+COMMENT ON COLUMN public.flashcards.back_image_url IS 'URL pública da imagem do verso do flashcard (bucket flashcard-images)';
+
+-- ============================================================
+-- 2. OBSERVAÇÕES SOBRE RPC E SINCRONIZAÇÃO
+-- ============================================================
+-- Não existe RPC dedicada para flashcards (salvar_flashcards_batch etc.).
+-- A sincronização RxDB ↔ Supabase usa:
+--   - PUSH: pushWithConflictCheck() genérico (src/lib/db.ts) — faz upsert do documento inteiro via .from('flashcards').upsert()
+--   - PULL: SELECT * FROM flashcards WHERE user_id = ... AND updated_at >= ...
+-- Como as colunas foram adicionadas com ADD COLUMN IF NOT EXISTS,
+-- o upsert e o select * funcionarão automaticamente sem alteração de código.
+-- O schema RxDB (src/lib/db.ts) já está na versão 16 com os campos
+-- front_image_url e back_image_url (type: ['string','null'], default: null).
+
+-------------------------------------------------------------------------------------
+3. PASSO A PASSO — O QUE VOCÊ PRECISA FAZER MANUALMENTE NO PAINEL DO SUPABASE
+-------------------------------------------------------------------------------------
+
+PASSO 1 — Rodar a migração SQL
+  - Vá em SQL Editor no painel do Supabase
+  - Cole o conteúdo do arquivo supabase/migrations/20261122_add_flashcard_images.sql
+  - Clique em "Run" (executar)
+  - Verifique se não houve erros
+
+PASSO 2 — Criar o bucket flashcard-images (se não existir)
+  - Vá em Storage → Buckets
+  - Clique em "Create bucket"
+  - Nome: flashcard-images
+  - Marque "Public bucket" = SIM (público)
+    → IMPORTANTE: O serviço usa getPublicUrl() que SÓ funciona se o bucket for público.
+    → Se o bucket for privado, as URLs não funcionarão no frontend.
+  - Clique em "Save"
+
+PASSO 3 — Configurar policies de upload/leitura (RLS no storage.objects)
+  Como o upload usa getSupabaseWithToken() (token do usuário autenticado via Clerk),
+  as policies precisam permitir:
+  
+  A) INSERT (upload) — apenas o próprio usuário pode fazer upload na própria pasta:
+     CREATE POLICY "Users can upload their own flashcard images"
+     ON storage.objects FOR INSERT
+     TO authenticated
+     WITH CHECK (
+       bucket_id = 'flashcard-images' 
+       AND (storage.foldername(name))[1] = auth.uid()::text
+     );
+
+  B) SELECT (leitura pública) — QUALQUER UM pode ler (bucket é público):
+     CREATE POLICY "Public read access for flashcard images"
+     ON storage.objects FOR SELECT
+     TO public
+     USING (bucket_id = 'flashcard-images');
+
+  C) DELETE (exclusão) — apenas o próprio usuário pode apagar suas imagens:
+     CREATE POLICY "Users can delete their own flashcard images"
+     ON storage.objects FOR DELETE
+     TO authenticated
+     USING (
+       bucket_id = 'flashcard-images' 
+       AND (storage.foldername(name))[1] = auth.uid()::text
+     );
+
+  Observação: O path no Storage é: <userId>/flashcards/<uuid>.webp
+  O service extrai o path da URL pública para deletar (linha 88-95 do flashcardImageService.ts).
+
+PASSO 4 — Testar
+  - No app, crie um flashcard com imagem
+  - Verifique se a imagem aparece no StudyCard (frente/verso)
+  - Verifique no Storage se o arquivo foi para flashcard-images/<seu-user-id>/flashcards/...
+
+-------------------------------------------------------------------------------------
+4. RISCOS ENCONTRADOS
+-------------------------------------------------------------------------------------
+
+| Risco | Descrição | Mitigação |
+|-------|-----------|-----------|
+| Bucket não existe | O serviço assume que 'flashcard-images' existe; upload falhará se não criado | PASSO 2 acima — criar bucket público |
+| Bucket privado | getPublicUrl() retorna URL que não funciona se bucket for privado | Marcar "Public bucket = SIM" na criação |
+| Policies de storage ausentes | Sem policies, upload/delete falharão com erro 403/RLS | PASSO 3 — criar as 3 policies acima |
+| userId hardcoded no modal | CriarFlashcardAulaModal.tsx:126,138 usa 'current-user' string fixa | Precisa corrigir para pegar userId real do Clerk (fora do escopo desta parte) |
+| Edição sem UI de imagem | flashcards.tsx modal de editar não tem inputs de imagem | Fora do escopo desta parte |
+| StudyCard não renderiza imagens | StudyCard.tsx não lê front_image_url/back_image_url | Fora do escopo desta parte |
+| Offline não funciona | Imagens são URLs públicas — não funcionam offline sem Service Worker cache | Futuro: adicionar cache no public/sw.js para bucket flashcard-images |
+
+-------------------------------------------------------------------------------------
+5. COMANDOS PARA VALIDAR (rode no terminal)
+-------------------------------------------------------------------------------------
+
+# 1. Testes unitários (esperado: 101 testes verdes)
+npx vitest run
+
+# 2. Build do projeto (esperado: build verde)
+npm run build
+
+# 3. TypeScript check (esperado: 64 erros ANTIGOS, NENHUM novo)
+npx tsc --noEmit
+
+# 4. Verificar que os 3 arquivos protegidos NÃO foram alterados (devem estar vazios)
+git diff src/lib/db.ts
+git diff src/routes/calendario.tsx
+git diff src/components/study-plan/WeeklyGridEditor.tsx
+
+-------------------------------------------------------------------------------------
+FIM DO RELATÓRIO
+-------------------------------------------------------------------------------------

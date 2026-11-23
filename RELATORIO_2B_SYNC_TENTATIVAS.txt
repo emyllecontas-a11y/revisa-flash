@@ -1,0 +1,373 @@
+================================================================
+RELATÓRIO — PARTE 2B: Sync do histórico de respostas + pausa do cronômetro
+Data: 23/11/2026
+================================================================
+
+Resumo em uma frase: o histórico de respostas do Banco de Questões
+(banco_tentativas) não subia para a nuvem porque faltava o campo
+"updated_at" no banco local; corrigimos isso, fizemos as respostas antigas
+serem reenviadas uma vez, e o cronômetro agora só conta tempo com a aba
+visível.
+
+Arquivos alterados (5):
+  - supabase/migrations/20261125_banco_tentativas_isdeleted.sql  (NOVO)
+  - src/lib/db.ts                       (só o schema/registro de banco_tentativas)
+  - src/services/bancoQuestoesService.ts (salvarTentativaAvulsa)
+  - src/services/queueService.ts         (UPSERT_CONFLICT)
+  - src/components/BancoPlayerInline.tsx (cronômetro)
+  - src/components/PlayerLivreModal.tsx  (cronômetro)
+
+================================================================
+(A) RESPOSTAS DA FASE 1 (somente leitura)
+================================================================
+
+(a) Schema atual e padrão de versionamento
+--------------------------------------------
+bancoTentativaSchema ORIGINAL (src/lib/db.ts, linhas ~983-1003):
+    version: 0
+    properties: id, user_id, questao_banco_id, resposta, acertou,
+                tempo_segundos, contexto, caderno_resultado_id, created_at
+    required: ['id', 'user_id', 'questao_banco_id', 'contexto']
+    (NÃO tinha updated_at nem isdeleted)
+
+Outras coleções com version > 0 (grep "version: [1-9]"):
+    - src/lib/db.ts:152  flashcardSchema        -> version: 16
+    - src/lib/db.ts:282  (schema de revisão)     -> version: 1
+    - src/lib/db.ts:~1018 studyThemeTimelineSchema -> version: 1
+
+PADRÃO DO PROJETO PARA SUBIR VERSÃO: NÃO EXISTE migrationStrategies em
+NENHUMA coleção do projeto (grep por "migrationStrategies" = 0
+ocorrências em todo o src antes da minha mudança). Ou seja, o projeto nunca
+usou strategies de migração; versões altas (ex.: flashcard v16) foram
+definidas direto no schema. Como a tarefa pediu explicitamente a strategy
+da nova versão e o RxDB exige uma strategy ao subir a versão quando já há
+dados locais, apliquei o padrão oficial do RxDB (função 1: oldDoc => novoDoc),
+que é seguro e idempotente. Não havia padrão anterior para copiar — por isso
+segui a especificação da tarefa.
+
+(b) Plugin de validação de schema do RxDB
+--------------------------------------------
+NÃO. Em src/client.tsx (linhas 27-32) só são registrados:
+    addRxPlugin(RxDBMigrationPlugin);   // migração de versão
+    addRxPlugin(RxDBUpdatePlugin);      // método .patch/.incremental
+Não há RxDBDevMode, RxDBJsonSchema nem plugin de validação.
+Consequência: ao inserir um documento com campo fora do schema, o RxDB NÃO
+rejeita a inserção (não há validação). Porém o campo não entra no schema, e
+tudo que depende do schema deixa de "enxergar" esse campo de forma confiável
+— em especial o FILTRO de push, que busca por updated_at { $gt: lastSync }.
+Esse é exatamente o bug: sem updated_at no schema, o seletor de push não
+casa com os documentos e o histórico nunca sobe. (Observação honesta: não
+consigo afirmar só lendo o código se o RxDB guarda ou descarta o campo extra
+no armazenamento; o que é certo é que o seletor de push por updated_at não
+funciona sem o campo no schema.)
+
+(c) Todos os arquivos que leem/gravam banco_tentativas
+--------------------------------------------
+GRAVAM:
+  - src/services/bancoQuestoesService.ts:234  função salvarTentativaAvulsa
+        - :256  db.banco_tentativas.insert(tentativa)   (grava local)
+        - :257  enqueueOperation('create', 'banco_tentativas', tentativa) (fila)
+  - Chamadores de salvarTentativaAvulsa:
+        - src/components/BancoPlayerInline.tsx:117
+        - src/components/PlayerLivreModal.tsx:100
+  - Registro/schema e sync:
+        - src/lib/db.ts:1345  registro da coleção (schema)
+        - src/lib/db.ts:1410  lista collectionsToCheck (pull)
+        - src/lib/db.ts:1439  lista collections (pull+push, caminho genérico)
+  - Tabela remota: public.banco_tentativas (Supabase), via sync genérico
+    (pull .eq('user_id').gte('updated_at') + push pushWithConflictCheck upsert por id).
+
+LEEM (apenas locais, via RxDB):
+  - src/components/RelatorioDesempenhoModal.tsx:62  find({user_id})
+        usa apenas .acertou (linhas 138,149,155) e .questao_banco_id
+  - src/services/rankingService.ts:234  find({user_id})
+  - src/services/rankingService.ts:277  find({user_id, created_at: {$gte: semanaIso}})
+
+Alguém lê contexto ou caderno_resultado_id? NÃO. Esses dois campos só aparecem
+no schema (db.ts) e na escrita (bancoQuestoesService.ts). Nenhum leitor usa
+contexto nem caderno_resultado_id. (As outras ocorrências de .resposta/.tempo_segundos
+no grep pertencem a simulados/listas/caderno, OUTRAS coleções — não banco_tentativas.)
+Por isso NÃO alterei esses campos.
+
+(d) Tratamento de erro do queueService quando um create falha
+--------------------------------------------
+Arquivo: src/services/queueService.ts, função processPendingOperations.
+Trecho do catch (linhas ~255-300):
+    } catch (error: any) {
+      console.error(`❌ Erro ao processar operação ...`, {...});
+      // 409 Conflict em create significa que a linha já existe no servidor.
+      const status = error?.status || error?.code;
+      const is409 = status === 409 || String(error?.message || '').includes('duplicate key');
+      const fresh = await db.pending_operations.findOne({ selector: { id: op.id } }).exec();
+      if (!fresh) continue;
+      if (is409) {
+        await fresh.remove();                       // já existe -> descarta da fila
+        console.log(`✅ Operação ${op.id} ignorada (já existe no servidor).`);
+        continue;
+      }
+      const retries = (op.retries || 0) + 1;
+      if (retries >= MAX_RETRIES) {                  // MAX_RETRIES = 5
+        await fresh.patch({ retries, failed: true, failed_at: ..., updated_at: ... });
+        // NÃO remove: marca como falha definitiva (preserva o dado).
+      } else {
+        await fresh.patch({ retries, updated_at: ... }); // tenta de novo depois
+        failed.push(op.id);
+      }
+    }
+Resumo por caso:
+  - Chave duplicada (409 / "duplicate key"): operação é DESCARTADA (considera que
+    o servidor já tem). [Com a mudança do UPSERT_CONFLICT, um create de
+    banco_tentativas vira upsert por id, então nem chega a dar 409.]
+  - Chave estrangeira (questão ainda não existe na nuvem): NÃO é 409; conta como
+    retry. Tenta até 5 vezes; depois fica MARCADA como failed=true e PRESERVADA
+    (não é perdida). Pode ser reativada por retryFailedOperations().
+  - RLS (sem permissão): idem — não é 409, vira retry e depois failed=true.
+  - Sem internet: a exceção é capturada; a fila também é reprocessada no evento
+    "online" (setupQueueListener / handleOnline). Vira retry e depois failed=true.
+
+(e) pushWithConflictCheck (lote com 1 falha) e pull com updated_at ausente
+--------------------------------------------
+pushWithConflictCheck (src/lib/db.ts:54-135):
+  - Primeiro faz SELECT dos ids remotos e monta remoteMap.
+  - Para cada doc local: se não existe remoto -> vai pra toUpsert; se o remoto é
+    mais novo (remoteTs > localTs) -> aplica remoto localmente e marca skipped;
+    senão vai pra toUpsert.
+  - No fim faz UM ÃNICO upsert em lote: .upsert(toUpsert, { onConflict: 'id' }).
+  => Se ESSE upsert falhar (ex.: 1 registro viola chave estrangeira porque a
+     questão ainda não existe na nuvem), o lote INTEIRO daquela coleção falha
+     (é tudo-ou-nada naquele ciclo). O erro é capturado no try/catch do loop
+     principal (houveErro=true) e será tentado de novo no próximo sync. Não
+     perde dado local; apenas atrasa a subida daquele lote.
+
+pull com updated_at ausente (src/lib/db.ts:1508-1516):
+  - Para doc que já existe localmente:
+        localUpdated = existing.get('updated_at') || '1970-01-01T00:00:00Z';
+        if (doc.updated_at > localUpdated) existing.patch(doc);
+    Se o doc remoto tiver updated_at ausente/null, a comparação
+    (undefined > data) é false -> NÃO atualiza o existente.
+  - Para doc que NÃO existe localmente: collection.insert(doc) (insere de todo
+    jeito, mesmo sem updated_at).
+  - No nosso caso a coluna remota updated_at tem default now(), então vem
+    preenchida; mas, por segurança, documentos sem updated_at são inseridos e
+    simplesmente não sobrescrevem versões locais.
+
+================================================================
+(B) ARQUIVOS ALTERADOS E O QUE MUDOU
+================================================================
+
+1) supabase/migrations/20261125_banco_tentativas_isdeleted.sql (NOVO)
+   - Adiciona a coluna isdeleted (boolean, default false) e o índice
+     idx_banco_tentativas_user_created (user_id, created_at).
+   - Idempotente (IF NOT EXISTS). Não cria tabela, não toca em updated_at
+     (já existe), não mexe em RLS/policies/chaves.
+
+2) src/lib/db.ts  (SÓ o bloco de banco_tentativas)
+   - bancoTentativaSchema: version 0 -> 1; adicionados updated_at (string) e
+     isdeleted (boolean, default false) em properties; required NÃO mudou.
+   - Registro da coleção banco_tentativas: adicionado migrationStrategies com a
+     versão 1: oldDoc => { ...oldDoc, updated_at: oldDoc.updated_at || agora,
+     isdeleted: false }. Assim as tentativas locais antigas recebem updated_at
+     na hora da migração e são reenviadas UMA vez (upsert por id é idempotente).
+   - Nenhuma outra linha de db.ts foi tocada.
+
+3) src/services/bancoQuestoesService.ts (salvarTentativaAvulsa)
+   - O objeto gravado agora inclui isdeleted: false (o updated_at já era igual
+     a created_at, via "agora"). contexto continua 'avulso' e
+     caderno_resultado_id continua null (inalterados).
+
+4) src/services/queueService.ts (UPSERT_CONFLICT)
+   - Adicionado banco_tentativas: 'id' ao mapa UPSERT_CONFLICT, no mesmo
+     padrão de progresso_simulado/progresso_lista. Agora o "create" dessa tabela
+     vira upsert por id, evitando erro de chave duplicada quando a mesma
+     tentativa é enviada pela fila E depois pelo sync em lote.
+
+5) src/components/BancoPlayerInline.tsx e src/components/PlayerLivreModal.tsx
+   - No setInterval do cronômetro, agora: if (document.hidden) return; antes de
+     incrementar. Ou seja, só conta tempo com a aba/app visível. Nada mais do
+     comportamento do cronômetro foi alterado.
+
+================================================================
+(C) CONTEÚDO COMPLETO DO ARQUIVO SQL CRIADO
+   (supabase/migrations/20261125_banco_tentativas_isdeleted.sql)
+================================================================
+
+-- ============================================================
+-- BANCO_TENTATIVAS: adicionar coluna isdeleted + índice
+-- ============================================================
+-- IMPORTANTE: este arquivo deve ser executado ANTES de publicar o
+-- código novo. Ele prepara a tabela remota para o sync de histórico
+-- de respostas do Banco de Questões.
+--
+-- As policies (RLS) NÃO são tratadas aqui — serão ajustadas em outra
+-- etapa. Este arquivo SOMENTE adiciona a coluna isdeleted e um índice
+-- de apoio à consulta por usuário + data.
+--
+-- É idempotente: pode ser executado mais de uma vez sem problema.
+-- ============================================================
+
+-- Coluna de exclusão lógica (soft delete), igual às outras tabelas do app.
+ALTER TABLE public.banco_tentativas
+  ADD COLUMN IF NOT EXISTS isdeleted boolean DEFAULT false;
+
+-- Índice para acelerar consultas por usuário ordenadas por data de criação
+-- (usado nas estatísticas e no histórico por período).
+CREATE INDEX IF NOT EXISTS idx_banco_tentativas_user_created
+  ON public.banco_tentativas (user_id, created_at);
+
+================================================================
+(D) DIFF COMPLETO DO src/lib/db.ts
+================================================================
+
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 850c5e5a..aa4b2105 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -982,7 +982,7 @@ const cadernoResultadoSchema = {
+
+ const bancoTentativaSchema = {
+   title: 'banco tentativa schema',
+-  version: 0,
++  version: 1,
+   primaryKey: 'id',
+   type: 'object',
+   properties: {
+@@ -995,6 +995,8 @@ const bancoTentativaSchema = {
+     contexto: { type: 'string' },
+     caderno_resultado_id: { type: ['string', 'null'] },
+     created_at: { type: 'string' },
++    updated_at: { type: 'string' },
++    isdeleted: { type: 'boolean', default: false },
+   },
+   required: ['id', 'user_id', 'questao_banco_id', 'contexto'],
+ };
+@@ -1342,7 +1344,19 @@ export async function getDb(): Promise<RxDatabase> {
+       cadernos: { schema: cadernoSchema },
+       caderno_questoes: { schema: cadernoQuestaoSchema },
+       caderno_resultados: { schema: cadernoResultadoSchema },
+-      banco_tentativas: { schema: bancoTentativaSchema },
++      banco_tentativas: {
++        schema: bancoTentativaSchema,
++        migrationStrategies: {
++          // v1: adiciona updated_at e isdeleted. Tentativas antigas (sem
++          // updated_at) recebem a data/hora ATUAL da migração, para serem
++          // reenviadas UMA vez pelo sync em lote (upsert por id é idempotente).
++          1: (oldDoc: any) => ({
++            ...oldDoc,
++            updated_at: oldDoc.updated_at || new Date().toISOString(),
++            isdeleted: false,
++          }),
++        },
++      },
+       // Plano de Estudos Inteligente (4 camadas)
+       study_tasks: { schema: studyTaskSchema },
+       study_theme_timelines: { schema: studyThemeTimelineSchema },
+
+================================================================
+(E) RESULTADO DOS COMANDOS DE VERIFICAÇÃO
+================================================================
+
+1) npx vitest run
+   -> 101 testes passaram (6 arquivos). TUDO VERDE. (conforme esperado)
+
+2) npm run build (vite build)
+   -> concluído com código de saída 0 (SUCESSO). Verde.
+   (lembrando: o build do Vite NÃO checa tipos.)
+
+3) npx tsc --noEmit
+   -> "Found 84 errors in 16 files."
+   IMPORTANTE (honesto): a tarefa esperava "64 errors in 16 files", mas o
+   projeto JÁ continha alterações não commitadas de outra frente (Part 1B dos
+   flashcards) ANTES desta tarefa. O git mostrava src/routes/flashcards.tsx
+   como modificado (M) no início. A maior parte dos 84 erros vem de
+   flashcards.tsx (32) e login.tsx (17), que NÃO fazem parte desta tarefa.
+   => NENHUM dos 5 arquivos que EU alterei aparece na lista de erros
+      (db.ts, bancoQuestoesService.ts, queueService.ts, BancoPlayerInline.tsx,
+      PlayerLivreModal.tsx). Portanto, esta tarefa NÃO introduziu nenhum erro
+      novo de tipo. (Arquivos na lista: client.tsx, FlashcardContext.tsx,
+      UserContext.tsx, router.tsx, cadastro.tsx, calendario.tsx,
+      compartilhados.tsx, conteudo.tsx, flashcards.tsx, listas.$id.tsx,
+      login.tsx, listaService.ts, pdfExtracaoAvancada.ts, pdfExtrasService.ts,
+      rankingService.ts, vite.config.ts.)
+   OBS: esse tsc rodou até o fim (não estourou o tempo). O número maior que 64
+   se deve ao trabalho pré-existente não commitado, não a esta mudança.
+
+4) git diff src/routes/calendario.tsx
+   -> VAZIO (arquivo protegido intacto). OK.
+
+5) git diff src/components/study-plan/WeeklyGridEditor.tsx
+   -> VAZIO (arquivo protegido intacto). OK.
+
+6) git diff src/lib/db.ts
+   -> contém APENAS as mudanças de banco_tentativas (schema + migrationStrategies).
+      Diff completo colado no item (D). Nenhuma outra parte do arquivo mudou.
+
+================================================================
+(F) PASSO A PASSO PARA VOCÊ TESTAR
+================================================================
+
+1. Rode o SQL no Supabase PRIMEIRO (antes de publicar o código):
+   - Abra o painel do Supabase do projeto Una Vox.
+   - No menu à esquerda, clique em "SQL Editor".
+   - Clique em "New query".
+   - Abra o arquivo supabase/migrations/20261125_banco_tentativas_isdeleted.sql,
+     copie TODO o conteúdo e cole no editor.
+   - Clique em "Run". Deve aparecer "Success" (sem erro).
+
+2. Abra o app (Una Vox) e faça login.
+
+3. No Banco de Questões, responda 2 questões.
+
+4. Volte ao Supabase > "Table Editor" > tabela "banco_tentativas".
+   Confira se aparecem linhas novas com as colunas "updated_at" preenchida e
+   "isdeleted" = false.
+
+5. Abra o app em OUTRO aparelho (ou outra janela anônima) com a mesma conta e
+   veja se o histórico de respostas aparece (o sync deve trazer da nuvem).
+
+6. Teste o cronômetro: abra uma questão, comece a responder, troque de aba
+   (ou minimize) por ~30 segundos e volte. Esses ~30 segundos NÃO podem ser
+   contados no tempo da questão.
+
+Observação sobre a primeira abertura após publicar: na primeira vez que o app
+rodar com o código novo, as tentativas antigas que estavam só neste aparelho
+serão reenviadas UMA vez para a nuvem (isso é esperado e seguro — o envio é
+idempotente, não duplica).
+
+================================================================
+(G) RISCOS
+================================================================
+
+1) O que acontece com os dados locais ao subir a versão do schema (0 -> 1):
+   - Nada é apagado. A strategy apenas ADICIONA updated_at e isdeleted a cada
+     tentativa antiga, mantendo todos os campos existentes (inclusive contexto
+     e caderno_resultado_id). É uma operação de acréscimo, não destrutiva.
+
+2) O que acontece se o código for publicado ANTES do SQL ser executado:
+   - O app tenta gravar/enviar isdeleted, mas a coluna ainda não existe na
+     tabela remota. Aí o push do sync em lote e/ou o envio pela fila podem
+     FALHAR por coluna inexistente. Por isso o SQL DEVE ser rodado PRIMEIRO.
+     (No dia a dia, o app continua funcionando local/offline; o que falha é a
+     subida ao Supabase até a coluna existir.)
+
+3) O que acontece se um registro reenviado falhar por chave estrangeira
+   (a questão pai ainda não existe na nuvem):
+   - No push em lote (pushWithConflictCheck), o upsert é tudo-ou-nada por lote:
+     se UM registro viola a chave estrangeira, o LOTE inteiro daquela coleção
+     falha naquele ciclo e será tentado de novo no próximo sync (não há perda
+     de dado local). Assim que a questão pai existir na nuvem, o sync passa.
+   - No envio pela fila (um a um), a falha de chave estrangeira conta como
+     retry; após 5 tentativas a operação fica marcada como failed=true e
+     PRESERVADA (não é descartada), podendo ser reativada depois.
+
+4) Downlevel/segurança do UPSERT: ao registrar banco_tentativas como upsert por
+   id na fila, o comportamento de "create" muda de INSERT puro para UPSERT.
+   Como id é a chave primária e cada tentativa tem id único, isso é seguro e
+   evita o erro de "duplicate key" quando fila e sync tencionam enviar o mesmo
+   registro.
+
+5) Coleções protegidas (calendario.tsx e WeeklyGridEditor.tsx): confirmado,
+   git diff VAZIO. db.ts: só o bloco de banco_tentativas (ver diff em D).
+
+================================================================
+FIM DO RELATÓRIO
+================================================================

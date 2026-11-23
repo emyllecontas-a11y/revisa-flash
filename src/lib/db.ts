@@ -982,7 +982,7 @@ const cadernoResultadoSchema = {
 
 const bancoTentativaSchema = {
   title: 'banco tentativa schema',
-  version: 0,
+  version: 1,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -995,6 +995,8 @@ const bancoTentativaSchema = {
     contexto: { type: 'string' },
     caderno_resultado_id: { type: ['string', 'null'] },
     created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isdeleted: { type: 'boolean', default: false },
   },
   required: ['id', 'user_id', 'questao_banco_id', 'contexto'],
 };
@@ -1342,7 +1344,19 @@ export async function getDb(): Promise<RxDatabase> {
       cadernos: { schema: cadernoSchema },
       caderno_questoes: { schema: cadernoQuestaoSchema },
       caderno_resultados: { schema: cadernoResultadoSchema },
-      banco_tentativas: { schema: bancoTentativaSchema },
+      banco_tentativas: {
+        schema: bancoTentativaSchema,
+        migrationStrategies: {
+          // v1: adiciona updated_at e isdeleted. Tentativas antigas (sem
+          // updated_at) recebem a data/hora ATUAL da migração, para serem
+          // reenviadas UMA vez pelo sync em lote (upsert por id é idempotente).
+          1: (oldDoc: any) => ({
+            ...oldDoc,
+            updated_at: oldDoc.updated_at || new Date().toISOString(),
+            isdeleted: false,
+          }),
+        },
+      },
       // Plano de Estudos Inteligente (4 camadas)
       study_tasks: { schema: studyTaskSchema },
       study_theme_timelines: { schema: studyThemeTimelineSchema },

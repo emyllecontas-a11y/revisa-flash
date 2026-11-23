@@ -197,7 +197,10 @@ export function BancoPlayerInline({ userId, questoes, startIndex = 0, resumoFilt
 
   useEffect(() => {
     if (!respondida && questaoAtual) {
-      timerRef.current = setInterval(() => setTempoQuestao(p => p + 1), 1000);
+      timerRef.current = setInterval(() => {
+        if (document.hidden) return; // só conta tempo com a aba visível
+        setTempoQuestao(p => p + 1);
+      }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }

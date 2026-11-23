@@ -1,0 +1,213 @@
+============================================================================
+RELATORIO — AUDITORIA DE ERROS DE TIPO (tsc)
+Projeto: Una Vox (revisa-flash)
+Data: 2026-11-23
+============================================================================
+
+RESUMO EM UMA FRASE
+-------------------
+O verificador de tipos acusa hoje 84 erros (antes eram 64). Os 20 erros a mais
+estao TODOS no arquivo src/routes/flashcards.tsx. A causa nao e anotação de
+tipo: ao reescrever o handleEditCard (recurso de imagens), o editor apagou sem
+querer 11 funções que ainda eram usadas na tela, e deixou a palavra "Done"
+solta na ultima linha do arquivo. Esta tarefa NAO corrigiu nada (decisão da
+usuaria: apenas relatorio).
+
+
+============================================================================
+(A) GIT STATUS (resumo)
+============================================================================
+Comando: git status --porcelain
+
+Arquivos MODIFICADOS (ja estavam assim antes desta tarefa):
+  M  src/components/BancoPlayerInline.tsx
+  M  src/components/CriarFlashcardAulaModal.tsx
+  M  src/components/PlayerLivreModal.tsx
+  M  src/components/flashcards/StudyCard.tsx
+  M  src/lib/db.ts
+  M  src/routes/flashcards.tsx
+  M  src/services/bancoQuestoesService.ts
+  M  src/services/queueService.ts
+
+Arquivos NOVOS (nao versionados):
+  ??  varios RELATORIO_*.txt / DIAGNOSTICO_*.txt / replace*.ps1
+  ??  supabase/migrations/20261122_add_flashcard_images.sql
+  ??  supabase/migrations/20261125_banco_tentativas_isdeleted.sql
+  (e este proprio RELATORIO_TSC_AUDITORIA.txt)
+
+Nenhum arquivo do codigo-fonte foi alterado por esta tarefa.
+
+
+============================================================================
+(B) TABELA DA FASE 1 — erros por arquivo (classificados NOVO x ANTIGO)
+============================================================================
+Regra de classificacao:
+  - Arquivo que aparece no git status como modificado -> comparado com git diff.
+    Linha de erro dentro de trecho alterado = NOVO; fora = ANTIGO.
+  - Arquivo com erro que NAO aparece no git status = ANTIGO (por definicao).
+
+Arquivo                              | totais | NOVOS | ANTIGOS
+-------------------------------------+--------+-------+--------
+src/routes/flashcards.tsx             |   32   |  20   |  12
+src/routes/login.tsx                  |   17   |   0   |  17
+src/services/pdfExtracaoAvancada.ts   |    7   |   0   |   7
+src/services/listaService.ts          |    6   |   0   |   6
+src/routes/cadastro.tsx               |    5   |   0   |   5
+src/contexts/FlashcardContext.tsx     |    4   |   0   |   4
+src/routes/calendario.tsx (protegido) |    2   |   0   |   2
+src/routes/conteudo.tsx               |    2   |   0   |   2
+vite.config.ts                        |    2   |   0   |   2
+src/client.tsx                        |    1   |   0   |   1
+src/contexts/UserContext.tsx          |    1   |   0   |   1
+src/router.tsx                        |    1   |   0   |   1
+src/routes/compartilhados.tsx         |    1   |   0   |   1
+src/routes/listas.$id.tsx             |    1   |   0   |   1
+src/services/pdfExtrasService.ts      |    1   |   0   |   1
+src/services/rankingService.ts        |    1   |   0   |   1
+-------------------------------------+--------+-------+--------
+TOTAL                                 |   84   |  20   |  64
+
+Confirmacao: a soma de NOVOS (20) explica exatamente a diferença de 84 - 64.
+Os 20 erros novos estao todos em src/routes/flashcards.tsx.
+
+IMPORTANTE sobre os arquivos modificados que TAMBEM tem codigo de imagem:
+  - src/components/CriarFlashcardAulaModal.tsx  -> modificado, mas 0 erros de tipo
+  - src/components/flashcards/StudyCard.tsx     -> modificado, mas 0 erros de tipo
+  - src/components/BancoPlayerInline.tsx        -> modificado, 0 erros
+  - src/components/PlayerLivreModal.tsx         -> modificado, 0 erros
+  - src/services/bancoQuestoesService.ts        -> modificado, 0 erros
+  - src/services/queueService.ts                -> modificado, 0 erros
+  - src/lib/db.ts                               -> modificado, 0 erros
+Ou seja: o unico arquivo modificado que gera erro de tipo e o flashcards.tsx.
+
+
+============================================================================
+(C) LISTA DOS 20 ERROS NOVOS (todos em src/routes/flashcards.tsx) e a CAUSA
+============================================================================
+NATUREZA DO PROBLEMA
+Quando o handleEditCard foi reescrito (bloco de upload de imagens), um trecho
+grande do arquivo (duas regioes, ~176 linhas no git diff) foi removido. Essas
+linhas continham 11 funções internas da tela. Elas continuam sendo CHAMADAS no
+JSX (botoes e rotulos), mas nao existem mais -> "Cannot find name".
+Alem disso, sobrou a palavra "Done" na ultima linha do arquivo (linha 2199).
+
+CONFIRMACAO:
+  - Busca por "const <nome>" / "function <nome>" dessas 11 funcoes no arquivo
+    atual: NENHUM resultado (elas nao existem mais).
+  - git diff -U0 mostra esses nomes apenas como linhas removidas ("-"), sem
+    nenhuma linha adicionada ("+") correspondente.
+  - A linha 2199 do arquivo e literalmente a palavra: Done
+
+LISTA DETALHADA (arquivo:linha -> funcao ausente):
+  1. flashcards.tsx:692  -> openEditFromStudy (nao existe)
+  2. flashcards.tsx:721  -> handleRating (nao existe)
+  3. flashcards.tsx:722  -> handleRating (nao existe)
+  4. flashcards.tsx:723  -> handleRating (nao existe)
+  5. flashcards.tsx:724  -> handleRating (nao existe)
+  6. flashcards.tsx:782  -> voltarDaConclusao (nao existe)
+  7. flashcards.tsx:788  -> iniciarEstudo (nao existe)
+  8. flashcards.tsx:797  -> iniciarEstudo (nao existe)
+  9. flashcards.tsx:837  -> voltarParaDecks (nao existe)
+ 10. flashcards.tsx:1010 -> iniciarEstudo (nao existe)
+ 11. flashcards.tsx:1082 -> openEditModal (nao existe)
+ 12. flashcards.tsx:1089 -> handleDeleteCard (nao existe)
+ 13. flashcards.tsx:1156 -> iniciarEstudo (nao existe)
+ 14. flashcards.tsx:1201 -> iniciarEstudo (nao existe)
+ 15. flashcards.tsx:1221 -> handleDeleteDeck (nao existe)
+ 16. flashcards.tsx:1471 -> handleRenameDeck (nao existe)
+ 17. flashcards.tsx:1595 -> handleDeleteCard (nao existe)
+ 18. flashcards.tsx:1869 -> handleRemoveMember (nao existe)
+ 19. flashcards.tsx:1893 -> handleAddMember (nao existe)
+ 20. flashcards.tsx:2199 -> "Done" (palavra solta no fim do arquivo)
+
+As 11 funcoes apagadas (agrupadas):
+  handleDeleteDeck, handleDeleteCard, handleRenameDeck,
+  handleAddMember, handleRemoveMember, iniciarEstudo, handleRating,
+  voltarDaConclusao, voltarParaDecks, openEditFromStudy, openEditModal
+
+CAUSA EM PORTUGUES SIMPLES:
+O recurso de imagens foi colado por cima de um bloco que tambem tinha essas 11
+funcoes. Na hora de salvar, elas foram substituidas (apagadas) junto, mas os
+botoes da tela continuam chamando elas. Por isso o verificador reclama 19 vezes
+"nome não encontrado", mais 1 vez por causa do "Done" perdido no rodape.
+
+
+============================================================================
+(D) O QUE FOI CORRIGIDO
+============================================================================
+NADA foi corrigido nesta tarefa.
+
+Decisao da usuaria: gerar apenas o relatorio, sem alterar codigo.
+Motivo tecnico: a correcao real nao e anotação de tipo e sim devolver as 11
+funcoes apagadas (~176 linhas) e remover o "Done" — o que ultrapassa o limite
+de ~30 linhas e mexe em comportamento. Pelas regras, isso exigiria aprovacao
+antes de editar.
+
+Como seria a correcao (para a usuaria decidir depois):
+  - Restaurar, a partir da versao salva no git (git show HEAD:src/routes/
+    flashcards.tsx), as 11 funcoes apagadas, mantendo o novo handleEditCard
+    (com imagens) intacto.
+  - Remover a palavra "Done" da linha 2199.
+  - Resultado esperado: volta a "64 errors in 16 files".
+
+
+============================================================================
+(E) RESULTADO DOS COMANDOS
+============================================================================
+RODOU:
+  - git status --porcelain ............... listou 8 modificados + arquivos novos
+  - npx tsc --noEmit ..................... "Found 84 errors in 16 files"
+                                           (saida completa salva em arquivo
+                                            temporario fora do projeto:
+                                            %TEMP%\tsc_audit_before.txt)
+  - git diff -U0 -- src/routes/flashcards.tsx ... usado para classificar
+  - git diff --stat (3 arquivos de imagens) ..... flashcards.tsx: 832 linhas
+                                                 (491 insercoes / 428 remocoes
+                                                  no conjunto dos 3 arquivos)
+
+NAO RODOU (porque nenhum codigo foi alterado nesta tarefa):
+  - npx vitest run ........ NAO executado
+  - npm run build ......... NAO executado
+Portanto NAO posso afirmar que "101 testes passam" nem que "build verde".
+Ambos continuam por verificar, sem alteracao de codigo de minha parte.
+
+ARQUIVOS PROTEGIDOS (nao tocados por esta tarefa):
+  - src/routes/calendario.tsx ................. sem modificacao (nao esta no git
+                                                 status) -> diff vazio
+  - src/components/study-plan/WeeklyGridEditor.tsx ... sem modificacao (nao
+                                                 esta no git status) -> diff vazio
+  - src/lib/db.ts ............................. NAO tocado; continua apenas com
+                                                 a alteracao de banco_tentativas
+                                                 que ja existia antes da tarefa
+
+
+============================================================================
+(F) RISCOS E O QUE NAO FOI CORRIGIDO
+============================================================================
+1. Os 20 erros novos continuam NO AR. Enquanto as 11 funcoes estiverem
+   apagadas, a pagina de Flashcards perde várias acoes: iniciar estudo,
+   avaliar card (Dificil/Bom/Facil), voltar da conclusao, voltar para baralhos,
+   abrir edicao, excluir card, excluir/renomear baralho, adicionar/remover
+   membro. O app pode nem compilar para produção ate isso ser resolvido.
+
+2. CORROMPIMENTO DE TEXTO (encoding) — fora do escopo de tipos, mas real:
+   varios comentários e textos de tela do flashcards.tsx ficaram embaralhados
+   (ex.: "🔥 FUNÇÃO" virou "Ã°Å¸âď¸â€Å¸ FUNÃâ€¡Ãâ€Ľâ€O"; "·" virou "Ã‚Â·"). Isso
+   NAO gera erro de tsc, mas aparece quebrado para o usuario final. Decisao da
+   usuaria: NAO corrigir agora. Fica registrado como pendencia.
+
+3. Correcao sugerida envolve restaurar ~176 linhas de codigo. E uma operacao
+   delicada e deve ser feita com cuidado, de preferencia recuperando do git e
+   conferindo que nada alem das funcoes apagadas foi tocado.
+
+4. Os 64 erros ANTIGOS (divida historica em client.tsx, login.tsx, cadastro.tsx,
+   pdfExtracaoAvancada.ts, vite.config.ts etc.) nao foram tocados, conforme as
+   regras. Nao sao desta tarefa.
+
+5. As verificacoes de teste (vitest) e de build (npm run build) NAO foram
+   executadas nesta tarefa (nenhum codigo alterado). Continuam pendentes ate a
+   correcao ser aprovada e aplicada.
+
+============================================================================
+FIM DO RELATORIO
+============================================================================

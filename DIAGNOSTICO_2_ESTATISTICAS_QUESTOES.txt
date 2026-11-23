@@ -1,0 +1,579 @@
+DIAGNÓSTICO 2 — BANCO DE QUESTÕES E HISTÓRICO DE RESPOSTAS
+Base para "estatísticas por questão" e "caderno de erros semanal"
+Data: 23/11/2026 | Tipo: SOMENTE LEITURA (nenhum arquivo de código foi alterado)
+
+
+================================================================
+RESUMO EM 5 LINHAS
+================================================================
+1) O Banco de Questões já existe: tabela `banco_questoes` no Supabase e coleção `banco_questoes` no RxDB, com id estável (UUID) por questão.
+2) Já existe UM REGISTRO POR TENTATIVA: a coleção `banco_tentativas` grava uma linha nova cada vez que você responde uma questão no Banco (acertou/errou, alternativa, tempo, data/hora).
+3) Esse histórico é bem incompleto: `banco_tentativas` NÃO tem coluna `updated_at`, e por isso o sync com a nuvem está quebrado — os pushes são simplesmente ignorados e os pulls usam comparação de data inválida.
+4) Resolver simulados e listas NÃO gera tentativas: só grava totais agregados por rodada (resultados_simulado / resultados_lista / caderno_resultados), sem linha por questão.
+5) A tela Relatório de Desempenho já faz "estatísticas por questão" por cima de `banco_tentativas`, mas ela é enganosa: trata cada erro como um "erro" e não deduplica questões; só mostra acertos por matéria/assunto.
+
+
+================================================================
+1. BANCO DE QUESTÕES — ONDE FICA, TABELA, COLEÇÃO, COLUNAS
+================================================================
+
+1.1 Onde fica no app
+- Rota: /simulados  (src/router.tsx:109) → src/routes/simulados.tsx
+- Dentro dessa rota há 3 abas (src/routes/simulados.tsx:51-57 e 489-524):
+  * "Banco"     → componente BancoQuestoesTab  (src/components/BancoQuestoesTab.tsx:58)
+  * "Listas"    → componente FixacaoTab → ListasTab
+  * "Simulados" → histórico de simulados
+- Serviço principal: src/services/bancoQuestoesService.ts
+- Schema local (RxDB): src/lib/db.ts:880-908  (bancoQuestaoSchema)
+- Registro da coleção: src/lib/db.ts:1340  →  banco_questoes: { schema: bancoQuestaoSchema }
+- Tipo TypeScript: src/services/bancoQuestoesService.ts:5-31  (interface QuestaoBanco)
+- Player (tela de responder): src/components/BancoPlayerInline.tsx  e  src/components/PlayerLivreModal.tsx
+- Importação: src/services/pdfBancoParser.ts + src/services/importarTecService.ts + src/routes/teste-parser.tsx
+- Existe também um fluxo SEPARADO de questões de listas (Fixação), coleção `questoes_lista`
+  (schema em src/lib/db.ts:530, serviço src/services/listaService.ts). É outro banco, não é o Banco de Questões.
+
+1.2 Nome EXATO
+- Tabela Supabase: banco_questoes
+- Coleção RxDB: banco_questoes (idêntico)
+
+1.3 Colunas (idênticas nos dois lugares — bancoQuestaoSchema em db.ts:880-908 e QuestaoBanco em bancoQuestoesService.ts:5-31)
+  id                string  (UUID gerado no app: crypto.randomUUID())  ← identificador estável
+  user_id           string  (ID do Clerk, texto)
+  banca             string
+  ano               number | null
+  concurso          string | null
+  cargo             string | null
+  disciplina        string
+  assunto           string | null
+  subassunto        string | null
+  tipo_questao      string  ('multipla_escolha' | 'certo_errado')
+  enunciado         string
+  alternativas      array | null   (itens { letra, texto, correta })
+  gabarito_letra    string | null
+  gabarito_ce       boolean | null
+  comentario        string | null
+  imagem_url        string | null
+  hash_dedup        string   (FNV-1a, usado para não duplicar)
+  url_origem        string | null
+  arquivo_origem    string | null
+  importado_em      string
+  created_at        string
+  updated_at        string
+  isdeleted         boolean  (default false) ← aqui é MINÚSCULO, tudo snake_case
+
+1.4 Identificador estável
+SIM. `id` é UUID criado no momento da inserção (bancoQuestoesService.ts:76: id: crypto.randomUUID()).
+Ele é a chave primária no RxDB e a chave usada no upsert do Supabase (onConflict: 'id',
+bancoQuestoesService.ts:135). O `hash_dedup` é um segundo identificador de conteúdo (evita duplicar
+a mesma questão importada duas vezes), mas o id é o identificador estável real.
+
+1.5 De onde vêm as questões (importação, criação manual, ou ambos)
+- IMPORTAÇÃO: é a origem real.
+  * PDF do TEC → src/services/importarTecService.ts:84 chama importarQuestoesNoBanco
+  * Rota de teste do parser → src/routes/teste-parser.tsx:108
+  * Função que grava: importarQuestoesNoBanco (bancoQuestoesService.ts:49-165)
+- CRIAÇÃO MANUAL no Banco de Questões: NÃO ENCONTREI EVIDÊNCIA.
+  BancoQuestoesTab não importa nem usa EditarQuestaoModal (grep em BancoQuestoesTab.tsx não achou
+  "importar", "EditarQuestaoModal"). O EditarQuestaoModal/EditarQuestaoSimuladoModal gravam em
+  OUTRAS coleções (questoes_lista e questoes), não em banco_questoes.
+- O único código que insere linhas diretamente em banco_questoes (fora a importação) é
+  src/components/CadernoDetalhesModal.tsx:46, que só serve para baixar da nuvem questões que
+  faltam no cache local — não é criação de conteúdo novo.
+
+
+================================================================
+2. COMO A USUÁRIA RESPONDE — O QUE É REGISTRADO E ONDE
+================================================================
+
+2.1 Telas que permitem responder
+A) BancoPlayerInline — abrir uma questão na lista do Banco (BancoQuestoesTab.tsx:479).
+B) PlayerLivreModal — botão "Praticar" com questões sorteadas (BancoQuestoesTab.tsx:542,
+   CadernoDetalhesModal.tsx:185, CadernoRevisao.tsx:175 e 418).
+C) Página do simulado — src/routes/simulados.$id.tsx (fase "resolvendo").
+D) Página da lista (Fixação) — src/routes/listas.$id.tsx.
+
+2.2 O que é registrado no momento da resposta
+
+A) Banco (BancoPlayerInline.tsx e PlayerLivreModal.tsx) — GRAVA POR QUESTÃO:
+   src/components/BancoPlayerInline.tsx:117
+   src/components/PlayerLivreModal.tsx:100
+     → await salvarTentativaAvulsa(userId, questaoAtual.id, selecionada, acertou, tempoQuestao)
+   Função que grava: salvarTentativaAvulsa  (src/services/bancoQuestoesService.ts:234-263)
+   Ela cria um objeto:
+     id                = crypto.randomUUID()      (linha NOVA a cada resposta)
+     user_id           = userId
+     questao_banco_id  = id da questão
+     resposta          = letra marcada (string|null)
+     acertou           = boolean|null
+     tempo_segundos    = cronômetro da questão
+     contexto          = 'avulso'  (hardcoded)
+     caderno_resultado_id = null (hardcoded)
+     created_at        = agora
+     updated_at        = agora
+   Grava em: RxDB (db.banco_tentativas.insert) e enfileira para o Supabase
+             (enqueueOperation('create', 'banco_tentativas', tentativa)).
+   Atenção: quem responde pelo PlayerLivreModal dentro de um caderno também grava contexto 'avulso'
+   e caderno_resultado_id null — a origem "caderno" nunca é preenchida.
+
+B) Simulado (src/routes/simulados.$id.tsx) — NÃO grava por questão:
+   * Cada clique só atualiza um objeto em memória: progresso.respostas[numero] = letra
+     (simulados.$id.tsx:317-323, função responder).
+   * Esse objeto é salvo várias vezes por minuto em `progresso_simulado`
+     (simuladoService.ts:241 salvarProgresso), que é UM documento por (simulado, usuária) —
+     ou seja, sobrescreve. Guarda respostas, eliminadas, marcadas, tempo_decorrido e status.
+   * Ao finalizar: finalizarSimulado (simuladoService.ts:328-401) grava
+     `resultados_simulado` com TOTAIS (total_questoes, acertos, erros, nao_respondidas, porcentagem,
+     tempo_segundos) + o mapa `respostas` {numero: letra} daquela rodada.
+   * Também grava um `study_records` (linha 344-375) com questionsCount/correctCount/wrongCount.
+   * Não existe nenhuma linha do tipo "questão X, usuária Y, errou, tempo Z".
+
+C) Lista / Fixação (src/routes/listas.$id.tsx:573) — mesma coisa:
+   salvarResultadoLista (listaService.ts:499-541) grava `resultados_lista` com totais + `respostas`
+   {numero: letra} + `areas` + `acertos_por_area`. Uma linha por rodada da lista, não por questão.
+
+D) Cadernos — NÃO ENCONREI EVIDÊNCIA de gravação.
+   A coleção `caderno_resultados` existe no schema (db.ts:963-980, cadernoResultadoSchema) e é LIDA em
+   src/services/cadernoService.ts:275 e 291, mas grep em todo o src não achou nenhum
+   `caderno_resultados.insert`. Ou seja: a coleção existe e o app tenta ler, mas nada grava.
+   Consequência: a tela CadernoRevisao (que só aparece "if (!resultado) return ...", linha 147)
+   nunca tem dados para mostrar hoje.
+
+
+================================================================
+3. HISTÓRICO POR TENTATIVA — QUAL DOS TRÊS CASOS É O REAL
+================================================================
+
+Resposta: existem DOIS regimes diferentes convivendo.
+
+REGIME 1 — "UMA LINHA POR VEZ QUE A QUESTÃO FOI RESPONDIDA": SÓ no Banco de Questões.
+  Tabela/coleção: banco_tentativas (db.ts:983-1003, bancoTentativaSchema)
+  Campos: id, user_id, questao_banco_id, resposta, acertou, tempo_segundos, contexto,
+          caderno_resultado_id, created_at
+  Como cada resposta gera um id novo (bancoQuestoesService.ts:245), é HISTÓRICO PURO:
+  a mesma questão respondida 5 vezes = 5 linhas.
+  Quem chama: BancoPlayerInline.tsx:117 e PlayerLivreModal.tsx:100 (via salvarTentativaAvulsa).
+
+REGIME 2 — "SÓ O ÚLTIMO RESULTADO / CONTADORES": Simulados, Listas e Cadernos.
+  * progresso_simulado (db.ts:705-723): 1 documento por (simulado, usuária), sobrescrito a cada
+    clique. Guarda `respostas` (mapa numero→letra) só da rodada atual.
+  * resultados_simulado (db.ts:726-750): 1 linha por RODADA FINALIZADA, com totais e o mapa de
+    respostas daquela rodada. É o mais perto de "histórico", mas não permite perguntar
+    "quantas vezes a questão 7 foi errada" sem abrir cada rodada e contar na mão.
+  * resultados_lista (db.ts:594-616): idem, por rodada de lista.
+  * caderno_resultados (db.ts:963-980): idem, por rodada de caderno — e NEM ISSO, porque nada grava.
+  * study_records: agregados (questionsCount / correctCount / wrongCount) — um contador por sessão.
+
+REGIME 3 — "SÓ TOTAIS AGREGADOS": study_records (questionsCount, correctCount, wrongCount,
+  occurrenceSourceType, autoGenerated) e getEstatisticasBanco (bancoQuestoesService.ts:172-212),
+  que conta questões por banca/disciplina/ano/tipo — nada disso é desempenho.
+
+Resumo direto:
+- Banco de Questões → caso 1 (linha por tentativa). ✅
+- Simulados / Listas / Cadernos → caso 2 (último resultado + mapa da rodada). ⚠️
+- study_records → caso 3 (agregados). ⚠️
+- "Estatísticas por questão" (quantas vezes respondi, errei, tempo médio por questão) SÓ é possível
+  hoje para o que passou pelo Banco de Questões, e mesmo assim de forma incompleta (ver item 5).
+
+
+================================================================
+4. TEMPO — EXISTE CRONÔMETRO? O TEMPO É GUARDADO?
+================================================================
+
+Banco (BancoPlayerInline.tsx)
+- Cronômetro por questão: SIM.
+  Estado tempoQuestao (linha 42) + useEffect linha 197-203: setInterval de 1s enquanto
+  !respondida && questaoAtual. Zera ao avançar/voltar (linhas 120-133) e ao ir para aleatória.
+- Tempo guardado: SIM, em banco_tentativas.tempo_segundos (bancoQuestoesService.ts:250).
+- Problema: o cronômetro roda enquanto a questão está na tela, INCLUSIVE se ela ficou aberta e você
+  saiu pra fazer outra coisa. Não pausa ao trocar de aba. Então "tempo" hoje é "tempo de tela",
+  não "tempo de resolução".
+
+PlayerLivreModal.tsx
+- Cronômetro por questão: SIM (setInterval de 1s, mesma lógica).
+- Tempo guardado: SIM, também em banco_tentativas.tempo_segundos (linha 100).
+
+Simulado (simulados.$id.tsx)
+- Cronômetro GERAL da prova: SIM (useEffect linha 235-247, incrementa progresso.tempo_decorrido).
+- Tempo por questão: NÃO EXISTE.
+- Guardado: só o total da rodada, em progresso_simulado.tempo_decorrido e
+  resultados_simulado.tempo_segundos (simuladoService.ts:387).
+
+Lista (listas.$id.tsx)
+- Tempo por questão: NÃO EXISTE. Só o total da lista (tempoTotal percorrendo a lista).
+- Guardado: resultados_lista.tempo_segundos (listaService.ts:521).
+
+Caderno
+- CadernoRevisao LÊ resultado.tempo_segundos (linha 190) e mostra formatado (linha 265) —
+  mas como nada grava caderno_resultados, esse tempo nunca existe.
+
+Conclusão do item 4: cronômetro por questão existe só no Banco/Player; tempo por questão é guardado
+só em banco_tentativas.tempo_segundos. Simulados e listas só têm tempo total da rodada.
+
+
+================================================================
+5. SINCRONIZAÇÃO — ENTRA NO SYNC DO RXDB COM O SUPABASE?
+================================================================
+
+5.1 Como o sync funciona (2 caminhos)
+
+CAMINHO A — fila genérica (src/services/queueService.ts)
+- enqueueOperation(type, table, data) grava em pending_operations (local).
+- processPendingOperations() (linha 124) faz, por operação:
+    create → supabase.from(table).insert(op.data)
+    update → supabase.from(table).update({...sem id}).eq('id', id)
+    delete → supabase.from(table).delete().eq('id', id)
+  Não existe RPC aqui. É insert/update/delete direto na tabela, com o nome da tabela igual ao
+  nome da coleção. As úplicas exceções são UPSERT_CONFLICT (linha 22-25) para progresso_simulado
+  e progresso_lista.
+- Quem chama enqueueOperation('create', 'banco_tentativas', ...) é
+  salvarTentativaAvulsa (bancoQuestoesService.ts:257).
+
+CAMINHO B — sync em lote no load (src/lib/db.ts, função de sincronização)
+- Pull: para cada nome da lista `collections` (db.ts:1428-1445), faz
+    supabase.from(name).select('*').eq('user_id', userIdStr).gte('updated_at', pullFrom)   (linha 1497-1503)
+  Exceções que usam RPC:
+    * study_records      → rpc('buscar_study_records_usuario', { p_user_id, p_last_sync })   (db.ts:1457)
+    * user_settings      → rpc('buscar_user_settings_usuario', { p_user_id, p_last_sync })   (db.ts:1464)
+  Exceções com query especial: decks (shared_with), listas_questoes (por lista), files, aula_materiais,
+  resultados_lista, resultados_simulado, questoes (simulado), simulados — todos .from(tabela).select.
+- Push: monta docsToPush com
+    collection.find({ selector: { user_id: userIdStr, updated_at: { $gt: lastSyncGlobal } } })   (db.ts:1523-1525)
+  e chama pushWithConflictCheck (db.ts:54-105), que compara `updated_at` remoto vs local (linhas 96-97)
+  e só sobe se o local for mais novo. As exceções de push são RPC:
+    * study_records → rpc('salvar_study_records_batch', { p_records: docsToPush })   (db.ts:1531)
+    * user_settings → rpc('salvar_user_settings_batch', { p_records: docsToPush })   (db.ts:1536)
+    * listas_questoes → bloco manual dedicado (db.ts:1541)
+
+5.2 Assinaturas EXATAS de RPC encontradas (grep em todo o src)
+- rpc('buscar_study_records_usuario', { p_user_id: userIdStr, p_last_sync: pullFrom })      — db.ts:1457
+- rpc('salvar_study_records_batch',   { p_records: docsToPush })                             — db.ts:1531
+- rpc('buscar_user_settings_usuario', { p_user_id: userIdStr, p_last_sync: pullFrom })      — db.ts:1464
+- rpc('salvar_user_settings_batch',   { p_records: docsToPush })                             — db.ts:1536
+Nenhuma RPC para banco_questoes, banco_tentativas, cadernos, caderno_resultados,
+resultados_lista ou resultados_simulado. Essas vão pelo caminho genérico (insert/update/delete).
+
+5.3 Situação do `banco_tentativas` — PROBLEMA GRAVE ENCONTRADO
+- `banco_tentativas` ESTÁ na lista de verificação de coleções vazias (db.ts:1410) e na lista de
+  pull/push do loop (db.ts:1439), com o nome batendo com a tabela do Supabase.
+- MAS: o schema `bancoTentativaSchema` (db.ts:983-1003) NÃO TEM a propriedade `updated_at`.
+  Só tem `created_at`.
+  Consequências, todas confirmadas no código:
+   a) PUSH NUNCA SOBE: o seletor local exige `updated_at: { $gt: lastSyncGlobal }` (db.ts:1524).
+      Documentos sem `updated_at` não casam com o seletor → docsToPush fica vazio →
+      pushWithConflictCheck nunca é chamado para banco_tentativas.
+      (O objeto montado em salvarTentativaAvulsa TEM updated_at, mas o RxDB descarta campos que
+      não estão no schema — quem manda é o schema.)
+   b) PULL COMPARA CAMPOS QUE NÃO EXISTEM: a query pede .gte('updated_at', pullFrom) (db.ts:1503)
+      e depois compara doc.updated_at > localTs (linha 1512-1513). Se a tabela remota não tiver
+      updated_at, a query pode falhar ou voltar vazia; se voltar, o patch compara undefined.
+   c) Além disso, o comentário no próprio db.ts (linhas 1800-1801) já registra um caso IGUAL:
+      listas_questoes "não têm updated_at; por isso o pull genérico por user_id + updated_at voltava
+      vazio para sempre e a lista abria sem questões". O mesmo bug de raiz.
+   d) Enquanto isso, o enqueueOperation('create', 'banco_tentativas', tentativa) do
+      salvarTentativaAvulsa MANDARIA o documento (a fila não filtra por updated_at, ela usa
+      insert(op.data)), então pela fila a linha até subiria — DESDE QUE a tabela exista no
+      Supabase e a coluna user_id aceite o ID do Clerk. Não achei migration para banco_tentativas.
+      (ver item 7)
+
+5.4 Situação do `banco_questoes`
+- Não está na lista `collections` do sync em lote (db.ts:1428-1445). Só aparece na lista de
+  verificação de vazias (db.ts:1410).
+- O sync do banco é feito por funções próprias, todas .from('banco_questoes'):
+  * pullTodasQuestoesBanco (db.ts:2243-2300) — baixa tudo em lotes de 500, .eq('isdeleted', false),
+    .order('created_at' desc), .range(offset, offset+499)
+  * pullBancoQuestoesOtimizado (db.ts:2197-2236) — versão antiga paginada
+  * pós-importação (bancoQuestoesService.ts:117-158) — upsert em lotes de 200, onConflict: 'id'
+  * comentário sob demanda (bancoQuestoesService.ts:268-320) — select('comentario').eq('id', ...)
+  Nenhuma RPC. Tudo query direta.
+
+5.5 Resumo do item 5
+- RPCs existentes: só study_records e user_settings (4 assinaturas acima).
+- banco_questoes: sync próprio por query direta, funciona, sem RPC.
+- banco_tentativas: ESTÁ no sync, mas o schema sem updated_at quebra push e pull (bug real, não
+  hipótese).
+- caderno_resultados, cadernos, pastas_caderno, caderno_questoes: no sync genérico, com updated_at
+  presente nos schemas — ok (caderno_questoes, porém, só tem created_at; db.ts:948-959).
+
+
+================================================================
+6. TELAS DE DESEMPENHO — O QUE EXISTE HOJE
+================================================================
+
+6.1 RelatorioDesempenhoModal (src/components/RelatorioDesempenhoModal.tsx)
+- Onde é aberta:
+  * BancoQuestoesTab.tsx:556 (botão de relatório do Banco) — escopo: banco inteiro
+  * CadernoDetalhesModal.tsx:323 — escopo: questões daquele caderno
+  * CadernoRevisao.tsx:435 — escopo: caderno
+- De onde tira os dados: SOMENTE de `banco_tentativas` + `banco_questoes` (linhas 62-90).
+  Não usa results_simulado, resultados_lista, caderno_resultados nem study_records.
+- O que mostra:
+  * Aproveitamento geral (%) em rosca (acertos vs erros)
+  * Questões resolvidas, acertos, erros (contadores)
+  * Gráfico de evolução por dia (acertos/erros por dia)
+  * Tabela por "matéria" (na verdade q.assunto) e "assunto" (na verdade q.subassunto),
+     com total, acertos, erros e % — ordenada por total
+  * Filtros: período (7d / 30d / tudo) e matéria
+  * Botão "Criar Caderno com Erros" (cria caderno com os ids das questões erradas)
+- Problemas encontrados (importantes para a proposta):
+  a) A tabela diz "Atividades por Matéria" mas agrupa por q.assunto, e dentro dele por
+     q.subassunto (linhas 137-138). O campo `disciplina` da questão é ignorado.
+  b) Cada linha de `banco_tentativas` conta como 1 "questão resolvida". Se você errou a mesma
+     questão 3 vezes, o total é 3. Não existe "questões distintas".
+  c) O filtro de período usa created_at da tentativa, ok — mas como as tentativas antigas não
+     sobem pro Supabase (item 5.3), o que aparece é só o que existe localmente naquele aparelho.
+  d) Não mostra tempo médio, apesar de `tempo_segundos` existir na coleção. O dado está lá e
+     ninguém usa.
+
+6.2 Outras telas de desempenho
+- EstatisticasListasModal (src/components/EstatisticasListasModal.tsx), aberta em ListasTab.tsx:435:
+  mostra por lista: total de tentativas, % , tempo médio, evolução entre tentativas, acertos por
+  área. Fonte: `resultados_lista` (linha 43-45, 100-114). É agregado por RODADA, não por questão.
+- Aba "Estatísticas" dentro de Simulados (simulados.tsx:872-1125): acertos por disciplina e
+  histórico de simulados. Fonte: resultados_simulado.
+- Início (rankingService.ts:231-260 getIndicadoresReais): conta banco_tentativas por dia/semana/mês
+  para o contador "questões resolvidas". Só contagem.
+
+6.3 O que NÃO existe
+- Nenhuma tela mostra "esta questão X: respondida N vezes, errada M vezes, tempo médio T,
+  última vez em D, sequência de acertos".
+- Nenhum "caderno de erros semanal" (o botão "Criar Caderno com Erros" do RelatorioDesempenhoModal
+  é manual, não é semanal e não é automático).
+
+
+================================================================
+7. SEGURANÇA ATUAL (RLS)
+================================================================
+
+7.1 MIGRATIONS QUE EXISTEM NO PROJETO (pasta supabase/migrations)
+  20261115_add_ordem_to_aulas.sql
+  20261116_add_subassunto_e_assunto_ordem_to_aulas.sql
+  20261117_create_aula_materiais.sql
+  20261119_create_study_plan.sql
+  20261120_weekly_blocks_effective_until.sql
+  20261122_study_plan_pauses.sql
+  20261122_add_flashcard_images.sql
+  20261123_study_records_auto_link.sql
+  20261124_theme_timeline_topic_ids.sql
+
+7.2 TABELAS DE QUESTÕES E RESPOSTAS — SITUAÇÃO
+- banco_questoes: NÃO TEM migration no projeto. Grep por "banco_questoes" em todos os .sql do
+  repositório = 0 resultados. Grep por "create table.*banco" = 0 resultados.
+  → TABELA CRIADA MANUALMENTE no Supabase (fora do versionamento do projeto).
+- banco_tentativas: idem. NÃO TEM migration. Grep por "banco_tentativas" nos .sql = 0 resultados.
+  → TABELA CRIADA MANUALMENTE.
+- cadernos, pastas_caderno, caderno_questoes, caderno_resultados: idem, sem migration.
+- questoes_lista, listas, listas_questoes, resultados_lista, progresso_lista, simulados, questoes,
+  resultados_simulado, progresso_simulado: idem, sem migration.
+→ Conclusão: NENHUMA tabela de questões/respostas tem migration versionada neste repositório.
+  Não é possível copiar daqui o texto das policies delas — elas foram feitas direto no painel do
+  Supabase. Só as tabelas de Plano de Estudos e materiais de aula estão versionadas.
+
+7.3 POLICIES QUE EU CONSIGO COPIAR (as únicas versionadas)
+Todas seguem exatamente o mesmo padrão: (auth.jwt() ->> 'sub') = user_id, com user_id text.
+
+(a) aula_materiais (20261117_create_aula_materiais.sql:45-68)
+  DROP POLICY IF EXISTS "aula_materiais_select_own" ON public.aula_materiais;
+  CREATE POLICY "aula_materiais_select_own"
+    ON public.aula_materiais FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "aula_materiais_insert_own" ON public.aula_materiais;
+  CREATE POLICY "aula_materiais_insert_own"
+    ON public.aula_materiais FOR INSERT
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "aula_materiais_update_own" ON public.aula_materiais;
+  CREATE POLICY "aula_materiais_update_own"
+    ON public.aula_materiais FOR UPDATE
+    USING ((auth.jwt() ->> 'sub') = user_id)
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "aula_materiais_delete_own" ON public.aula_materiais;
+  CREATE POLICY "aula_materiais_delete_own"
+    ON public.aula_materiais FOR DELETE
+    USING ((auth.jwt() ->> 'sub') = user_id);
+
+(b) study_tasks (20261119_create_study_plan.sql:36-54)
+  DROP POLICY IF EXISTS "study_tasks_select_own" ON public.study_tasks;
+  CREATE POLICY "study_tasks_select_own"
+    ON public.study_tasks FOR SELECT
+    USING ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "study_tasks_insert_own" ON public.study_tasks;
+  CREATE POLICY "study_tasks_insert_own"
+    ON public.study_tasks FOR INSERT
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "study_tasks_update_own" ON public.study_tasks;
+  CREATE POLICY "study_tasks_update_own"
+    ON public.study_tasks FOR UPDATE
+    USING ((auth.jwt() ->> 'sub') = user_id)
+    WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+
+  DROP POLICY IF EXISTS "study_tasks_delete_own" ON public.study_tasks;
+  CREATE POLICY "study_tasks_delete_own"
+    ON public.study_tasks FOR DELETE
+    USING ((auth.jwt() ->> 'sub') = user_id);
+
+(c) study_plan_pauses (20261122_study_plan_pauses.sql:20-31) — mesma forma, em uma linha cada:
+  CREATE POLICY "study_plan_pauses_select_own" ON public.study_plan_pauses FOR SELECT USING ((auth.jwt() ->> 'sub') = user_id);
+  CREATE POLICY "study_plan_pauses_insert_own" ON public.study_plan_pauses FOR INSERT WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+  CREATE POLICY "study_plan_pauses_update_own" ON public.study_plan_pauses FOR UPDATE USING ((auth.jwt() ->> 'sub') = user_id) WITH CHECK ((auth.jwt() ->> 'sub') = user_id);
+  CREATE POLICY "study_plan_pauses_delete_own" ON public.study_plan_pauses FOR DELETE USING ((auth.jwt() ->> 'sub') = user_id);
+
+7.4 O QUE ISSO SIGNIFICA NA PRÁTICA
+- NÃO achei nenhum uso de auth.uid(), request.jwt.claims ou current_setting em nenhuma migration.
+- NÃO achei nenhuma policy para banco_questoes ou banco_tentativas em lugar nenhum do repositório.
+- Como o pull do banco de questões faz .select('*').eq('isdeleted', false) SEM filtro de user_id
+  (db.ts:2206-2210 e 2261-2265) e funciona (o banco é compartilhado entre usuárias), é bem provável
+  que a policy de SELECT de banco_questoes seja pública (true) e a de INSERT/UPDATE/DELETE
+  restrita ao dono. MAS ISSO É DEDUÇÃO, NÃO EVIDÊNCIA. Sem a query no SQL Editor do Supabase não dá
+  para afirmar. Sinalizo como "não encontrei evidência".
+
+
+================================================================
+8. DADOS JÁ EXISTENTES — HÁ HISTÓRICO ANTIGO APROVEITÁVEL?
+================================================================
+
+8.1 O que existe de fato hoje (com base no código)
+- banco_tentativas: só começa a existir para quem usou o Banco de Questões / Player.
+  As linhas que existem estão no aparelho (IndexedDB) e, pela fila, podem ter subido para a nuvem.
+  Não há migração de nada para dentro dela: nenhum código lê resultados_simulado ou resultados_lista
+  e converte em tentativas. Portanto NÃO há passado reconstruível.
+- resultados_simulado: uma linha por rodada finalizada, com o mapa `respostas` {numero: letra}
+  daquela rodada. Esse mapa É aproveitável em teoria, mas:
+  * as chaves são NUMERO da questão dentro do simulado (não o id da questão),
+  * não há tempo por questão,
+  * não há "acertou" gravado — só a letra escolhida; para saber se acertou é preciso cruzar com
+    as alternativas corretas da questão,
+  * e cada simulado tem suas próprias questões (ids diferentes), então "a mesma questão" entre
+    simulados não é rastreável.
+  → Aproveitamento possível, mas trabalhoso e incompleto.
+- resultados_lista: idem (mapa respostas {numero: letra} + areas + acertos_por_area).
+- progresso_simulado: só a rodada em andamento; sobrescrito. Sem valor histórico.
+- caderno_resultados: NADA (nunca foi gravado).
+- study_records: tem questionsCount / correctCount / wrongCount por sessão. É total agregado,
+  não permite estatística por questão.
+
+8.2 Resposta direta
+- Estatística por questão com passado: NÃO existe passado aproveitável de forma automática.
+- O histórico "de verdade" (linha por questão) só passa a existir a partir das respostas dadas
+  pelo Banco de Questões / Player — e só enquanto o app for atualizado para não perder esses dados
+  (item 5.3).
+- Respostas de simulados e listas têm um rascunho aproveitável (o mapa de respostas da rodada),
+  mas exigiria um trabalho de reconstrução e ainda assim ficaria sem tempo por questão.
+
+
+================================================================
+9. PROPOSTA (APENAS DESCRIÇÃO — NADA FOI IMPLEMENTADO)
+================================================================
+
+9.1 Princípios da proposta
+- Reaproveitar a coleção que já existe: `banco_tentativas`. Ela já é "uma linha por resposta".
+- Seguir o padrão das tabelas de questões/respostas do projeto: snake_case, user_id text (Clerk),
+  id UUID gerado no app, created_at + updated_at, isdeleted boolean.
+- Corrigir o bug de raiz do item 5.3 antes de qualquer coisa (adicionar updated_at ao schema).
+- Registrar também as respostas que hoje ficam de fora (simulados e listas), para o histórico
+  passar a cobrir tudo.
+
+9.2 Campos sugeridos para a coleção `banco_tentativas` (PROPOSTA)
+
+  id                    string   UUID gerado no app (já existe)
+  user_id               string   ID do Clerk (já existe)
+  questao_banco_id      string   id da questão no banco_questoes (já existe)
+  questao_origem        string   de onde veio a questão: 'banco' | 'simulado' | 'lista'
+                                 (substitui o hardcoded contexto='avulso')
+  questao_origem_id     string   id do simulado/lista de origem (null quando 'banco')
+  resposta              string|null   letra marcada (já existe)
+  acertou               boolean|null  (já existe)
+  tempo_segundos        number        (já existe)
+  origem_tentativa      string   como a resposta foi dada:
+                                 'banco_player' | 'player_livre' | 'simulado' | 'lista'
+  sessao_id             string|null   agrupa tentativas da mesma rodada
+  created_at            string   (já existe)
+  updated_at            string   ← FALTANDO; é o que quebra o sync
+  isdeleted             boolean  ← FALTANDO; padrão das outras coleções
+
+  Observações sobre a proposta:
+  - O campo `contexto` atual (sempre 'avulso') e `caderno_resultado_id` (sempre null) podem virar
+    os campos acima, aproveitando o que já existe em vez de criar campos novos.
+  - Nenhuma coluna nova é obrigatória para começar: as duas que faltam de verdade para o sync
+    funcionar são updated_at e isdeleted.
+
+9.3 O que passa a ser possível calcular (estatísticas por questão)
+Com uma linha por resposta, dá para responder, por questão:
+  1. Vezes respondida (total de linhas daquela questao_banco_id)
+  2. Vezes errada (linhas com acertou = false)
+  3. Vezes certa (acertou = true)
+  4. Taxa de acerto (%) = certas / respondidas
+  5. Tempo médio por questão (média de tempo_segundos)
+  6. Tempo da última tentativa
+  7. Última vez que respondeu (máximo created_at)
+  8. Primeira vez que respondeu (mínimo created_at)
+  9. Sequência atual de acertos (contar linhas seguidas com acertou = true do fim para o começo)
+ 10. Quantas vezes a questão foi errada e depois acertada (proxy de "aprendeu")
+ 11. Questões "sanguessuga": ordenadas por (vezes errada) desc
+ 12. Questões nunca respondidas (banco_questoes sem nenhuma linha em banco_tentativas)
+ 13. Desempenho por dia/semana (agrupando created_at) — já existe um esboço disso
+ 14. Desempenho por disciplina/assunto (cruzando com banco_questoes)
+
+9.4 O que seria o "caderno de erros semanal" (PROPOSTA, descrição)
+- Semanal = janela de 7 dias sobre created_at das tentativas.
+- Pegar as questões com pelo menos 1 linha em banco_tentativas nos últimos 7 dias e
+  taxa de acerto abaixo de um limite (ex.: < 70%).
+- Criar automaticamente um caderno (cadernos + caderno_questoes) com essas questões, ou
+  reaproveitar o caderno já existente da semana.
+- Isso é uma leitura/agrupação; hoje o botão "Criar Caderno com Erros" do RelatorioDesempenhoModal
+  já faz algo parecido, só que manual e sem recorte semanal.
+
+
+================================================================
+10. PERGUNTAS PARA A USUÁRIA DECIDIR ANTES DE IMPLEMENTAR
+================================================================
+
+1) Histórico antigo de simulados e listas: quer que a gente tente reconstruir as respostas antigas
+   (extraindo o mapa de respostas de cada rodada) ou começamos o histórico do zero a partir de agora?
+   (Reconstruir é possível, mas dá trabalho e não recupera o tempo por questão.)
+
+2) Questões respondeidas fora do Banco (simulados e listas): quer que elas também passem a gerar
+   uma linha por questão no histórico? Sem isso, a aba Simulados e a aba Listas continuam
+   aparecendo só como totais e as "estatísticas por questão" ficam pela metade.
+
+3) Tempo por questão: quer que o cronômetro continue rodando enquanto a questão está na tela
+   (como hoje), ou prefere que ele pause quando você troca de aba / deixa o app em segundo plano?
+   Hoje "tempo" é "tempo de tela".
+
+4) Correção do sync: posso adicionar os campos `updated_at` e `isdeleted` na coleção de tentativas
+   (e no schema) para o histórico parar de se perder? Isso é o que faz os dados realmente chegarem
+   na nuvem. Sem isso, o histórico fica só no aparelho e some se você trocar de celular.
+
+5) Tabela no Supabase: as tabelas de questões (banco_questoes, banco_tentativas, cadernos,
+   resultados_*) foram criadas à mão e não têm migration no projeto. Quer que a gente crie as
+   migrations que faltam (registrando as estruturas e as policies de segurança) para não perder
+   essa configuração?
+
+6) Onde mostrar as estatísticas por questão: numa tela nova, dentro do Relatório de Desempenho que
+   já existe, ou na própria lista do Banco (uma coluna/ícone do lado de cada questão)?
+
+7) Caderno de erros semanal: quer que ele seja criado sozinho toda semana, ou prefere continuar
+   criando na mão quando quiser?
+
+8) "Questão errada": o que conta como erro para o caderno semanal — errou pelo menos 1 vez,
+   errou mais vezes do que acertou, ou está abaixo de uma % de acerto?
+
+9) Questões que você nunca respondeu: quer que apareçam em algum lugar ("X questões do banco ainda
+   não vistas")?
+
+10) Apagar questões: hoje existe exclusão lógica (isdeleted) no banco. Se uma questão for apagada,
+    o histórico das tentativas dela deve continuar guardado (para estatística) ou deve sumir junto?
+
+
+================================================================
+VERIFICAÇÃO FINAL
+================================================================
+Comando rodado: git status --porcelain
+Resultado: os únicos arquivos alterados/novos são os que já estavam assim ANTES desta tarefa
+(CriarFlashcardAulaModal.tsx, flashcards/StudyCard.tsx, flashcards.tsx, relatórios .txt anteriores,
+replace.ps1, replace2.ps1, migrations de flashcards/study).
+Nenhum arquivo de código foi criado, editado ou formatado por esta tarefa.
+O único arquivo novo é este relatório.

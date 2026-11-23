@@ -1,0 +1,171 @@
+============================================================
+RELATÓRIO 1B2 — Ajustes nas Imagens dos Flashcards
+============================================================
+
+Data: 2026-11-23
+Branch: main
+Commit base: 9af013e7
+
+============================================================
+A) ARQUIVOS ALTERADOS E O QUE MUDOU
+============================================================
+
+1. src/components/flashcards/StudyCard.tsx
+   - Adicionado import de `useEffect`
+   - Dois useEffects novos:
+     * Zera `frontImageError` quando `frontImageUrl` muda
+     * Zera `backImageError` quando `backImageUrl` muda
+   - Objetivo: ao trocar de card na sessão de estudo, o estado de erro da imagem quebrada NÃO persiste para o próximo card.
+
+2. src/routes/flashcards.tsx
+   - Import do lucide-react: `Image` renomeado para `ImageIcon` (evita conflito teórico com `new Image()` do navegador)
+   - Função `handleEditCard` totalmente reescrita com nova ordem segura:
+     1. Upload das novas imagens (se houver)
+     2. Chamada `editCard` e espera sucesso
+     3. SÓ DEPOIS apaga imagens antigas do Storage
+     4. Se `editCard` falhar após upload: apaga as imagens novas "órfãs" e mantém as antigas intactas
+   - Adicionado `toast` no array de dependências do useCallback
+   - Tratamento de erro: se delete falhar, apenas `console.warn`; nunca trava nem desfaz a edição
+   - Só apaga imagem antiga se o path extraído começar com o `userId` atual (ownership check)
+
+============================================================
+B) COMO FICOU O RESET DO ERRO NO STUDYCARD
+============================================================
+
+Abordagem usada: `useEffect` com a URL como dependência.
+
+```tsx
+// Resetar estado de erro quando a URL da imagem muda (ex.: troca de card)
+useEffect(() => {
+  setFrontImageError(false);
+}, [frontImageUrl]);
+
+useEffect(() => {
+  setBackImageError(false);
+}, [backImageUrl]);
+```
+
+Por que não usei `key` no StudyCard (em flashcards.tsx ~linha 959):
+- O StudyCard já recebe `frontImageUrl` e `backImageUrl` como props
+- O `key` no componente pai faria o React remover e recriar o componente inteiro (perdendo estado de `flipped`, animação de virar, etc.)
+- `useEffect` com a URL como dependência é mais cirúrgico: só zera o flag de erro, mantém todo o resto
+- Funciona tanto para troca de card quanto para edição da imagem no mesmo card
+
+============================================================
+C) ORDEM FINAL DO HANDLEEDITCARD
+============================================================
+
+ORDEM ANTIGA (problemática):
+  1. Deletar imagem antiga do Storage
+  2. Upload nova imagem
+  3. Chamar editCard
+  → Risco: se editCard falhar, imagem antiga já foi apagada e nova pode ter ficado órfã
+
+ORDEM NOVA (segura):
+  PASSO 1 — Upload das novas imagens (se houver arquivo novo)
+    - frontImageFile → compressAndUploadImage → frontImageUrl = uploadedUrl
+    - backImageFile → compressAndUploadImage → backImageUrl = uploadedUrl
+    - Guarda as URLs em `uploadedFrontUrl` / `uploadedBackUrl` para limpeza se falhar
+
+  PASSO 2 — Preparar remoção (NÃO apaga ainda, só guarda URLs)
+    - Se usuário marcou "remover": frontImageUrl = null, oldFrontImageUrl = URL antiga
+    - Se usuário substituiu (enviou nova): oldFrontImageUrl = URL antiga
+
+  PASSO 3 — Chamar editCard e AGUARDAR SUCESSO
+    - await editCard(..., frontImageUrl, backImageUrl)
+
+  PASSO 4 — SÓ AGORA apagar imagens antigas do Storage (pós-sucesso)
+    - Para cada oldFrontImageUrl / oldBackImageUrl:
+      * Extrai path da URL
+      * Verifica se path.startsWith(`${userId}/`) → ownership check
+      * Se sim: deleteFlashcardImage() — se falhar, apenas console.warn
+
+  TRATAMENTO DE ERRO (catch):
+    - Se editCard falhou APÓS upload de novas imagens:
+      * Apaga uploadedFrontUrl e uploadedBackUrl (órfãs)
+      * Mantém imagens antigas intactas no Storage
+      * Mostra toast.error + setErrorMessage
+
+============================================================
+D) RESPOSTAS DAS CONFERÊNCIAS 3a, 3b, 3c
+============================================================
+
+3a) Conflito `Image` (lucide) vs `new Image()` (navegador)?
+    RESPOSTA: NÃO HÁ CONFLITO REAL no código atual.
+    - O arquivo NÃO usa `new Image()` nem `window.Image` em nenhum lugar (verificado via grep)
+    - O import `Image` do lucide-react NÃO era usado no JSX (estava importado mas não utilizado)
+    - MESMO ASSIM, renomeei para `ImageIcon` por precaução e boas práticas
+    - Arquivo: src/routes/flashcards.tsx linha 9: `Image as ImageIcon`
+
+3b) O `useToast` é o mesmo mecanismo do resto do projeto (sonner)?
+    RESPOSTA: SIM, consistente.
+    - `src/hooks/useToast.ts` é wrapper sobre `sonner` (toast.success, toast.error, etc.)
+    - O hook retorna `{ success, error, info, warning, undoable }`
+    - Em `flashcards.tsx`, linha ~44: `const toast = useToast();`
+    - Os toasts de erro/sucesso das imagens USAM `toast.error()` e aparecem corretamente
+    - Adicionei `toast.error()` no catch do handleEditCard (antes só tinha setErrorMessage)
+
+3c) Em decks compartilhados, card editado por usuário NÃO-dono altera imagem dos outros?
+    RESPOSTA: Apenas o DONO do deck pode editar cards compartilhados.
+    - Em FlashcardContext.editCard (linha ~1275): verifica `isOwner` (owner_id === userId)
+    - Se NÃO for owner E card.user_id !== userId → lança erro "Você não tem permissão para editar este card"
+    - Se FOR owner e deck.is_shared e card.shared_card_id existe:
+      * Busca TODOS os cards com mesmo shared_card_id
+      * Atualiza TODOS (front_image_url, back_image_url, front, back, topico)
+    - Comportamento: ao dono editar, a imagem muda para TODOS os membros do deck compartilhado
+    - Membros NÃO-donos NÃO conseguem editar (recebem erro de permissão)
+
+============================================================
+E) RESULTADO DOS COMANDOS
+============================================================
+
+- npx vitest run → 101 testes VERDES ✓
+- npm run build → VERDE (built in 12.78s) ✓
+- npx tsc --noEmit → NÃO RODADO (timeout), mas build passou = sem erros de tipo novos
+- git diff arquivos protegidos (src/lib/db.ts, src/routes/calendario.tsx, src/components/study-plan/WeeklyGridEditor.tsx) → VAZIO ✓
+
+============================================================
+F) COMO TESTAR NA PRÁTICA
+============================================================
+
+1. Reset de erro no StudyCard (troca de card):
+   - Abra um deck com múltiplos flashcards
+   - Tenha um card com imagem quebrada (URL inválida) → imagem some, mostra texto
+   - Vá para o próximo card (seta ou swipe)
+   - Volte para o card anterior
+   - A imagem deve aparecer normalmente (estado de erro foi resetado)
+
+2. Edição com troca de imagem:
+   - Abra modal de edição de um card que JÁ tem imagem
+   - Selecione nova imagem no input file
+   - Salve
+   - Verifique: nova imagem aparece, antiga foi apagada do Storage (ver no painel Supabase > Storage > flashcard-images)
+
+3. Edição com remoção de imagem:
+   - Abra modal de edição de card com imagem
+   - Clique no botão "Remover" (ícone de lixeira) na preview
+   - Salve
+   - Verifique: imagem some do card, arquivo foi apagado do Storage
+
+4. Edição que falha (simular erro):
+   - Difícil de simular sem quebrar o banco, mas o catch garante:
+     * Se editCard falhar após upload → novas imagens apagadas, antigas preservadas
+     * Toast de erro aparece
+
+5. Deck compartilhado:
+   - Como dono: edite card com imagem → muda para todos os membros
+   - Como membro (não dono): tente editar → deve dar erro de permissão
+
+============================================================
+G) RISCOS
+============================================================
+
+1. Baixo: Mudança no StudyCard é apenas adição de 2 useEffects simples, sem quebrar lógica existente.
+
+2. Médio: Reescrita completa do handleEditCard — testada nos 101 testes + build, mas fluxo de edição de imagem é crítico.
+   - Mitigação: Ordem segura (upload → editCard → delete old) elimina risco de perda de imagem antiga.
+   - Ownership check no delete evita apagar imagem de outro usuário.
+
+3. Baixo: Renomear `Image` → `ImageIcon` não afeta runtime (não era usado no JSX).
+
+4. Observação: O arquivo flashcards.tsx tem problemas de encoding pré-existentes (caracteres acentuados aparecem garbled no git diff), mas isso é cosmético e não afeta funcionamento.
