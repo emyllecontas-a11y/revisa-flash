@@ -25,6 +25,7 @@ import { VideoOfflineButton } from "../aulas/VideoOfflineButton";
 import { CriarFlashcardAulaModal } from "../CriarFlashcardAulaModal";
 import { aulaEhNova, useAulasData } from "./AulasDataContext";
 import { AulasRedesignStyles } from "./AulasRedesignStyles";
+import { localizarAula, resumirTopicos } from "./topicosUtils";
 
 // Nome do arquivo no download do vídeo: sem \ / : * ? " < > | e com até 120 caracteres.
 function nomeSeguroArquivo(titulo: string): string {
@@ -127,6 +128,17 @@ export function AulaDetalhe() {
   const proxima = index < disciplina.aulas.length - 1 ? disciplina.aulas[index + 1] : null;
   const irPara = (id: string) => navigate(`/aulas/${disciplina.slug}/${id}`);
 
+  // "Voltar" leva para a lista onde a aula está (subtópico ou tópico); se não achar, para a disciplina.
+  const local = localizarAula(resumirTopicos(disciplina.assuntos), aula);
+  const voltar = local
+    ? local.subtopico
+      ? {
+          to: `/aulas/${disciplina.slug}/topico/${local.topico.slug}/${local.subtopico.slug}`,
+          rotulo: local.subtopico.nome,
+        }
+      : { to: `/aulas/${disciplina.slug}/topico/${local.topico.slug}`, rotulo: local.topico.nome }
+    : { to: `/aulas/${disciplina.slug}`, rotulo: disciplina.nome };
+
   const acoes = [
     {
       icon: FileText,
@@ -152,10 +164,10 @@ export function AulaDetalhe() {
     <div className="mx-auto w-full max-w-7xl py-2 sm:py-4" data-tone={disciplina.tone}>
       <AulasRedesignStyles />
       <Link
-        to={`/aulas/${disciplina.slug}`}
+        to={voltar.to}
         className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft className="h-4 w-4" /> {disciplina.nome}
+        <ArrowLeft className="h-4 w-4" /> {voltar.rotulo}
       </Link>
 
       <div className="rfx-topbar mb-5">

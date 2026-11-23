@@ -22,6 +22,7 @@ import Sessoes from './routes/sessoes';
 import Aulas from './routes/aulas';
 import { DisciplinasGrid } from './components/aulas-redesign/DisciplinasGrid';
 import { TopicosLista } from './components/aulas-redesign/TopicosLista';
+import { AulasDoTopico } from './components/aulas-redesign/AulasDoTopico';
 import { AulaDetalhe } from './components/aulas-redesign/AulaDetalhe';
 // 🔥 NOVA: tela única que junta "Compartilhado comigo" + "Amizades"
 import Comunidade from './routes/comunidade';
@@ -175,6 +176,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DisciplinasGrid /> },
       { path: ':disciplinaId', element: <TopicosLista /> },
+      { path: ':disciplinaId/topico/:assuntoSlug', element: <AulasDoTopico /> },
+      { path: ':disciplinaId/topico/:assuntoSlug/:subSlug', element: <AulasDoTopico /> },
       { path: ':disciplinaId/:aulaId', element: <AulaDetalhe /> },
     ],
   },
