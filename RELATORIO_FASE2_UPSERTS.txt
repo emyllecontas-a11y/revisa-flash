@@ -1,0 +1,51 @@
+FASE 2 - FUNÇÕES DE UPSERT IDEMPOTENTE CONCLUÍDA
+=================================================
+
+Arquivo modificado: src/services/studyPlanService.ts
+
+Mudanças (apenas ADIÇÕES, nenhuma função existente alterada):
+------------------------------------------------------------
+
+1. findStudyTaskByName(userId, name)
+   - Busca tarefa por nome case-insensitive
+   - Ignora isDeleted=true
+   - Filtra em JavaScript (evita regex no selector RxDB)
+   - Retorna StudyTask ou null
+
+2. upsertStudyTaskByName(data)
+   - Recebe: name, activity_type, duration_min, color, theme_rule
+   - Converte duration_min → default_duration_min (StudyTask)
+   - Chave de negócio: name (case-insensitive)
+   - Se existe e não mudou → action 'skipped'
+   - Se existe e mudou → action 'updated'
+   - Se não existe → action 'created'
+   - Retorna { action, task }
+
+3. findStudyWeeklyBlock(userId, task_id, weekday, start_time, effective_from)
+   - Busca pela chave de negócio: task_id + weekday + start_time + effective_from
+   - Ignora isDeleted=true
+   - Retorna StudyWeeklyBlock ou null
+
+4. upsertStudyWeeklyBlock(data)
+   - Recebe: task_id, weekday, start_time, end_time, effective_from, effective_until
+   - Chave de negócio: task_id + weekday + start_time + effective_from
+   - Se existe e não mudou (end_time/effective_until) → 'skipped'
+   - Se existe e mudou → 'updated'
+   - Se não existe → 'created'
+   - Retorna { action, block }
+
+Exports adicionados ao objeto studyPlanService:
+- findStudyTaskByName
+- upsertStudyTaskByName
+- findStudyWeeklyBlock
+- upsertStudyWeeklyBlock
+
+Diff completo:
+--------------
+(veja saída do git diff acima)
+
+Verificação:
+- ✅ Nenhuma função existente foi modificada
+- ✅ Apenas 4 novas funções adicionadas
+- ✅ Exports seguem o mesmo padrão do arquivo
+- ✅ Usam helpers existentes (assertUserId, nowISO, uid, getDb, enqueueOperation)

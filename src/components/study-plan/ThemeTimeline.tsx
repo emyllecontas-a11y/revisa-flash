@@ -354,7 +354,7 @@ export function ThemeTimeline({ userId }: { userId: string }) {
     if (existing) {
       setModalInitialTopicIds(existing.topic_ids || []);
       setModalInitialThemes(existing.themes);
-      setModalIsLegacy(isLegacy);
+      setModalIsLegacy(!!isLegacy);
     } else {
       setModalInitialTopicIds([]);
       setModalInitialThemes([]);

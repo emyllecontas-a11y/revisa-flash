@@ -115,6 +115,91 @@ export async function getStudyTasks(userId?: string): Promise<StudyTask[]> {
   return docs.map(d => d.toJSON() as StudyTask);
 }
 
+/**
+ * Busca tarefa por nome (case-insensitive), ignorando isDeleted=true.
+ * Filtra em JavaScript para evitar depender de regex no selector do RxDB.
+ */
+export async function findStudyTaskByName(userId: string, name: string): Promise<StudyTask | null> {
+  const db = await getDb();
+  const searchName = name.trim().toLowerCase();
+
+  const docs = await db.study_tasks.find({
+    selector: { user_id: userId, isDeleted: { $ne: true } },
+  }).exec();
+
+  for (const doc of docs) {
+    const task = doc.toJSON() as StudyTask;
+    if (task.name.trim().toLowerCase() === searchName) {
+      return task;
+    }
+  }
+  return null;
+}
+
+/**
+ * Upsert idempotente de StudyTask pelo nome.
+ * Recebe dados sem id/user_id/created_at/updated_at/isDeleted.
+ * Converte duration_min (do parser) para default_duration_min (do StudyTask).
+ * Retorna { action, task } onde action = 'created' | 'updated' | 'skipped'.
+ */
+export async function upsertStudyTaskByName(data: {
+  name: string;
+  activity_type: string;
+  duration_min: number;
+  color: string;
+  theme_rule: string;
+}): Promise<{ action: 'created' | 'updated' | 'skipped'; task: StudyTask }> {
+  const userId = await assertUserId();
+  const db = await getDb();
+  const now = nowISO();
+
+  const existing = await findStudyTaskByName(userId, data.name);
+
+  // Converter duration_min para default_duration_min
+  const taskData: Omit<StudyTask, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'isDeleted'> = {
+    name: data.name.trim(),
+    activity_type: data.activity_type as ActivityType,
+    default_duration_min: data.duration_min,
+    color: data.color,
+    theme_rule: data.theme_rule as ThemeRule,
+  };
+
+  if (existing) {
+    // Verificar se houve mudança nos campos relevantes
+    const changed =
+      existing.activity_type !== taskData.activity_type ||
+      existing.default_duration_min !== taskData.default_duration_min ||
+      existing.color !== taskData.color ||
+      existing.theme_rule !== taskData.theme_rule;
+
+    if (!changed) {
+      return { action: 'skipped', task: existing };
+    }
+
+    // Atualizar
+    const updated = { ...existing, ...taskData, updated_at: now };
+    await db.study_tasks.findOne({ selector: { id: existing.id } }).exec().then(doc => {
+      if (doc) doc.patch(updated);
+    });
+    await enqueueOperation('update', 'study_tasks', updated);
+    return { action: 'updated', task: updated };
+  }
+
+  // Criar nova
+  const newTask: StudyTask = {
+    id: uid(),
+    user_id: userId,
+    ...taskData,
+    created_at: now,
+    updated_at: now,
+    isDeleted: false,
+  };
+
+  await db.study_tasks.insert(newTask);
+  await enqueueOperation('create', 'study_tasks', newTask);
+  return { action: 'created', task: newTask };
+}
+
 export function subscribeStudyTasks(userId: string, callback: (tasks: StudyTask[]) => void): () => void {
   let unsub: (() => void) | null = null;
 
@@ -343,7 +428,7 @@ export async function updateWeeklyBlockSeriesFromToday(
     id: uid(),
     user_id: userId,
     task_id: cambios.task_id ?? original.task_id,
-    weekday: cambios.weekday ?? original.weekday,
+    weekday: (cambios.weekday ?? original.weekday) as Weekday,
     start_time: cambios.start_time ?? original.start_time,
     end_time: cambios.end_time ?? original.end_time,
     effective_from: hojeStr,
@@ -399,6 +484,104 @@ export async function getStudyWeeklyBlocks(userId?: string): Promise<StudyWeekly
   }).exec();
 
   return docs.map(d => d.toJSON() as StudyWeeklyBlock);
+}
+
+/**
+ * Busca bloco semanal pela chave de negócio (task_id + weekday + start_time + effective_from),
+ * ignorando isDeleted=true.
+ */
+export async function findStudyWeeklyBlock(
+  userId: string,
+  task_id: string,
+  weekday: number,
+  start_time: string,
+  effective_from: string
+): Promise<StudyWeeklyBlock | null> {
+  const db = await getDb();
+
+  const docs = await db.study_weekly_blocks.find({
+    selector: { user_id: userId, isDeleted: { $ne: true } },
+  }).exec();
+
+  for (const doc of docs) {
+    const block = doc.toJSON() as StudyWeeklyBlock;
+    if (
+      block.task_id === task_id &&
+      block.weekday === weekday &&
+      block.start_time === start_time &&
+      block.effective_from === effective_from
+    ) {
+      return block;
+    }
+  }
+  return null;
+}
+
+/**
+ * Upsert idempotente de StudyWeeklyBlock pela chave de negócio.
+ * Chave = task_id + weekday + start_time + effective_from.
+ * Se mudou end_time, atualiza; senão pula; senão cria.
+ * Retorna { action, block } onde action = 'created' | 'updated' | 'skipped'.
+ */
+export async function upsertStudyWeeklyBlock(data: {
+  task_id: string;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  effective_from: string;
+  effective_until?: string | null;
+}): Promise<{ action: 'created' | 'updated' | 'skipped'; block: StudyWeeklyBlock }> {
+  const userId = await assertUserId();
+  const db = await getDb();
+  const now = nowISO();
+
+  const existing = await findStudyWeeklyBlock(
+    userId,
+    data.task_id,
+    data.weekday,
+    data.start_time,
+    data.effective_from
+  );
+
+  const blockData = {
+    task_id: data.task_id,
+    weekday: data.weekday as Weekday,
+    start_time: data.start_time,
+    end_time: data.end_time,
+    effective_from: data.effective_from,
+    effective_until: data.effective_until ?? null,
+  };
+
+  if (existing) {
+    // Verificar se houve mudança (apenas end_time é mutável nessa chave)
+    const changed = existing.end_time !== blockData.end_time || existing.effective_until !== blockData.effective_until;
+
+    if (!changed) {
+      return { action: 'skipped', block: existing };
+    }
+
+    // Atualizar
+    const updated = { ...existing, ...blockData, updated_at: now };
+    await db.study_weekly_blocks.findOne({ selector: { id: existing.id } }).exec().then(doc => {
+      if (doc) doc.patch(updated);
+    });
+    await enqueueOperation('update', 'study_weekly_blocks', updated);
+    return { action: 'updated', block: updated };
+  }
+
+  // Criar novo
+  const newBlock: StudyWeeklyBlock = {
+    id: uid(),
+    user_id: userId,
+    ...blockData,
+    created_at: now,
+    updated_at: now,
+    isDeleted: false,
+  };
+
+  await db.study_weekly_blocks.insert(newBlock);
+  await enqueueOperation('create', 'study_weekly_blocks', newBlock);
+  return { action: 'created', block: newBlock };
 }
 
 export function subscribeStudyWeeklyBlocks(userId: string, callback: (blocks: StudyWeeklyBlock[]) => void): () => void {
@@ -1356,6 +1539,8 @@ export const studyPlanService = {
   deleteStudyTask,
   getStudyTasks,
   subscribeStudyTasks,
+  findStudyTaskByName,
+  upsertStudyTaskByName,
 
   // Theme Timelines
   createStudyThemeTimeline,
@@ -1373,6 +1558,8 @@ export const studyPlanService = {
   closeWeeklyBlockSeriesFromToday,
   getStudyWeeklyBlocks,
   subscribeStudyWeeklyBlocks,
+  findStudyWeeklyBlock,
+  upsertStudyWeeklyBlock,
 
   // Extra Events
   createStudyExtraEvent,

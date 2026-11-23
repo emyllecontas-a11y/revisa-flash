@@ -6,5 +6,6 @@ export { StudyPlanHub } from "./StudyPlanHub";
 export { OccurrenceModal } from "./OccurrenceModal";
 export { DailyListView } from "./DailyListView";
 export { ContentTreeSelector } from "./ContentTreeSelector";
+export { CronogramaImportModal } from "./CronogramaImportModal";
 export { useStudyTasks } from "@/hooks/useStudyTasks";
 export { useThemeTimeline } from "@/hooks/useThemeTimeline";

@@ -1,0 +1,240 @@
+# RELATÓRIO DE DIAGNÓSTICO — SELETOR DE TÓPICOS VAZIO (ContentTreeSelector)
+
+**Data:** 2026-11-22  
+**Versão:** V2 (chat novo, autônomo)  
+**Escopo:** FASE 1 — Somente diagnóstico, sem edições
+
+---
+
+## 1. CÓDIGO REAL — ContentTreeSelector.tsx (busca de dados)
+
+```typescript
+// Linhas 1-5: imports
+import { getDisciplines, getTopics } from "@/lib/supabaseClient";
+
+// Linhas 36-75: loadData (useCallback com dependência [userId])
+const loadData = useCallback(async () => {
+  if (!userId) return;
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    // Buscar disciplinas
+    const discResult = await getDisciplines(userId);        // <-- USA getDisciplines DO SUPABASE CLIENT
+    if (!discResult.success) throw new Error(discResult.error || "Erro ao buscar disciplinas");
+
+    const disciplinesData = discResult.data || [];
+    setDisciplines(disciplinesData);
+
+    // Buscar tópicos para cada disciplina em paralelo
+    const topicsPromises = disciplinesData.map(async (disc) => {
+      const topicResult = await getTopics(disc.id);         // <-- USA getTopics DO SUPABASE CLIENT
+      if (topicResult.success && topicResult.data) {
+        return { disciplineId: disc.id, topics: topicResult.data };
+      }
+      return { disciplineId: disc.id, topics: [] };
+    });
+
+    const topicsResults = await Promise.all(topicsPromises);
+    const topicsMap: Record<string, Array<{ id: string; name: string }>> = {};
+    topicsResults.forEach(({ disciplineId, topics }) => {
+      topicsMap[disciplineId] = topics.map((t: any) => ({ id: t.id, name: t.name }));
+    });
+    setTopicsByDiscipline(topicsMap);
+
+    // Expandir primeiras disciplinas por padrão
+    if (disciplinesData.length > 0) {
+      const initialExpanded = new Set(disciplinesData.slice(0, 3).map((d) => d.id));
+      setExpandedDisciplines(initialExpanded);
+    }
+  } catch (err) {
+    console.error("Erro ao carregar árvore de conteúdo:", err);
+    setError(err instanceof Error ? err.message : "Erro ao carregar disciplinas e tópicos");
+  } finally {
+    setLoading(false);
+  }
+}, [userId]);
+
+// Linha 77: useEffect dispara loadData
+useEffect(() => {
+  loadData();
+}, [loadData]);
+```
+
+**Empty state (linhas 189-200):**
+```tsx
+if (disciplines.length === 0) {
+  return (
+    <div className="rf-card p-6 text-center border-border/50">
+      <svg ... />  {/* ícone de pasta vazia */}
+      <p className="text-muted-foreground text-sm">Nenhuma disciplina cadastrada.</p>
+      <p className="text-xs text-muted-foreground/70 mt-1">
+        Crie disciplinas e tópicos na aba <strong>Conteúdos</strong>.
+      </p>
+    </div>
+  );
+}
+```
+> **Condição exata:** `disciplines.length === 0` — ou seja, `getDisciplines` retorna array vazio OU a query falha silenciosamente e `discResult.data` é `[]`.
+
+---
+
+## 2. CÓDIGO REAL — conteudo.tsx (como FUNCIONA)
+
+```typescript
+// Linhas 13-15: usa RxDB local, NÃO supabaseClient
+import { getDb } from "@/lib/db";
+import { supabase, getSupabaseWithToken } from "@/lib/supabaseClient";
+
+// Linhas 180-225: loadData (useCallback com dependência [userId])
+const loadData = useCallback(async () => {
+  if (!userId) return;
+  try {
+    const db = await getDb();
+
+    // DISCIPLINAS — RxDB local
+    const disciplinesResult = await db.disciplines.find({
+      selector: { user_id: userId, isDeleted: { $ne: true } }   // <-- $ne: true pega false + NULL
+    }).exec();
+    setDisciplinas(disciplinesResult.map((doc: any) => doc.toJSON()));
+
+    // TÓPICOS — RxDB local
+    const topicsResult = await db.topics.find({
+      selector: { user_id: userId, isDeleted: { $ne: true } }   // <-- $ne: true pega false + NULL
+    }).exec();
+    const topicsData = topicsResult.map((doc: any) => doc.toJSON());
+    // ... normalização de order, sync com Supabase, etc.
+    setTopicos(topicsData);
+    // ...
+  } catch (error) {
+    console.error('Erro ao carregar dados do RxDB:', error);
+  }
+}, [userId]);
+```
+
+**Diferenças-chave:**
+| Aspecto | ContentTreeSelector | conteudo.tsx |
+|---------|---------------------|--------------|
+| **Fonte de dados** | Supabase direto (`getDisciplines`/`getTopics` do `supabaseClient.ts`) | RxDB local (`db.disciplines.find`, `db.topics.find`) |
+| **Cliente Supabase** | `supabase` (ANON, sem token) | `getSupabaseWithToken()` (autenticado) — só para sync/escrita |
+| **Filtro isdeleted** | `.neq('isdeleted', true)` no Supabase | `{ isDeleted: { $ne: true } }` no RxDB (camelCase) |
+| **Autenticação** | Query roda com ANON key; RLS pode bloquear | Lê do cache local (offline-first), sync em background |
+| **userId** | Recebido via prop (obrigatório) | Obtido do Clerk + localStorage, armazenado em state |
+
+---
+
+## 3. CÓDIGO REAL — supabaseClient.ts (getDisciplines / getTopics ATUAIS)
+
+```typescript
+// Linhas 175-193: getDisciplines
+export const getDisciplines = async (userId: string) => {
+  try {
+    const { data, error } = await supabase   // <-- CLIENTE ANON (linha 13)
+      .from('disciplines')
+      .select('*')
+      .eq('user_id', userId)
+      .neq('isdeleted', true)                // <-- CORRETO (fix aplicado)
+      .order('createdAt', { ascending: true }); // <-- CORRETO (fix aplicado)
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (error: any) {
+    console.error('Erro ao buscar disciplinas:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Linhas 223-241: getTopics
+export const getTopics = async (disciplineId: string) => {
+  try {
+    const { data, error } = await supabase   // <-- CLIENTE ANON
+      .from('topics')
+      .select('*')
+      .eq('discipline_id', disciplineId)
+      .neq('isdeleted', true)                // <-- CORRETO
+      .order('createdAt', { ascending: true }); // <-- CORRETO
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (error: any) {
+    console.error('Erro ao buscar tópicos:', error);
+    return { success: false, error: error.message };
+  }
+};
+```
+
+> **Observação crítica:** Ambas as funções usam `supabase` (constante exportada na linha 13), que é o **cliente ANON** criado sem autenticação:
+> ```typescript
+> export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+> ```
+> As tabelas `disciplines` e `topics` têm **RLS habilitado** (políticas `user_id = auth.uid()`). O cliente ANON **não tem `auth.uid()`**, logo a query retorna **vazio** (sem erro, apenas 0 linhas) — comportamento esperado do Postgres RLS.
+
+---
+
+## 4. VERIFICAÇÃO — index.ts do study-plan
+
+```typescript
+// src/components/study-plan/index.ts
+export { ContentTreeSelector } from "./ContentTreeSelector";
+// ... outros exports
+```
+> **Confirmado:** O `ContentTreeSelector` exportado é **exatamente o arquivo lido em 2.1**.
+
+---
+
+## 5. CLASSIFICAÇÃO DAS HIPÓTESES
+
+| Hipótese | Classificação | Evidência (1 linha) |
+|----------|---------------|---------------------|
+| **H1. Seletor lê do RxDB local (`db.disciplines.find`) em vez de `getDisciplines` do Supabase** | **REJEITADA** | Linhas 4-5 e 41-42: `import { getDisciplines, getTopics } from "@/lib/supabaseClient"` + `await getDisciplines(userId)` |
+| **H2. Seletor usa uma função wrapper diferente (ex: `useDisciplines` hook) que tem filtro próprio** | **REJEITADA** | Não existe hook `useDisciplines` no arquivo; `loadData` chama `getDisciplines`/`getTopics` diretamente |
+| **H3. Seletor filtra por `isDeleted` (camelCase) no RxDB, excluindo NULL** | **REJEITADA** | Seletor **não usa RxDB**; usa Supabase com `.neq('isdeleted', true)` (snake_case, correto) |
+| **H4. Seletor recebe `userId` undefined/null e a query retorna vazio** | **INCONCLUSIVA** | `loadData` tem `if (!userId) return;` (linha 38) — se `userId` for undefined, loading fica `true` eternamente e empty state não aparece; **precisa confirmar se prop chega** |
+| **H5. Seletor tem `useEffect` com dependência que nunca satisfaz (ex: `userId` só chega depois)** | **INCONCLUSIVA** | `useEffect` depende de `[loadData]` que depende de `[userId]` — se `userId` mudar de undefined → string, roda; **precisa confirmar timing do prop** |
+| **H6. Seletor está em estado de loading eterno (spinner não aparece, mas dados não carregam)** | **INCONCLUSIVA** | Loading renderiza `<Loader2 />` (linhas 178-183); empty state só aparece quando `loading === false && disciplines.length === 0` — **precisa confirmar se loading resolve** |
+
+---
+
+## 6. HIPÓTESE ADICIONAL IDENTIFICADA (CAUSA RAIZ PROVÁVEL)
+
+| Hipótese | Classificação | Evidência |
+|----------|---------------|-----------|
+| **H7. `getDisciplines`/`getTopics` usam cliente ANON (sem token) → RLS bloqueia → retorna array vazio sem erro** | **CONFIRMADA** | `supabaseClient.ts` linhas 13, 178, 226: `const supabase = createClient(...)` (ANON) usado em `getDisciplines`/`getTopics`; tabelas têm RLS `user_id = auth.uid()`; ANON key não tem `auth.uid()` |
+
+> **Por que conteudo.tsx funciona:** Lê do **RxDB local** (offline-first), que já sincronizou os dados via `getSupabaseWithToken()` (autenticado) em background. O seletor **ignora o cache local** e vai direto ao Supabase com credenciais insuficientes.
+
+---
+
+## 7. CAUSA RAIZ (1 linha)
+
+> **O ContentTreeSelector usa `getDisciplines`/`getTopics` do `supabaseClient.ts`, que executam queries no cliente ANON (sem token Clerk); as tabelas `disciplines`/`topics` têm RLS ativo exigindo `auth.uid()`, então a query retorna 0 linhas sem erro, disparando o empty state "Nenhuma disciplina cadastrada".**
+
+---
+
+## 8. CORREÇÃO PROPOSTA (sem implementar)
+
+**Opção A — Mínima (recomendada):** Alterar `getDisciplines` e `getTopics` em `supabaseClient.ts` para usar `getSupabaseWithToken()` (cliente autenticado) em vez do cliente ANON.
+
+```typescript
+// Em getDisciplines:
+const client = await getSupabaseWithToken();  // substitui `supabase`
+const { data, error } = await client.from('disciplines')...
+```
+
+**Opção B — Arquitetural (alinhada com conteudo.tsx):** Fazer o seletor ler do **RxDB local** (`db.disciplines.find` + `db.topics.find`) igual ao `conteudo.tsx`, garantindo offline-first e consistência.
+
+> **Nota:** Opção A é mais simples e mantém o padrão atual do seletor (server-driven). Opção B exige mais mudanças mas alinha com a arquitetura offline-first do app.
+
+---
+
+## 9. ARQUIVOS ENVOLVIDOS NA CORREÇÃO
+
+| Arquivo | Mudança |
+|---------|---------|
+| `src/lib/supabaseClient.ts` | `getDisciplines` e `getTopics`: trocar `supabase` por `await getSupabaseWithToken()` + try/catch para erro de auth |
+| *(Opcional)* `src/components/study-plan/ContentTreeSelector.tsx` | Se Opção B: reescrever `loadData` para usar `getDb()` + RxDB selectors |
+
+---
+
+**Fim do relatório.** Aguardando prompt de correção da arquiteta.

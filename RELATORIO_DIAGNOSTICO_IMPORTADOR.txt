@@ -1,0 +1,241 @@
+# RELATÓRIO DE DIAGNÓSTICO — IMPORTADOR DE CRONOGRAMA
+**Data:** 22/11/2026  
+**Fase:** 1 — Diagnóstico (somente leitura)
+
+---
+
+## 1. ESTRUTURA DO STUDYPLANHUB.TSX
+
+**Arquivo:** `src/components/study-plan/StudyPlanHub.tsx` (1024 linhas)
+
+### 1.1 Abas (TABS) — linha 167-178
+```typescript
+const TABS: TabConfig[] = [
+  { id: "visao", label: "Visão geral", icon: <BarChart2 className="h-4 w-4" /> },
+  { id: "rotina", label: "Rotina semanal", icon: <Calendar className="h-4 w-4" /> },
+  { id: "temas", label: "Cronograma de temas", icon: <Target className="h-4 w-4" /> },
+  { id: "biblioteca", label: "Biblioteca de atividades", icon: <Home className="h-4 w-4" /> },
+  { id: "excecoes", label: "Exceções da semana", icon: <CalendarDays className="h-4 w-4" /> },
+];
+```
+
+### 1.2 Renderização das abas — linha 966-988
+```tsx
+<div className="border-b border-border mb-4 flex gap-1" role="tablist">
+  {TABS.map((tab) => (
+    <button
+      key={tab.id}
+      onClick={() => setActiveTab(tab.id)}
+      role="tab"
+      aria-selected={activeTab === tab.id}
+      className={`... ${activeTab === tab.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+    >
+      {tab.icon}
+      {tab.label}
+    </button>
+  ))}
+</div>
+```
+
+### 1.3 Aba "Visão geral" (id="visao") — função `renderVisaoGeral()` (linhas 484-735)
+- **Toolbar de navegação** (semana/mês, botões anterior/hoje/próximo)
+- **3 cards de estatísticas da semana**: Horas planejadas, Total ocorrências, Temas ativos
+- **4 cards de Aderência (FASE 4 - M2)**: Planejadas (azul), Efetivas (verde), Aderência% (cores dinâmicas), Dias c/ atividade (roxo)
+- **Faixa de pausa ativa** (ETAPA 7) ou botão "Pausar plano"
+- **Grade semanal** (7 colunas × 3 turnos) ou visão mensal
+- **Estado vazio** com botão "Montar a minha semana" → navega para aba "rotina"
+- **Temas ativos da semana** (chips clicáveis)
+
+### 1.4 Local ideal para botão "Importar cronograma"
+**Linha 568-577** — Logo após os 4 cards de Aderência e antes da faixa de pausa/grade:
+```tsx
+{/* Aderência: 4 cards */}
+<div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">...</div>
+
+{/* ← AQUI: Inserir linha de ações rápidas */}
+<div className="mb-4 flex gap-2">
+  <button onClick={abrirImportador} className="btn-ghost flex items-center gap-2">
+    <FileSpreadsheet className="h-4 w-4" /> Importar cronograma
+  </button>
+</div>
+
+{/* Faixa de pausa ativa / botão Pausar */}
+{activePause ? (...) : (...)}
+```
+
+---
+
+## 2. STUDYPLANSERVICE.TS — FUNÇÕES CREATE* EXISTENTES
+
+**Arquivo:** `src/services/studyPlanService.ts` (1418 linhas)
+
+### 2.1 Funções de criação (assinaturas exatas)
+
+| Função | Parâmetros | Retorno | Enqueue |
+|--------|------------|---------|---------|
+| `createStudyTask(data: Omit<StudyTask, 'id' \| 'user_id' \| 'created_at' \| 'updated_at' \| 'isDeleted'>)` | `name, activity_type, color, theme_rule, default_duration_min` | `Promise<StudyTask>` | `enqueueOperation('create', 'study_tasks', task)` |
+| `createStudyThemeTimeline(data: Omit<StudyThemeTimeline, 'id' \| 'user_id' \| 'created_at' \| 'updated_at' \| 'isDeleted'>)` | `period_type, period_start, themes, topic_ids?` | `Promise<StudyThemeTimeline>` | `enqueueOperation('create', 'study_theme_timelines', timeline)` |
+| `upsertStudyThemeTimeline(data: Omit<...>)` | Mesmo acima, faz upsert por `period_type + period_start` | `Promise<StudyThemeTimeline>` | `enqueueOperation('update' \| 'create', ...)` |
+| `createStudyWeeklyBlock(data: Omit<StudyWeeklyBlock, 'id' \| 'user_id' \| 'created_at' \| 'updated_at' \| 'isDeleted'>)` | `task_id, weekday, start_time, end_time, effective_from, effective_until?` | `Promise<StudyWeeklyBlock>` | `enqueueOperation('create', 'study_weekly_blocks', block)` |
+| `createStudyExtraEvent(data: Omit<StudyExtraEvent, 'id' \| 'user_id' \| 'created_at' \| 'updated_at' \| 'isDeleted'>)` | `task_id, weekdays[], start_time, end_time, week_starts[]` | `Promise<StudyExtraEvent>` | `enqueueOperation('create', 'study_extra_events', event)` |
+
+### 2.2 Padrão de upsert idempotente
+- **StudyThemeTimeline**: `upsertStudyThemeTimeline` busca por `user_id + period_type + period_start + isDeleted !== true`
+- **StudyTask**: **NÃO existe** busca por nome. Será necessário criar `findStudyTaskByName` ou `upsertStudyTaskByName`
+- **StudyWeeklyBlock**: Upsert por `task_id + weekday + start_time + effective_from` (não existe função pronta)
+- **StudyExtraEvent**: Não tem upsert (cria direto)
+
+### 2.3 Helpers existentes
+- `getCurrentUserId()` → lê `localStorage.getItem('revisaflash_user_id')`
+- `assertUserId()` → lança erro se não autenticado
+- `nowISO()` → `new Date().toISOString()`
+- `uid()` (importado de `@/utils/helpers`) → gera ID único
+
+---
+
+## 3. TYPES/STUDY-PLAN.TS — INTERFACES E CONSTANTES
+
+**Arquivo:** `src/types/study-plan.ts`
+
+### 3.1 Interfaces principais (campos exatos)
+
+```typescript
+// StudyTask (Camada 2 - Biblioteca)
+interface StudyTask {
+  id: string;
+  user_id: string;
+  name: string;
+  activity_type: ActivityType; // 'theory' | 'questions' | 'review' | 'cards' | 'exam' | 'break' | 'other'
+  color: string; // hex
+  theme_rule: ThemeRule; // 'period' | 'all' | 'none'
+  default_duration_min: number;
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+
+// StudyThemeTimeline (Camada 1 - Linha do Tempo)
+interface StudyThemeTimeline {
+  id: string;
+  user_id: string;
+  period_type: PeriodType; // 'month' | 'week'
+  period_start: string; // ISO date
+  themes: string[]; // nomes dos temas
+  topic_ids?: string[]; // UUIDs dos tópicos (integração Conteúdos)
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+
+// StudyWeeklyBlock (Camada 3 - Padrão Semanal)
+interface StudyWeeklyBlock {
+  id: string;
+  user_id: string;
+  task_id: string;
+  weekday: Weekday; // 0=Dom..6=Sáb
+  start_time: string; // HH:MM
+  end_time: string; // HH:MM
+  effective_from: string; // ISO date
+  effective_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+
+// StudyExtraEvent (Camada 4 - Exceções)
+interface StudyExtraEvent {
+  id: string;
+  user_id: string;
+  task_id: string;
+  weekdays: Weekday[];
+  start_time: string;
+  end_time: string;
+  week_starts: string[]; // ISO dates
+  created_at: string;
+  updated_at: string;
+  isDeleted?: boolean;
+}
+```
+
+### 3.2 Constantes úteis
+```typescript
+export const WEEKDAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+export const WEEKDAY_NAMES_FULL = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+export const ACTIVITY_TYPE_LABELS = { theory: 'Teoria', questions: 'Questões', review: 'Revisão', cards: 'Flashcards', exam: 'Simulado', break: 'Pausa', other: 'Outro' };
+export const ACTIVITY_TYPE_DEFAULT_COLORS = { theory: '#3B82F6', questions: '#EF4444', review: '#8B5CF6', cards: '#F59E0B', exam: '#EC4899', break: '#6B7280', other: '#14B8A6' };
+```
+
+---
+
+## 4. PACKAGE.JSON — BIBLIOTECA XLSX
+
+**Status:** ✅ **JÁ EXISTE**  
+**Versão:** `"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"`  
+**Tipo:** Client-side (funciona no browser)  
+**Build:** Não quebra o build (já está no projeto)
+
+**Observação:** A versão é a 0.20.3 (via CDN SheetJS). Funciona para leitura de `.xlsx` e `.xls`.
+
+---
+
+## 5. PASTA PUBLIC/ — ARQUIVOS ESTÁTICOS
+
+**Caminho real:** `C:\Users\vande\revisa-flash\public\`
+
+**Conteúdo atual:**
+```
+public/
+├── icons/                 # Favicons e app icons
+├── splash/                # Splash screens PWA
+├── manifest.json          # PWA manifest
+├── sw.js                  # Service Worker
+└── Modelo_Plano_Estudos.xlsx  # Template existente (simples, 1 aba "Plano")
+```
+
+**Vite config:** O `vite.config.ts` serve `/public` automaticamente (padrão Vite). Arquivos em `public/` ficam disponíveis na raiz do site (ex: `/Modelo_Plano_Estudos.xlsx`).
+
+**Template existente (`Modelo_Plano_Estudos.xlsx`):**
+- 1 aba: "Plano"
+- Colunas: Semana, Segunda, Terça, Quarta, Quinta, Sexta, Sábado, Domingo
+- 11 linhas de exemplo (Semana 1 a 11)
+- **Não atende** ao novo requisito (3 abas: Rotina, Temas, Tarefas)
+
+---
+
+## 6. RISCOS IDENTIFICADOS
+
+| Risco | Probabilidade | Impacto | Mitigação |
+|-------|---------------|---------|-----------|
+| **Rate limit Supabase** em importação em massa (muitas operações create) | Média | Alto | Usar `bulkCreateStudyOccurrences` padrão; para tasks/timelines/blocks, agrupar em lotes de 50-100; adicionar delay entre lotes |
+| **Duplicatas** se usuário importar 2x o mesmo Excel | Alta | Médio | Implementar upsert idempotente por chave de negócio (nome da task, period_type+period_start, task_id+weekday+start_time) |
+| **Tópicos não encontrados** (case-sensitive, espaços) | Alta | Baixo | Match case-insensitive + trim; fallback para texto livre com warning no preview |
+| **Template Excel corrompido / abas faltando** | Baixa | Médio | Validação rigorosa no parser: checar abas obrigatórias, cabeçalhos esperados |
+| **Conflito de colunas camelCase vs snake_case** | Baixa | Alto | **REGRA DE OURO**: Usar exatamente os nomes do schema RxDB (snake_case: `user_id`, `created_at`, `activity_type`, etc.) |
+| **Weekday inconsistente** (0=Dom no código, exibição Seg→Dom) | Média | Alto | Converter "Segunda"→1, "Domingo"→0 no parser; validar range 0-6 |
+
+---
+
+## 7. RECOMENDAÇÃO FINAL
+
+### Seguir o plano original com ajustes:
+
+1. **Fase 1** ✅ Concluída — Diagnóstico confirmado
+2. **Fase 2** — Criar novo template `cronograma-template.xlsx` em `public/templates/` (não sobrescrever o existente)
+3. **Fase 3** — Parser em `src/services/cronogramaImporter.ts` com:
+   - Novas funções de upsert idempotente no `studyPlanService.ts` (ADICIONAR, não modificar existentes):
+     - `findStudyTaskByName(userId, name)` 
+     - `upsertStudyTaskByName(data)`
+     - `upsertStudyWeeklyBlock(data)` por `task_id+weekday+start_time+effective_from`
+4. **Fase 4** — Modal em `src/components/study-plan/CronogramaImportModal.tsx` + botão na aba "Visão geral"
+5. **Fase 5** — Testes Vitest em `src/services/cronogramaImporter.test.ts`
+
+### Decisões técnicas confirmadas:
+- ✅ `xlsx` já instalado (v0.20.3 via CDN)
+- ✅ `public/` servido corretamente pelo Vite
+- ✅ Colunas snake_case confirmadas nos schemas RxDB
+- ✅ Weekday: 0=Domingo, exibição visual Seg→Dom
+- ✅ Não tocar em arquivos protegidos (calendario.tsx, aulas.tsx, conteudo.tsx, Clerk, WeeklyGridEditor, ContentTreeSelector, db.ts, generateWeekSchedule.ts, studyPlanService.ts — apenas ADICIONAR funções)
+
+---
+
+**PRÓXIMO PASSO:** Aguardar aprovação para iniciar **Fase 2** (Template Excel + Prompt IA).

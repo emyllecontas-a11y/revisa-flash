@@ -22,7 +22,9 @@ import {
   X,
   TrendingUp,
   Target as TargetIcon,
+  Upload,
 } from "lucide-react";
+import { CronogramaImportModal } from "./CronogramaImportModal";
 import { useToast } from "@/hooks/useToast";
 import { useWeekSchedule } from "@/hooks/useWeekSchedule";
 import { studyPlanService, type OccurrenceStatus, type StudyStatistics } from "@/services/studyPlanService";
@@ -43,14 +45,12 @@ import "./study-plan.css";
  */
 function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState(false);
-
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
-
   return isMobile;
 }
 
@@ -94,7 +94,6 @@ function getMonthWeeks(year: number, month: number): Date[] {
   const firstDay = new Date(year, month, 1);
   let weekStart = getWeekStart(firstDay);
   const lastDay = new Date(year, month + 1, 0);
-
   while (weekStart <= lastDay) {
     weeks.push(new Date(weekStart));
     weekStart = new Date(weekStart);
@@ -127,6 +126,7 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
   const toast = useToast();
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState<TabName>("visao");
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [weekStart, setWeekStart] = useState<string>(() => {
     const today = new Date();
     return getWeekStart(today).toISOString().split("T")[0];
@@ -190,8 +190,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
   const todayDate = new Date(todayStr + "T12:00:00");
   todayDate.setHours(0, 0, 0, 0);
 
-  // todayStr para uso no render (evita recálculo)
-  const todayStrForRender = todayStr;
   const activePause = useMemo(() => {
     return pauses.find((p) => {
       const start = new Date(p.start_date + "T00:00:00");
@@ -261,7 +259,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
     let totalMinutes = 0;
     let totalEvents = 0;
     const themesSet = new Set<string>();
-
     weekSchedule.days.forEach((day) => {
       [...day.morning, ...day.afternoon, ...day.evening].forEach((event) => {
         const [sh, sm] = event.startTime.split(":").map(Number);
@@ -274,7 +271,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
         if (event.theme) themesSet.add(event.theme);
       });
     });
-
     return {
       totalHours: Math.round((totalMinutes / 60) * 10) / 10,
       totalEvents,
@@ -285,7 +281,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
   // ============================================================
   // HANDLERS DE PAUSA (ETAPA 7)
   // ============================================================
-
   const handleOpenPauseModal = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -453,6 +448,25 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
             </div>
           </div>
 
+          {/* Botão Importar cronograma */}
+          <div className="flex gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => setImportModalOpen(true)}
+              className="rf-button inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Importar cronograma
+            </button>
+          </div>
+          {importModalOpen && (
+            <CronogramaImportModal
+              userId={userId}
+              isOpen={importModalOpen}
+              onClose={() => setImportModalOpen(false)}
+            />
+          )}
+
           {/* Aderência: Horas planejadas vs Efetivas (FASE 4 - M2) */}
           <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="rf-card p-3 text-center">
@@ -524,7 +538,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                 date.setDate(date.getDate() + dayIdx);
                 const isToday = date.toISOString().split("T")[0] === todayStr;
                 const dayNumber = date.getDate();
-
                 return (
                   <div
                     key={dayIdx}
@@ -584,7 +597,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                           const isDone = event.status === "done";
                           const isMissed = event.status === "missed";
                           const isOverdue = event.date < todayStr && event.status === "pending";
-
                           return (
                             <div
                               key={eventIdx}
@@ -615,7 +627,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                                     <Square className="h-4 w-4 text-white/70 hover:text-white" />
                                   )}
                                 </button>
-
                                 <div className={`font-semibold text-xs leading-tight flex-1 truncate ${isDone ? "line-through opacity-90" : ""}`}>
                                   {event.taskName}
                                 </div>
@@ -710,7 +721,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
     } else {
       // Visão Mês
       const monthWeeks = getMonthWeeks(monthViewDate.getFullYear(), monthViewDate.getMonth());
-
       return (
         <div className="study-plan-scope">
           {/* Toolbar de navegação do mês */}
@@ -815,16 +825,13 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
             <div className="grid grid-cols-7">
               {monthWeeks.map((weekStartDate, weekIdx) => {
                 const weekStartStr = weekStartDate.toISOString().split("T")[0];
-
                 return WEEKDAY_NAMES.map((_, dayIdx) => {
                   const cellDate = new Date(weekStartDate);
                   cellDate.setDate(cellDate.getDate() + dayIdx);
                   const cellDateStr = cellDate.toISOString().split("T")[0];
                   const isCurrentMonth = cellDate.getMonth() === monthViewDate.getMonth();
                   const isToday = cellDateStr === todayStr;
-
                   const isCurrentWeek = weekStartStr === weekSchedule?.weekStart;
-
                   let events: StudyPlanEvent[] = [];
                   if (isCurrentWeek && weekSchedule) {
                     const day = weekSchedule.days[dayIdx];
@@ -832,7 +839,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                       events = [...day.morning, ...day.afternoon, ...day.evening];
                     }
                   }
-
                   return (
                     <div
                       key={`${weekIdx}-${dayIdx}`}
@@ -948,7 +954,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                 <X className="h-5 w-5" />
               </button>
             </div>
-
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -962,7 +967,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm focus:ring-1 focus:ring-primary focus:outline-none"
                 />
               </div>
-
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Fim da pausa
@@ -975,7 +979,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm focus:ring-1 focus:ring-primary focus:outline-none"
                 />
               </div>
-
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Motivo (opcional)
@@ -988,7 +991,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm focus:ring-1 focus:ring-primary focus:outline-none"
                 />
               </div>
-
               <div className="p-3 rounded bg-muted/50 border border-border/50 text-sm text-muted-foreground">
                 <p className="font-medium mb-1">Como funciona a pausa:</p>
                 <ul className="list-disc list-inside space-y-1 text-xs">
@@ -1000,7 +1002,6 @@ export function StudyPlanHub({ userId }: StudyPlanHubProps) {
                 </ul>
               </div>
             </div>
-
             <div className="flex justify-end gap-2 mt-6">
               <button
                 onClick={() => setIsPauseModalOpen(false)}

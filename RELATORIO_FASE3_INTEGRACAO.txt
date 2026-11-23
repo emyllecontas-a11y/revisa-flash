@@ -1,0 +1,57 @@
+FASE 3 - INTEGRAÇÃO DO MODAL À LÓGICA CONCLUÍDA
+=================================================
+
+Arquivo modificado: src/components/study-plan/CronogramaImportModal.tsx (NOVO - era arquivo do Lovable com placeholders)
+
+Mudanças implementadas:
+-----------------------
+
+1. **Imports adicionados:**
+   - `parseCronogramaExcel`, `validateCronograma`, `buildImportPreview`, `ValidationResult`, `ImportPreview` de `@/services/cronogramaImporter`
+   - `upsertStudyTaskByName`, `upsertStudyWeeklyBlock`, `upsertStudyThemeTimeline` de `@/services/studyPlanService`
+   - `Loader2` de lucide-react (para spinner durante processamento)
+
+2. **Estados novos:**
+   - `validatedData` (ValidationResult | null) - resultado da validação
+   - `preview` (ImportPreview | null) - preview para exibição
+   - `isProcessing` (boolean) - loading state
+
+3. **Prop userId:** Agora usa o `userId` real (não mais `_userId` ignorado)
+
+4. **handleValidate():**
+   - Chama `parseCronogramaExcel(file)`
+   - Se `parsed.errors` tem itens → toast.error e para
+   - Senão chama `validateCronograma(parsed, userId)` → guarda em `validatedData`
+   - Chama `buildImportPreview(validated)` → guarda em `preview`
+   - Toast.success
+
+5. **handleImport():**
+   - Itera `validatedData.tasks` → `upsertStudyTaskByName` (converte duration_min → default_duration_min)
+   - Itera `validatedData.timelines` → `upsertStudyThemeTimeline` (topic_ids via `topicMatches`)
+   - Itera `validatedData.blocks`:
+     - Cria/acha task correspondente via `upsertStudyTaskByName` (nome = "Tipo - Disciplina")
+     - Cria bloco semanal via `upsertStudyWeeklyBlock` (weekday real, start/end_time HH:MM, effective_from = hoje)
+   - Soma ações (created/updated/skipped) → toast.success com contagens
+   - Fecha modal
+
+6. **Botões conectados:**
+   - "Validar" (Etapa 2) → `handleValidate` (disabled se !file || isProcessing)
+   - "Importar tudo" (Etapa 3) → `handleImport` (disabled se isProcessing)
+
+7. **Etapa 3 (Preview) com dados reais:**
+   - Cards mostram `preview.taskCount`, `preview.timelineCount`, `preview.blockCount`
+   - Warning de tópicos não encontrados: `preview.topicMissCount`
+   - Warnings reais do parser/validador: `preview.warnings`
+   - Fallback para placeholders X/Y/Z se preview ainda não carregado
+
+8. **Layout/visual:** Mantido idêntico ao original; apenas lógica conectada
+
+Conteúdo completo do arquivo (novo):
+-----------------------------------
+(veja src/components/study-plan/CronogramaImportModal.tsx)
+
+Verificação:
+- ✅ Nenhum arquivo protegido tocado
+- ✅ Usa apenas funções/imports existentes
+- ✅ Fase 2 upserts reutilizados
+- ✅ Parser/validador/preview da Fase 1 usados
