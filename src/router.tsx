@@ -20,6 +20,9 @@ import TesteParser from './routes/teste-parser';
 import PdfPage from './routes/pdf.$fileId';
 import Sessoes from './routes/sessoes';
 import Aulas from './routes/aulas';
+import { DisciplinasGrid } from './components/aulas-redesign/DisciplinasGrid';
+import { TopicosLista } from './components/aulas-redesign/TopicosLista';
+import { AulaDetalhe } from './components/aulas-redesign/AulaDetalhe';
 // 🔥 NOVA: tela única que junta "Compartilhado comigo" + "Amizades"
 import Comunidade from './routes/comunidade';
 
@@ -168,6 +171,12 @@ export const router = createBrowserRouter([
         <Aulas />
       </ClerkProtectedRoute>
     ),
+    // Novo visual de Aulas: 3 telas dentro da mesma moldura (src/routes/aulas.tsx)
+    children: [
+      { index: true, element: <DisciplinasGrid /> },
+      { path: ':disciplinaId', element: <TopicosLista /> },
+      { path: ':disciplinaId/:aulaId', element: <AulaDetalhe /> },
+    ],
   },
   // 🔥 NOVA ROTA UNIFICADA
   {
