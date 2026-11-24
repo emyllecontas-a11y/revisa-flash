@@ -133,6 +133,21 @@ function AppShellInner({
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 🔧 Helper para obter "now" com suporte a ?fakeNow=... em DEV
+  const getNow = () => {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      const fakeNow = params.get('fakeNow');
+      if (fakeNow) {
+        const parsed = new Date(fakeNow);
+        if (!isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+    return new Date();
+  };
+
   useEffect(() => {
     const loadProfile = async () => {
       if (!user?.id) return;
@@ -243,7 +258,7 @@ function AppShellInner({
     // Após sync (mesmo se falhou), gerar caderno semanal de erros sobre dados locais
     if (userId) {
       try {
-        const result = await generateWeeklyErrorNotebookIfNeeded(userId);
+        const result = await generateWeeklyErrorNotebookIfNeeded(userId, getNow());
         if (result.created) {
           // Toast com ação para abrir o caderno
           toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
@@ -292,7 +307,7 @@ function AppShellInner({
       // Gerar caderno semanal de erros ao voltar para a aba (dados locais)
       if (user?.id) {
         try {
-          const result = await generateWeeklyErrorNotebookIfNeeded(user.id);
+          const result = await generateWeeklyErrorNotebookIfNeeded(user.id, getNow());
           if (result.created) {
             toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
               action: {
@@ -317,7 +332,7 @@ function AppShellInner({
       // Gerar caderno semanal de erros ao reconectar
       if (user?.id) {
         try {
-          const result = await generateWeeklyErrorNotebookIfNeeded(user.id);
+          const result = await generateWeeklyErrorNotebookIfNeeded(user.id, getNow());
           if (result.created) {
             toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
               action: {

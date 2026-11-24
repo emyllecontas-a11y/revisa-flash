@@ -95,13 +95,14 @@ export async function generateWeeklyErrorNotebookIfNeeded(
       // e) Nome do caderno: "Caderno de Erros: DD/MM a DD/MM" (segunda a sexta)
       const nome = `Caderno de Erros: ${formatDDMM(weekStart)} a ${formatDDMM(weekEnd)}`;
 
-      // f) IDs determinísticos para os vínculos
-      const linkIdFn = async (cId: string, qId: string) => generateCadernoQuestaoLinkId(cId, qId);
-
-      // g) Criar caderno com ID fixo
-      const resultado = await criarCadernoComIdFixo(userId, cadernoId, nome, questaoIdsUnicos, async (cId, qId) => {
-        return generateCadernoQuestaoLinkId(cId, qId);
-      });
+      // g) Criar caderno com ID fixo (IDs dos vínculos derivados de cadernoId:questaoId)
+      const resultado = await criarCadernoComIdFixo(
+        userId, 
+        cadernoId, 
+        nome, 
+        questaoIdsUnicos, 
+        (cId, qId) => `${cId}:${qId}`
+      );
 
       if (!resultado.success) {
         // Se falhou por erro inesperado, propagar

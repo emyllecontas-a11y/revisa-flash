@@ -181,7 +181,7 @@ export function getLastClosedWeek(now: Date = new Date()): { weekStart: Date; we
   // Verificar se o "sábado 06:00" da semana atual já passou
   let saturdayPassed = false;
   if (day === 6) { // Sábado
-    saturdayPassed = hour > 6 || (hour === 6 && (minute > 0 || second > 0 || ms > 0));
+    saturdayPassed = hour >= 6; // Às 06:00:00 exatas, já passou
   } else if (day === 0) { // Domingo
     saturdayPassed = true; // Sábado 06:00 já passou
   } else {
