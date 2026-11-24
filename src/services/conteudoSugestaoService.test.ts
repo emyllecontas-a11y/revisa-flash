@@ -5,9 +5,13 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizarNome,
   calcularConteudoNovo,
+  montarEntradasDaTaxonomia,
   EntradaConteudo,
   DisciplinaExistente,
   TopicoExistente,
+  SelecaoTaxonomia,
+  TaxonomiaDisciplina,
+  TaxonomiaMateria,
 } from './conteudoSugestaoService';
 
 describe('conteudoSugestaoService', () => {
@@ -186,6 +190,139 @@ describe('conteudoSugestaoService', () => {
       const result = calcularConteudoNovo(entradas, disciplinasExistentes, topicosExistentes);
 
       expect(result.disciplinasNovas).toEqual(['Zootecnia', 'Fisiologia']);
+    });
+  });
+
+  describe('montarEntradasDaTaxonomia', () => {
+    // Taxonomia de teste
+    const taxonomia: TaxonomiaDisciplina[] = [
+      {
+        disciplina: 'Area1',
+        materias: [
+          { nome: 'Materia A', topicos: [{ nome: 'Topico A1', subtopicos: [] }, { nome: 'Topico A2', subtopicos: [] }] },
+          { nome: 'Materia B', topicos: [{ nome: 'Topico B1', subtopicos: [] }] },
+          { nome: 'Materia Sem Topicos', topicos: [] },
+        ],
+      },
+      {
+        disciplina: 'Area2',
+        materias: [
+          { nome: 'Materia A', topicos: [{ nome: 'Topico A1', subtopicos: [] }, { nome: 'Topico A3', subtopicos: [] }] }, // mesma matéria, tópicos diferentes
+          { nome: 'Materia C', topicos: [] },
+        ],
+      },
+    ];
+
+    it('matéria sem tópicos marcados gera só a disciplina', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [{ area: 'Area1', nome: 'Materia Sem Topicos' }],
+        topicos: [],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      expect(result).toEqual([{ disciplina: 'Materia Sem Topicos' }]);
+    });
+
+    it('matéria com tópicos marcados gera disciplina + tópicos', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [{ area: 'Area1', nome: 'Materia A' }],
+        topicos: [
+          { area: 'Area1', materia: 'Materia A', nome: 'Topico A1' },
+          { area: 'Area1', materia: 'Materia A', nome: 'Topico A2' },
+        ],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      expect(result).toEqual([
+        { disciplina: 'Materia A', topico: 'Topico A1' },
+        { disciplina: 'Materia A', topico: 'Topico A2' },
+      ]);
+    });
+
+    it('mesma matéria duplicada em duas áreas é deduplicada', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [
+          { area: 'Area1', nome: 'Materia A' },
+          { area: 'Area2', nome: 'Materia A' }, // mesma matéria, área diferente
+        ],
+        topicos: [
+          { area: 'Area1', materia: 'Materia A', nome: 'Topico A1' },
+          { area: 'Area2', materia: 'Materia A', nome: 'Topico A3' },
+        ],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      // Deve aparecer uma vez, com todos os tópicos únicos
+      expect(result).toEqual([
+        { disciplina: 'Materia A', topico: 'Topico A1' },
+        { disciplina: 'Materia A', topico: 'Topico A3' },
+      ]);
+    });
+
+    it('acentos e maiúsculas não duplicam', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [
+          { area: 'Area1', nome: 'MATERIA A' },
+          { area: 'Area1', nome: 'matéria a' }, // mesmo nome, case/acento diferente
+        ],
+        topicos: [
+          { area: 'Area1', materia: 'MATERIA A', nome: 'TOPICO A1' },
+          { area: 'Area1', materia: 'matéria a', nome: 'tópico a1' }, // mesmo tópico
+        ],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      expect(result).toEqual([
+        { disciplina: 'Materia A', topico: 'Topico A1' },
+      ]);
+    });
+
+    it('múltiplas matérias com e sem tópicos', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [
+          { area: 'Area1', nome: 'Materia A' },
+          { area: 'Area1', nome: 'Materia B' },
+          { area: 'Area1', nome: 'Materia Sem Topicos' },
+        ],
+        topicos: [
+          { area: 'Area1', materia: 'Materia A', nome: 'Topico A1' },
+          { area: 'Area1', materia: 'Materia B', nome: 'Topico B1' },
+        ],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      expect(result).toEqual([
+        { disciplina: 'Materia A', topico: 'Topico A1' },
+        { disciplina: 'Materia B', topico: 'Topico B1' },
+        { disciplina: 'Materia Sem Topicos' },
+      ]);
+    });
+
+    it('tópicos de matérias não selecionadas são ignorados', () => {
+      const selecao: SelecaoTaxonomia = {
+        areas: [],
+        materias: [{ area: 'Area1', nome: 'Materia A' }],
+        topicos: [
+          { area: 'Area1', materia: 'Materia A', nome: 'Topico A1' },
+          { area: 'Area1', materia: 'Materia B', nome: 'Topico B1' }, // Materia B não está selecionada
+        ],
+      };
+
+      const result = montarEntradasDaTaxonomia(selecao, taxonomia);
+
+      expect(result).toEqual([
+        { disciplina: 'Materia A', topico: 'Topico A1' },
+      ]);
     });
   });
 });

@@ -6,6 +6,7 @@ import { getSupabaseWithToken } from '@/lib/supabaseClient';
 import { enqueueOperation } from '@/services/queueService';
 import { uid } from '@/utils/helpers';
 import { STATUS_TOPICO } from '@/constants';
+import type { TaxonomiaDisciplina } from './taxonomiaService';
 
 // ============================================================
 // TIPOS
@@ -172,6 +173,112 @@ export async function carregarConteudoExistente(userId: string): Promise<{
 
   return { disciplinas, topicos };
 }
+
+// ============================================================
+// MONTAR ENTRADAS DA TAXONOMIA (FUNÇÃO PURA)
+// ============================================================
+
+export interface SelecaoTaxonomia {
+  areas: string[]; // nomes das áreas marcadas (ex.: "Odontologia", "Português")
+  materias: Array<{ area: string; nome: string }>; // matérias marcadas
+  topicos: Array<{ area: string; materia: string; nome: string }>; // tópicos marcados
+}
+
+/**
+ * Converte a seleção da taxonomia (áreas, matérias, tópicos) para o formato
+ * EntradaConteudo[] que calcularConteudoNovo/criarConteudoSelecionado esperam.
+ * - Matéria sem tópico marcado gera só a disciplina.
+ * - Deduplica por nome normalizado: mesma matéria em áreas diferentes vira UMA disciplina,
+ *   com a UNIÃO dos tópicos marcados (sem repetir tópico por nome normalizado).
+ * - A grafia mantida é a da PRIMEIRA ocorrência na taxonomia (ordem das áreas/matérias/tópicos).
+ * - Ordem: disciplinas e tópicos na ordem da primeira aparição na seleção.
+ * - Subtópicos são ignorados nesta versão.
+ */
+export function montarEntradasDaTaxonomia(
+  selecao: SelecaoTaxonomia,
+  taxonomia: TaxonomiaDisciplina[]
+): EntradaConteudo[] {
+  // 1. Construir mapas canônicos a partir da taxonomia (fonte da verdade para grafia)
+  // normMateria -> { nomeCanonico: string, topicos: Map<normTopico, nomeCanonicoTopico> }
+  // A grafia da matéria vem da PRIMEIRA ocorrência; os tópicos são a UNIÃO de todas as ocorrências.
+  const mapaMateriasCanonicas = new Map<string, { nomeCanonico: string; topicos: Map<string, string> }>();
+
+  for (const area of taxonomia) {
+    for (const materia of area.materias) {
+      const normMateria = normalizarNome(materia.nome);
+      const entrada = mapaMateriasCanonicas.get(normMateria);
+      if (!entrada) {
+        // Primeira ocorrência: define grafia canônica e inicia mapa de tópicos
+        const topicosMap = new Map<string, string>();
+        for (const topico of materia.topicos) {
+          const normTopico = normalizarNome(topico.nome);
+          if (!topicosMap.has(normTopico)) {
+            topicosMap.set(normTopico, topico.nome);
+          }
+        }
+        mapaMateriasCanonicas.set(normMateria, { nomeCanonico: materia.nome, topicos: topicosMap });
+      } else {
+        // Ocorrências seguintes: mesclar tópicos (união), mantendo grafia canônica original
+        for (const topico of materia.topicos) {
+          const normTopico = normalizarNome(topico.nome);
+          if (!entrada.topicos.has(normTopico)) {
+            entrada.topicos.set(normTopico, topico.nome);
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Agrupar tópicos da seleção por matéria normalizada (independente da área)
+  // normMateria -> Set<normTopico> (mantém ordem de primeira aparição na seleção)
+  const topicosSelecionadosPorMateria = new Map<string, Array<{ normTopico: string; ordem: number }>>();
+  let ordemTopico = 0;
+  for (const topicoSel of selecao.topicos) {
+    const normMateria = normalizarNome(topicoSel.materia);
+    const normTopico = normalizarNome(topicoSel.nome);
+    if (!topicosSelecionadosPorMateria.has(normMateria)) {
+      topicosSelecionadosPorMateria.set(normMateria, []);
+    }
+    const arr = topicosSelecionadosPorMateria.get(normMateria)!;
+    // Evitar duplicados por normTopico (manter o primeiro)
+    if (!arr.some(t => t.normTopico === normTopico)) {
+      arr.push({ normTopico, ordem: ordemTopico++ });
+    }
+  }
+
+  // 3. Processar matérias da seleção em ordem, deduplicando por normMateria
+  const entradas: EntradaConteudo[] = [];
+  const materiasVistas = new Set<string>();
+
+  for (const { area: _areaNome, nome: materiaNomeSel } of selecao.materias) {
+    const normMateria = normalizarNome(materiaNomeSel);
+    if (materiasVistas.has(normMateria)) continue;
+    materiasVistas.add(normMateria);
+
+    // Obter grafia canônica da taxonomia
+    const canonica = mapaMateriasCanonicas.get(normMateria);
+    const nomeDisciplina = canonica?.nomeCanonico ?? materiaNomeSel;
+
+    // Obter tópicos selecionados para esta matéria (já deduplicados e ordenados)
+    const topicosSel = topicosSelecionadosPorMateria.get(normMateria) ?? [];
+
+    if (topicosSel.length === 0) {
+      // Matéria sem tópicos marcados -> só a disciplina
+      entradas.push({ disciplina: nomeDisciplina });
+    } else {
+      // Matéria com tópicos -> disciplina + cada tópico (grafia canônica da taxonomia)
+      for (const { normTopico } of topicosSel) {
+        const nomeTopicoCanonico = canonica?.topicos.get(normTopico) ?? normTopico;
+        entradas.push({ disciplina: nomeDisciplina, topico: nomeTopicoCanonico });
+      }
+    }
+  }
+
+  return entradas;
+}
+
+// Tipos da taxonomia (reexportados para o modal)
+export type { TaxonomiaDisciplina, TaxonomiaMateria, TaxonomiaTopico } from './taxonomiaService';
 
 // ============================================================
 // CRIAR CONTEÚDO SELECIONADO

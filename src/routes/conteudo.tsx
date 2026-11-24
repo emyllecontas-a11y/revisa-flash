@@ -23,6 +23,7 @@ import { SubtopicoCard } from "@/components/SubtopicoCard";
 import { CompartilharModal } from "@/components/compartilhar-modal";
 import type { ShareItemType } from "@/services/shareService";
 import { FicharioCard, FicharioGrid, FicharioAberto, type TopicStatus } from "@/components/FicharioConteudo";
+import { ListaPadraoConteudoModal } from "@/components/ListaPadraoConteudoModal";
 
 interface Disciplina {
   id: string;
@@ -92,6 +93,7 @@ export default function ConteudoPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAddTopicModalOpen, setIsAddTopicModalOpen] = useState(false);
+  const [isListaPadraoModalOpen, setIsListaPadraoModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -1015,13 +1017,21 @@ export default function ConteudoPage() {
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
-              data-tour="conteudo-criar"
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-            >
-              <Plus className="h-3.5 w-3.5" /> Nova disciplina
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
+                data-tour="conteudo-criar"
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+              >
+                <Plus className="h-3.5 w-3.5" /> Nova disciplina
+              </button>
+              <button
+                onClick={() => { setIsListaPadraoModalOpen(true); setErrorMessage(""); }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground/65 hover:bg-surface-2 hover:border-primary transition-colors"
+              >
+                <Layers className="h-3.5 w-3.5" /> Adicionar da lista padrão
+              </button>
+            </div>
           </div>
 
           {disciplinasFiltradas.length > 0 ? (
@@ -1044,9 +1054,31 @@ export default function ConteudoPage() {
             </FicharioGrid>
           ) : (
             <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
-              <p className="text-sm text-foreground/40">
-                {busca ? "Nenhuma disciplina encontrada para esta busca." : "Nenhuma disciplina criada. Clique em 'Nova disciplina' para começar."}
-              </p>
+              {busca ? (
+                <p className="text-sm text-foreground/40">
+                  Nenhuma disciplina encontrada para esta busca.
+                </p>
+              ) : disciplinas.length === 0 ? (
+                <div className="w-full max-w-md text-center p-6">
+                  <div className="rounded-2xl border-2 border-primary/30 bg-primary/10 p-6">
+                    <Sparkles className="h-10 w-10 mx-auto text-primary mb-3" />
+                    <h4 className="text-lg font-semibold text-foreground mb-2">Comece pela lista padrão</h4>
+                    <p className="text-sm text-foreground/60 mb-4">
+                      Temos 7 áreas e mais de 100 matérias prontas. Escolha o que precisa e adicione de uma vez.
+                    </p>
+                    <button
+                      onClick={() => { setIsListaPadraoModalOpen(true); setErrorMessage(""); }}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                      <Layers className="h-4 w-4" /> Adicionar da lista padrão
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-foreground/40">
+                  Nenhuma disciplina criada. Clique em 'Nova disciplina' para começar.
+                </p>
+              )}
             </div>
           )}
         </AppShell>
@@ -1197,6 +1229,15 @@ export default function ConteudoPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {isListaPadraoModalOpen && (
+          <ListaPadraoConteudoModal
+            isOpen={isListaPadraoModalOpen}
+            onClose={() => setIsListaPadraoModalOpen(false)}
+            userId={userId!}
+            onSuccess={loadData}
+          />
         )}
       </>
     );
