@@ -1,0 +1,90 @@
+# RELATÓRIO DA ETAPA: FILTRO_NAO_REPETIR
+
+## Arquivos Alterados
+1. **src/services/bancoQuestoesService.ts** - Adicionada função `getQuestaoIdsFeitas(userId)`
+2. **src/components/BancoQuestoesTab.tsx** - Implementado filtro "Ocultar questões já feitas"
+
+---
+
+## Decisões Tomadas
+
+### 1. Definição de "Já Feita"
+Uma questão é considerada "já feita" se tem **ao menos uma tentativa registrada em `banco_tentativas`** para o usuário atual (`user_id` + `questao_banco_id`), com `isdeleted: false`.
+
+### 2. Fontes Consideradas (que gravam em `banco_tentativas`)
+| Fluxo / Componente | Grava em `banco_tentativas`? | Contexto (`contexto`) |
+|---------------------|------------------------------|------------------------|
+| **BancoPlayerInline** (prática inline no banco) | ✅ Sim | `'avulso'` |
+| **PlayerLivreModal** (modal "Praticar" do banco) | ✅ Sim | `'avulso'` |
+| **CadernoDetalhesModal → PlayerLivreModal** (praticar caderno) | ✅ Sim | `'avulso'` |
+| **CadernoRevisao** (revisão de caderno - NÃO pratica, só visualiza) | ❌ Não | — |
+| **SimuladoPlayerPage** (rota `/simulados/:id`) | ❌ Não | Usa coleção própria `resultados_simulado` + `progresso_simulado` |
+| **ListasTab → Player** (fixação via listas) | ❌ Não | Usa coleção própria `resultados_lista` + `progresso_lista` |
+| **Caderno de Erros** (envio de erros) | ❌ Não | Apenas cria flashcards/entradas de erro |
+
+**Conclusão:** Apenas os fluxos de **prática livre do banco de questões** (BancoPlayerInline, PlayerLivreModal, e prática de caderno via PlayerLivreModal) gravam em `banco_tentativas`. Simulados, Listas de Fixação e Cadernos de Erros usam coleções próprias e **não** são contabilizados — o que está alinhado ao requisito "contando apenas questões realmente respondidas (não as meramente adicionadas a uma lista)".
+
+---
+
+## Implementação
+
+### Novo Serviço (`bancoQuestoesService.ts`)
+```typescript
+export async function getQuestaoIdsFeitas(userId: string): Promise<{
+  success: boolean;
+  data?: Set<string>;
+  error?: string;
+}>
+```
+- Busca `banco_tentativas` filtrando por `user_id` e `isdeleted: false`
+- Retorna `Set<string>` com `questao_banco_id` únicos
+- Usa RxDB local (funciona offline)
+
+### Componente (`BancoQuestoesTab.tsx`)
+**Estados adicionados:**
+- `ocultarFeitas` (boolean) — toggle do filtro, default `false`
+- `feitasLoading` (boolean) — loading da busca dos IDs
+- `questoesFeitasIds` (Set<string>) — cache reativo dos IDs
+
+**Efeitos:**
+1. Carrega IDs ao montar (se `ocultarFeitas=true`) ou quando usuário muda
+2. Reset `paginaAtual=1` quando `ocultarFeitas` muda
+
+**Filtro aplicado no `useMemo filtradas`:**
+```typescript
+if (ocultarFeitas && questoesFeitasIds.has(q.id)) return false;
+```
+
+**UI:**
+- Toggle "Ocultar questões já feitas" ao lado dos chips de Tipo
+- Badge discreto "X ocultas" ao lado do toggle quando ativo
+- Texto auxiliar no rodapé dos filtros: "N de M questões encontradas (X ocultas)"
+- Loading global enquanto `feitasLoading=true` (não pisca a lista)
+
+**Contagens e Paginação:**
+- `filtradas.length`, `totalPaginas`, `filtradasPaginadas` já refletem o filtro automaticamente
+- Botões "Selecionar todas" e paginação operam sobre o conjunto já filtrado
+
+---
+
+## Pendências / Observações
+1. **Persistência da preferência:** O requisito diz "Persistir a preferência do mesmo jeito que os outros filtros persistem (se não persistem, não persista)". Os outros filtros (disciplina, matéria, banca, ano, tipo, busca) **não persistem** entre sessões (são estado local React). Portanto, `ocultarFeitas` também **não persiste** — reseta para `false` ao recarregar a aba.
+
+2. **Atualização reativa:** O `useEffect` recarrega os IDs quando `ocultarFeitas` vira `true` ou quando `user.id` muda. Se o usuário responder uma questão enquanto o filtro está ligado, a lista **não** atualiza automaticamente (o `questoesFeitasIds` não escuta mudanças em `banco_tentativas`). Para atualizar, o usuário pode desligar/ligar o toggle ou trocar de aba e voltar. Isso é consistente com o comportamento dos outros filtros (que não são reativos a mudanças externas).
+
+3. **Performance:** O Set é construído **uma única vez** por ativação do filtro (ou mudança de usuário), nunca por questão. A busca usa índice RxDB implícito em `user_id`.
+
+---
+
+## O Que Testar Manualmente
+1. Abrir `/simulados?tab=banco` (BancoQuestoesTab)
+2. Verificar que o toggle "Ocultar questões já feitas" aparece ao lado de "Tipo:"
+3. Com toggle **desligado** (default): todas as questões aparecem
+4. Praticar algumas questões (via "Praticar" ou inline)
+5. Ligar o toggle → questões praticadas devem desaparecer da lista
+6. Contagem "X de Y questões encontradas (Z ocultas)" deve atualizar
+7. Paginação deve recalcular (páginas a menos se houver ocultas)
+8. Desligar toggle → questões reaparecem
+9. Mudar de aba (Fixação/Simulados) e voltar → toggle volta para OFF (sem persistência)
+10. Offline: desligar rede, praticar uma questão, ligar toggle → deve funcionar (dados vêm do RxDB local)
+11. Loading: ao ligar toggle pela 1ª vez, deve aparecer spinner global (não lista piscando)

@@ -47,6 +47,98 @@ export const uid = (): string => {
 };
 
 // ============================================================
+// 🔐 UUID DETERMINÍSTICO (v5-like usando SHA-1)
+// ============================================================
+
+/**
+ * Gera um UUID determinístico (v5-like) a partir de um namespace e nome.
+ * Usa crypto.subtle.digest('SHA-1') para criar um hash consistente.
+ * O resultado é formatado como UUID v5 (versão 5, variant RFC4122).
+ *
+ * @param namespace UUID do namespace (ex: '6ba7b810-9dad-11d1-80b4-00c04fd430c8' para DNS)
+ * @param name String que identifica o recurso de forma única (ex: 'weekly-errors:user123:2024-11-25')
+ * @returns UUID v5-like determinístico
+ */
+export async function deterministicUuid(namespace: string, name: string): Promise<string> {
+  // Converter namespace UUID para bytes
+  const namespaceBytes = uuidToBytes(namespace);
+  // Converter name para bytes (UTF-8)
+  const nameBytes = new TextEncoder().encode(name);
+
+  // Concatenar namespace + name
+  const combined = new Uint8Array(namespaceBytes.length + nameBytes.length);
+  combined.set(namespaceBytes);
+  combined.set(nameBytes, namespaceBytes.length);
+
+  // Calcular SHA-1
+  const hashBuffer = await crypto.subtle.digest('SHA-1', combined);
+  const hashBytes = new Uint8Array(hashBuffer);
+
+  // Pegar primeiros 16 bytes (128 bits) e formatar como UUID v5
+  const uuidBytes = hashBytes.slice(0, 16);
+
+  // Definir versão (5) no byte 6 (bits 4-7)
+  uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x50;
+  // Definir variant (RFC4122) no byte 8 (bits 6-7)
+  uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
+
+  // Converter para string UUID
+  const hex = '0123456789abcdef';
+  let uuid = '';
+  for (let i = 0; i < 16; i++) {
+    if (i === 4 || i === 6 || i === 8 || i === 10) {
+      uuid += '-';
+    }
+    uuid += hex[uuidBytes[i] >> 4];
+    uuid += hex[uuidBytes[i] & 0x0f];
+  }
+  return uuid;
+}
+
+/**
+ * Converte UUID string para array de 16 bytes.
+ */
+function uuidToBytes(uuid: string): Uint8Array {
+  const clean = uuid.replace(/-/g, '');
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Gera ID determinístico para o caderno semanal de erros.
+ * Namespace fixo para "weekly-errors" + userId + weekStart.
+ *
+ * @param userId ID do usuário (Clerk sub)
+ * @param weekStartStr Data da segunda-feira em 'YYYY-MM-DD' (fuso local)
+ * @returns UUID v5-like determinístico
+ */
+export async function generateWeeklyErrorNotebookId(userId: string, weekStartStr: string): Promise<string> {
+  // Namespace UUID v5 fixo para "weekly-errors" (gerado uma vez, fixo)
+  // Este UUID foi gerado aleatoriamente para servir como namespace fixo
+  const NAMESPACE_WEEKLY_ERRORS = '6ba7b810-9dad-5ea1-80b4-00c04fd430c8'; // versão 5, variante RFC4122
+  const name = `weekly-errors:${userId}:${weekStartStr}`;
+  return deterministicUuid(NAMESPACE_WEEKLY_ERRORS, name);
+}
+
+/**
+ * Gera ID determinístico para o vínculo caderno_questoes.
+ * Derivado de `${cadernoId}:${questaoId}`.
+ *
+ * @param cadernoId ID do caderno
+ * @param questaoId ID da questão
+ * @returns UUID v5-like determinístico
+ */
+export async function generateCadernoQuestaoLinkId(cadernoId: string, questaoId: string): Promise<string> {
+  // Namespace fixo para vínculos de caderno
+  const NAMESPACE_CADERNO_QUESTAO = '6ba7b811-9dad-5ea1-80b4-00c04fd430c8';
+  const name = `${cadernoId}:${questaoId}`;
+  return deterministicUuid(NAMESPACE_CADERNO_QUESTAO, name);
+}
+
+// ============================================================
 // 🧹 SANITIZAÇÃO DE DADOS
 // ============================================================
 

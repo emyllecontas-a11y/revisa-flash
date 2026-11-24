@@ -6,6 +6,7 @@ import {
   getQuestoesDoBanco,
   getEstatisticasBanco,
   limparDuplicatasLocais,
+  getQuestaoIdsFeitas,
   type QuestaoBanco,
 } from "@/services/bancoQuestoesService";
 import {
@@ -101,6 +102,22 @@ export function BancoQuestoesTab() {
   const [paginaAtual, setPaginaAtual] = useState(1);
   const itensPorPagina = 100;
 
+  // Filtro "Ocultar questões já feitas"
+  const [ocultarFeitas, setOcultarFeitas] = useState(false);
+  const [feitasLoading, setFeitasLoading] = useState(false);
+  const [questoesFeitasIds, setQuestoesFeitasIds] = useState<Set<string>>(new Set());
+
+  // Listener para atualizar cadernos quando houver mudança externa (ex.: caderno semanal de erros)
+  useEffect(() => {
+    const handleCadernosUpdated = () => {
+      if (user?.id) {
+        load();
+      }
+    };
+    window.addEventListener('cadernos-updated', handleCadernosUpdated);
+    return () => window.removeEventListener('cadernos-updated', handleCadernosUpdated);
+  }, [user?.id, load]);
+
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
@@ -127,6 +144,29 @@ export function BancoQuestoesTab() {
   }, [user?.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Carrega IDs de questões já feitas (para o filtro "Ocultar questões já feitas")
+  useEffect(() => {
+    if (!user?.id || !ocultarFeitas) {
+      if (!ocultarFeitas) setQuestoesFeitasIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    setFeitasLoading(true);
+    getQuestaoIdsFeitas(user.id).then((res) => {
+      if (!cancelled) {
+        if (res.success && res.data) setQuestoesFeitasIds(res.data);
+        else setQuestoesFeitasIds(new Set());
+        setFeitasLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [user?.id, ocultarFeitas]);
+
+  // Reset para página 1 quando o filtro "Ocultar feitas" muda
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [ocultarFeitas]);
 
   useEffect(() => {
     setSelecionadas(new Set());
@@ -255,9 +295,11 @@ export function BancoQuestoesTab() {
         const hay = [q.enunciado, q.assunto, q.subassunto, q.cargo, q.concurso].filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(termo)) return false;
       }
+      // Filtro "Ocultar questões já feitas"
+      if (ocultarFeitas && questoesFeitasIds.has(q.id)) return false;
       return true;
     });
-  }, [todasQuestoes, fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
+  }, [todasQuestoes, fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca, ocultarFeitas, questoesFeitasIds]);
 
   const totalPaginas = Math.ceil(filtradas.length / itensPorPagina);
   const filtradasPaginadas = useMemo(() => {
@@ -284,7 +326,8 @@ export function BancoQuestoesTab() {
     return partes.join(" · ") || "Todas as questões";
   }, [fDisciplina, fMateria, fAssunto, fBanca, fAno, fTipo, busca]);
 
-  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  // Mostra loading enquanto carrega as questões OU enquanto carrega o set de "feitas" (se o filtro está ligado)
+  if (loading || (ocultarFeitas && feitasLoading)) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (error) return <div className="rf-card p-6 text-center"><p className="text-accent">{error}</p><button onClick={load} className="mt-4 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground">Tentar novamente</button></div>;
 
   return (
@@ -376,10 +419,40 @@ export function BancoQuestoesTab() {
               <Chip active={fTipo === "certo_errado"} onClick={() => setFTipo("certo_errado")}>Certo / Errado</Chip>
             </div>
 
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setOcultarFeitas(!ocultarFeitas)}
+                disabled={feitasLoading}
+                className={[
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                  ocultarFeitas
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-surface text-foreground/65 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                ].join(" ")}
+              >
+                <CheckCircle2 className={["h-3 w-3", ocultarFeitas ? "text-primary-foreground" : "text-foreground/40"].join(" ")} />
+                Ocultar questões já feitas
+              </button>
+              {feitasLoading && (
+                <Loader2 className="h-3 w-3 animate-spin text-foreground/40" />
+              )}
+              {ocultarFeitas && questoesFeitasIds.size > 0 && filtradas.length < todasQuestoes.length && (
+                <span className="text-xs text-foreground/45">
+                  {todasQuestoes.length - filtradas.length} ocultas
+                </span>
+              )}
+            </div>
+
             <hr className="border-border/60" />
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
-              <span className="text-foreground/55 font-medium">{filtradas.length} de {todasQuestoes.length} questões encontradas</span>
+              <span className="text-foreground/55 font-medium">
+                {filtradas.length} de {todasQuestoes.length} questões encontradas
+                {ocultarFeitas && questoesFeitasIds.size > 0 && filtradas.length < todasQuestoes.length && (
+                  <span className="ml-2 text-foreground/45">({todasQuestoes.length - filtradas.length} ocultas)</span>
+                )}
+              </span>
               <div className="flex items-center gap-3">
                 {filtradas.length > 0 && (<button onClick={selecionarTodasFiltradas} className="text-primary hover:underline">Selecionar todas</button>)}
                 {temFiltroAtivo && (<button onClick={limparFiltros} className="inline-flex items-center gap-1 text-foreground/55 hover:text-foreground"><X className="h-3 w-3" /> Limpar filtros</button>)}

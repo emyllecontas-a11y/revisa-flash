@@ -267,7 +267,7 @@ export async function limparDuplicatasLocais(userId: string): Promise<void> {
   try {
     const db = await getDb();
     const docs = await db.banco_questoes.find({ selector: { isdeleted: false } }).exec();
-    
+
     const vistos = new Set<string>();
     for (const doc of docs) {
       const hash = doc.get('hash_dedup');
@@ -283,6 +283,28 @@ export async function limparDuplicatasLocais(userId: string): Promise<void> {
     }
   } catch (e) {
     console.error('[bancoQuestoes] Erro ao limpar duplicatas:', e);
+  }
+}
+
+/**
+ * Retorna o Set com IDs de questões que o usuário já tentou (tem registro em banco_tentativas).
+ * Usado pelo filtro "Ocultar questões já feitas" no BancoQuestoesTab.
+ * Busca apenas questões não deletadas (isdeleted: false).
+ */
+export async function getQuestaoIdsFeitas(userId: string): Promise<{ success: boolean; data?: Set<string>; error?: string }> {
+  if (!userId) return { success: false, error: 'Usuário não autenticado.' };
+  try {
+    const db = await getDb();
+    const docs = await db.banco_tentativas.find({ selector: { user_id: userId, isdeleted: false } }).exec();
+    const ids = new Set<string>();
+    for (const doc of docs) {
+      const questaoId = doc.get('questao_banco_id');
+      if (questaoId) ids.add(questaoId);
+    }
+    return { success: true, data: ids };
+  } catch (e: any) {
+    console.error('[bancoQuestoes] Erro ao buscar IDs de questões feitas:', e);
+    return { success: false, error: e?.message || 'Erro ao buscar questões feitas.' };
   }
 }
 

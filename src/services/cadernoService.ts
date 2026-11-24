@@ -162,6 +162,76 @@ export async function criarCaderno(userId: string, nome: string, pastaId: string
   }
 }
 
+/**
+ * Cria um caderno com ID fixo (determinístico).
+ * Mesma lógica de criarCaderno, mas usa o ID fornecido.
+ * Trata conflito de chave primária (documento já existe) como "já criado", sem erro.
+ *
+ * @param userId ID do usuário
+ * @param cadernoId ID determinístico do caderno (já calculado externamente)
+ * @param nome Nome do caderno
+ * @param questoesIds Array de IDs das questões do banco
+ * @param linkIdFn Função opcional para gerar IDs determinísticos dos vínculos (caderno_questoes).
+ *                 Recebe (cadernoId, questaoId) e retorna string. Se não fornecida, usa crypto.randomUUID().
+ * @returns { success: boolean; error?: string; alreadyExists?: boolean }
+ */
+export async function criarCadernoComIdFixo(
+  userId: string,
+  cadernoId: string,
+  nome: string,
+  questoesIds: string[],
+  linkIdFn?: (cadernoId: string, questaoId: string) => string
+): Promise<{ success: boolean; error?: string; alreadyExists?: boolean }> {
+  if (!nome.trim()) return { success: false, error: 'O nome do caderno é obrigatório.' };
+  if (questoesIds.length === 0) return { success: false, error: 'Selecione pelo menos uma questão.' };
+
+  try {
+    const db = await getDb();
+    const agora = nowIso();
+
+    // Tenta inserir o caderno. Se já existe (mesmo isdeleted=true), trata como "já criado".
+    const existingCaderno = await db.cadernos.findOne({ selector: { id: cadernoId } }).exec();
+    if (existingCaderno) {
+      return { success: true, alreadyExists: true };
+    }
+
+    const novoCaderno = {
+      id: cadernoId,
+      user_id: userId,
+      nome: nome.trim(),
+      descricao: null,
+      pasta_id: null,
+      created_at: agora,
+      updated_at: agora,
+      isdeleted: false
+    };
+    await db.cadernos.insert(novoCaderno);
+    await enqueueOperation('create', 'cadernos', novoCaderno);
+
+    // Insere os vínculos caderno_questoes com IDs determinísticos se linkIdFn fornecida
+    for (let i = 0; i < questoesIds.length; i++) {
+      const questaoId = questoesIds[i];
+      const linkId = linkIdFn ? linkIdFn(cadernoId, questaoId) : crypto.randomUUID();
+      const link = {
+        id: linkId,
+        caderno_id: cadernoId,
+        questao_banco_id: questaoId,
+        ordem: i,
+        created_at: agora
+      };
+      await db.caderno_questoes.insert(link);
+      await enqueueOperation('create', 'caderno_questoes', link);
+    }
+    return { success: true, alreadyExists: false };
+  } catch (e: any) {
+    // Se o erro for de chave duplicada (race condition), trata como já existente
+    if (e?.name === 'RxDBError' && e?.message?.includes('conflict') || e?.message?.includes('duplicate') || e?.message?.includes('primary')) {
+      return { success: true, alreadyExists: true };
+    }
+    return { success: false, error: e?.message || 'Erro ao criar caderno com ID fixo.' };
+  }
+}
+
 export async function atualizarCaderno(userId: string, id: string, dados: { nome: string; pasta_id: string | null }): Promise<{ success: boolean; error?: string }> {
   try {
     const db = await getDb();

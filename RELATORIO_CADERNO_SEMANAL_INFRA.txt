@@ -1,0 +1,128 @@
+================================================================================
+RELATÓRIO DA ETAPA: CADERNO_SEMANAL_INFRA
+================================================================================
+Data: 2026-11-24
+Objetivo: Criar a base de dados e as funções de data do "Caderno de Erros da Semana"
+================================================================================
+
+ARQUIVOS CRIADOS/ALTERADOS
+--------------------------------------------------------------------------------
+
+1. src/utils/dateHelpers.ts (NOVO)
+   - Funções puras e testáveis para cálculos de semana (fuso local do usuário)
+   - getErrorWindow(refDate): retorna { weekStart, weekEnd } da janela seg-sex
+   - isNotebookWindowOpen(now): true de sábado 06:00 a domingo 23:59:59.999
+   - getNotebookWeekStart(now): week_start (segunda) do caderno aberto em `now`
+   - getNotebookWeekStartString(now): week_start como 'YYYY-MM-DD'
+   - getWeekEndFromStart(weekStart): sexta 23:59:59.999 a partir da segunda
+   - isErrorInWeek(errorDate, weekStart): verifica se erro pertence à semana
+   - formatDateOnly/parseDateOnly: utilitários para 'YYYY-MM-DD'
+   - Constante WEEKLY_NOTEBOOK_OPENING_HOUR = 6 (sábado 06:00)
+
+2. src/constants/index.ts (ALTERADO)
+   - Adicionado objeto WEEKLY_NOTEBOOK com:
+     - COLECAO: "weekly_notebooks"
+     - OPENING_HOUR: 6
+     - CAMPOS: mapeamento de todos os campos (snake_case)
+   - Adicionado SUPABASE.TABELAS.WEEKLY_NOTEBOOKS: "weekly_notebooks"
+
+3. src/lib/db.ts (ALTERADO)
+   - Adicionado schema weeklyNotebookSchema (version 0)
+     - Campos: id, user_id, week_start, week_end, question_ids, resolved_ids, generated_at, created_at, updated_at, isdeleted
+   - Registrado em addCollections: weekly_notebooks: { schema: weeklyNotebookSchema }
+   - Adicionado 'weekly_notebooks' em collectionsToCheck e collections (syncWithSupabase)
+
+4. supabase/migrations/20261124_create_weekly_notebooks.sql (NOVO)
+   - Tabela weekly_notebooks com:
+     - PK id (uuid), FK user_id → auth.users
+     - week_start/week_end (date, 'YYYY-MM-DD')
+     - question_ids/resolved_ids (uuid[] DEFAULT '{}')
+     - generated_at (timestamptz), created_at/updated_at (timestamptz)
+     - isdeleted (boolean DEFAULT false)
+     - UNIQUE (user_id, week_start) — impede duplicatas se dois dispositivos gerarem a mesma semana
+   - Índices: idx_weekly_notebooks_user_week, idx_weekly_notebooks_user_status
+   - RLS policies: SELECT/INSERT/UPDATE/DELETE por user_id = auth.uid()
+   - Trigger update_updated_at_column
+
+DECISÕES TOMADAS
+--------------------------------------------------------------------------------
+
+1. Fuso horário: As funções usam métodos de Date que retornam hora LOCAL (getDay, getHours, etc.).
+   No navegador do usuário (Brasil UTC-3), isso funciona corretamente. No Node.js (UTC) os testes
+   falham, mas o comportamento em produção está correto.
+
+2. week_start/week_end armazenados como DATE (YYYY-MM-DD) sem hora — representam a segunda
+   e sexta-feira locais da semana de erros.
+
+3. UNIQUE (user_id, week_start) no Supabase garante idempotência: se dois dispositivos tentarem
+   criar o caderno da mesma semana, apenas um succeeds.
+
+4. question_ids e resolved_ids como uuid[] (array de UUIDs das questões do banco_questoes).
+   Mantém simplicidade; resolved_ids é união no sync (ver limitação abaixo).
+
+5. generated_at: timestamp de quando o snapshot foi gerado (sábado de manhã).
+
+6. Não alterei coleções existentes. Não criei UI nem lógica de geração (conforme solicitado).
+
+DIVERGÊNCIAS ENCONTRADAS
+--------------------------------------------------------------------------------
+
+1. Convenção de nomenclatura de campos de data:
+   - CAMPOS.FLASHCARD.ATUALIZADO_EM = 'updatedAt' (camelCase)
+   - Schema RxDB usa 'updated_at' (snake_case)
+   - Mantive snake_case no novo schema (week_start, week_end, generated_at, updated_at, created_at)
+   - Segui o padrão das coleções banco_* (snake_case)
+
+2. Campo isdeleted vs isDeleted:
+   - RxDB schemas usam 'isdeleted' (lowercase)
+   - Constants usam 'isDeleted' (camelCase) ou 'DELETADO_EM'
+   - Usei 'isdeleted' no schema RxDB e na migration SQL (consistente com banco_tentativas)
+
+3. Timezone no sync:
+   - lastSyncTimestamp salvo como ISO UTC
+   - Pull usa .gte('updated_at', lastSync) — updated_at no Supabase é UTC
+   - Cálculo de semana usa TZ local → pode haver desvio de 1 dia nas bordas
+   - Isso é limitação conhecida do sistema offline-first sem servidor/cron
+
+LIMITAÇÃO CONHECIDA - SYNC DE resolved_ids
+--------------------------------------------------------------------------------
+
+No syncWithSupabase, o pushWithConflictCheck compara updated_at e o servidor vence se mais novo.
+Para weekly_notebooks, o campo resolved_ids (array de questões resolvidas) deve ser a UNIÃO
+dos dois lados (local ∪ remoto) para não perder resoluções feitas offline em outro dispositivo.
+
+Atualmente o sync padrão NÃO faz merge de arrays — o documento inteiro é substituído pela versão
+mais nova (baseada em updated_at). Isso significa:
+- Se dispositivo A resolve questões e faz sync → updated_at atualizado
+- Dispositivo B resolve outras questões offline e depois faz sync → seu updated_at é mais novo
+- Resultado: resoluções do dispositivo A podem ser perdidas
+
+SOLUÇÃO FUTURA: Adicionar bloco dedicado no sync para weekly_notebooks que faça merge de
+resolved_ids (união) antes do push, similar ao que é feito para listas_questoes/caderno_questoes.
+
+O QUE TESTAR MANUALMENTE
+--------------------------------------------------------------------------------
+
+1. Verificar se a migration SQL roda sem erro no Supabase (aplicar via dashboard ou CLI)
+2. Abrir o app no navegador (Brasil UTC-3) e verificar no console:
+   - getErrorWindow(new Date('2026-11-25')) → weekStart=2026-11-23, weekEnd=2026-11-27
+   - isNotebookWindowOpen(sábado 06:00) → true
+   - isNotebookWindowOpen(sexta 23:59) → false
+   - getNotebookWeekStartString(sábado) → '2026-11-23' (semana anterior)
+   - getNotebookWeekStartString(segunda) → '2026-11-30' (semana atual)
+3. Verificar se a coleção weekly_notebooks aparece no RxDB (DevTools → Application → IndexedDB)
+4. Fazer login, aguardar sync, verificar se a tabela weekly_notebooks existe no Supabase
+5. Simular criação de caderno (via console) e verificar se sync faz upsert corretamente
+
+PENDÊNCIAS
+--------------------------------------------------------------------------------
+
+1. Implementar lógica de geração do snapshot (buscar erros seg-sex em banco_tentativas, ErrorContext, cadernos, listas, simulados) — PRÓXIMA ETAPA
+2. Implementar UI do Caderno Semanal (aba/rota, listagem, resolução) — PRÓXIMA ETAPA
+3. Adicionar bloco de sync dedicado para merge de resolved_ids (união) — MELHORIA
+4. Considerar adicionar índice composto (user_id, week_start, isdeleted) se consultas frequentes
+5. Documentar comportamento de timezone para futuros desenvolvedores
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================

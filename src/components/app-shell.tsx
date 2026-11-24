@@ -16,6 +16,7 @@ import { useStudy } from "@/contexts/StudyContext";
 import { UnaVoxLogo } from "@/components/UnaVoxLogo";
 import { syncWithSupabase, readLastSync } from "@/lib/db";
 import { processPendingOperations } from "@/services/queueService";
+import { generateWeeklyErrorNotebookIfNeeded } from "@/services/weeklyErrorNotebookService";
 import { useErrors } from '@/contexts/ErrorContext';
 import { Toaster } from "@/components/ui/sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -238,7 +239,31 @@ function AppShellInner({
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy, toast, user?.id]);
+
+    // Após sync (mesmo se falhou), gerar caderno semanal de erros sobre dados locais
+    if (userId) {
+      try {
+        const result = await generateWeeklyErrorNotebookIfNeeded(userId);
+        if (result.created) {
+          // Toast com ação para abrir o caderno
+          toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
+            action: {
+              label: 'Abrir',
+              onClick: () => {
+                // Disparar evento para atualizar lista de cadernos
+                window.dispatchEvent(new CustomEvent('cadernos-updated'));
+                navigate('/simulados'); // Aba "Questões" onde está a lista de cadernos
+              },
+            },
+          });
+          // Disparar refresh da lista de cadernos
+          window.dispatchEvent(new CustomEvent('cadernos-updated'));
+        }
+      } catch (err) {
+        console.warn('⚠️ [AppShell] Erro ao gerar caderno semanal de erros:', err);
+      }
+    }
+  }, [isSyncing, refreshFlashcards, refreshErrors, refreshStudy, toast, user?.id, navigate]);
 
   useEffect(() => {
     if (!isLoaded || flashcardsLoading) return;
@@ -259,16 +284,56 @@ function AppShellInner({
       document.visibilityState === 'visible' &&
       !(typeof navigator !== 'undefined' && navigator.onLine === false);
 
-    const aoVoltarParaAba = () => {
+    const aoVoltarParaAba = async () => {
       if (!podeSincronizar()) return;
       if (Date.now() - lastAutoSyncRef.current < INTERVALO_MIN_MS) return;
       lastAutoSyncRef.current = Date.now();
-      void performSyncRef.current();
+      await performSyncRef.current();
+      // Gerar caderno semanal de erros ao voltar para a aba (dados locais)
+      if (user?.id) {
+        try {
+          const result = await generateWeeklyErrorNotebookIfNeeded(user.id);
+          if (result.created) {
+            toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
+              action: {
+                label: 'Abrir',
+                onClick: () => {
+                  window.dispatchEvent(new CustomEvent('cadernos-updated'));
+                  navigate('/simulados');
+                },
+              },
+            });
+            window.dispatchEvent(new CustomEvent('cadernos-updated'));
+          }
+        } catch (err) {
+          console.warn('⚠️ [AppShell] Erro ao gerar caderno semanal de erros (visibilitychange):', err);
+        }
+      }
     };
-    const aoReconectar = () => {
+    const aoReconectar = async () => {
       if (!podeSincronizar()) return;
       lastAutoSyncRef.current = Date.now();
-      void performSyncRef.current();
+      await performSyncRef.current();
+      // Gerar caderno semanal de erros ao reconectar
+      if (user?.id) {
+        try {
+          const result = await generateWeeklyErrorNotebookIfNeeded(user.id);
+          if (result.created) {
+            toast.success(`Seu caderno de erros da semana está pronto (${result.count} questões)`, {
+              action: {
+                label: 'Abrir',
+                onClick: () => {
+                  window.dispatchEvent(new CustomEvent('cadernos-updated'));
+                  navigate('/simulados');
+                },
+              },
+            });
+            window.dispatchEvent(new CustomEvent('cadernos-updated'));
+          }
+        } catch (err) {
+          console.warn('⚠️ [AppShell] Erro ao gerar caderno semanal de erros (online):', err);
+        }
+      }
     };
 
     document.addEventListener('visibilitychange', aoVoltarParaAba);

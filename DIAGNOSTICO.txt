@@ -1,0 +1,577 @@
+================================================================================
+DIAGNÓSTICO DO PROJETO REVISA-FLASH
+================================================================================
+Data: 2026-11-24
+Objetivo: Auditoria somente leitura — sem alterações no código
+
+================================================================================
+1. BANCO DE QUESTÕES
+================================================================================
+
+1.1 Onde ficam as questões (RxDB, Supabase ou arquivo estático)? Qual o schema/interface?
+
+--- RxDB (local-first / offline-first) ---
+Arquivo: src/lib/db.ts (linhas ~1070-1110)
+Coleção: banco_questoes
+Schema version: 0
+Campos principais (bancoQuestaoSchema):
+- id: string (PK)
+- user_id: string
+- banca: string
+- ano: number | null
+- concurso: string | null
+- cargo: string | null
+- disciplina: string
+- assunto: string | null
+- subassunto: string | null
+- tipo_questao: 'multipla_escolha' | 'certo_errado'
+- enunciado: string
+- alternativas: array | null (objetos com letra, texto, correta, sublinhados, negritos, italicos)
+- gabarito_letra: string | null
+- gabarito_ce: boolean | null
+- comentario: string | null
+- imagem_url: string | null
+- hash_dedup: string (FNV-1a, dedup global)
+- url_origem: string | null
+- arquivo_origem: string | null
+- importado_em: string (ISO)
+- created_at: string (ISO)
+- updated_at: string (ISO)
+- isdeleted: boolean (default: false)
+
+--- Supabase (nuvem) ---
+Tabela: banco_questoes
+Mesmas colunas (snake_case). RLS habilitado (user_id = Clerk ID).
+Migration: supabase/migrations/20261122_add_flashcard_images.sql (não encontrada migration específica para banco_questoes — ver seção RISCOS)
+
+--- Interface TypeScript ---
+Arquivo: src/services/bancoQuestoesService.ts (linhas 1-35)
+Interface: QuestaoBanco (estende schema RxDB com campos opcionais numero?, area?)
+
+1.2 Qual componente/rota renderiza o banco de questões e o filtro? Quais filtros existem hoje e como são aplicados? Há paginação?
+
+--- Rota/Componente ---
+Rota: /simulados?tab=banco  (src/routes/simulados.tsx, linhas ~130-160)
+Componente: BancoQuestoesTab  (src/components/BancoQuestoesTab.tsx)
+- Aba "Banco de Questões" dentro da página Simulados (tabs: banco | listas | simulados)
+
+--- Filtros atuais (aplicados EM MEMÓRIA via useMemo filtradas) ---
+BancoQuestoesTab.tsx linhas ~250-290:
+- Disciplina (fDisciplina) — match exato em q.disciplina
+- Matéria/Assunto (fMateria) — match exato em q.assunto
+- Subassunto (fAssunto) — match exato em q.subassunto
+- Banca (fBanca) — match exato em q.banca
+- Ano (fAno) — match exato string
+- Tipo (fTipo) — 'multipla_escolha' | 'certo_errado' | ''
+- Busca textual (busca) — includes no enunciado, assunto, subassunto, cargo, concurso
+- Hierarquia visual via FiltroHierarquiaModal (taxonomia fixa + questões locais)
+
+--- Paginação ---
+Sim, client-side: itensPorPagina = 100 (linha 68), paginaAtual state, filtradasPaginadas useMemo.
+NÃO há paginação no nível RxDB/Supabase — carrega tudo local e filtra em memória.
+
+--- Ordenação padrão ---
+importado_em desc (mais recentes primeiro) — getQuestoesDoBanco linha ~110.
+
+1.3 Como as questões são importadas/criadas?
+- Importação via PDF/TEC: src/services/importarTecService.ts → importarQuestoesNoBanco (bancoQuestoesService.ts)
+- RPC Supabase: importar_lista (para listas), importar_simulado (para simulados)
+- Hash dedup global (hash_dedup) evita duplicar mesma questão entre usuários
+
+================================================================================
+2. HISTÓRICO DE RESPOSTAS
+================================================================================
+
+2.1 Quando o usuário responde uma questão, o que é salvo e onde? Existe registro por tentativa (questionId, acertou/errou, data) ou só o estado atual?
+
+--- Banco de Questões (avulso / player livre) ---
+Serviço: src/services/bancoQuestoesService.ts → salvarTentativaAvulsa (linhas ~190-215)
+Coleção RxDB: banco_tentativas (schema version 1, db.ts linhas ~1110-1135)
+Campos:
+- id: string (PK)
+- user_id: string
+- questao_banco_id: string (FK → banco_questoes.id)
+- resposta: string | null
+- acertou: boolean | null
+- tempo_segundos: number (default 0)
+- contexto: 'avulso' | 'caderno' | 'lista' | 'simulado'
+- caderno_resultado_id: string | null
+- created_at: string (ISO)
+- updated_at: string (ISO)  ← ADICIONADO NA MIGRAÇÃO v1
+- isdeleted: boolean (default: false) ← ADICIONADO NA MIGRAÇÃO v1
+
+>>> SIM: Existe registro por tentativa (uma linha por resposta) com questionId, acertou/errou, data (created_at).
+
+--- Listas (Fixação) ---
+Resultado salvo em: resultados_lista (uma linha por finalização de lista)
+Campos: total_questoes, acertos, erros, nao_respondidas, porcentagem, tempo_segundos, respostas (objeto), areas, acertos_por_area, created_at
+NÃO salva tentativa por questão individual — só agregado por lista.
+
+--- Simulados ---
+Resultado salvo em: resultados_simulado (uma linha por finalização)
+Mesmo padrão: agregado, não por questão.
+
+--- Cadernos ---
+Resultado salvo em: caderno_resultados (uma linha por finalização)
+Campos: total_questoes, acertos, erros, nao_respondidas, porcentagem, tempo_segundos, respostas, created_at
+NÃO salva tentativa por questão individual.
+
+--- Progresso (em andamento) ---
+progresso_lista: respostas parciais, marcadas, tempo_decorrido, status 'em-andamento' | 'concluido'
+progresso_simulado: similar
+
+2.2 A coleção de erros (ErrorContext) guarda o quê? Serve como histórico de tentativas erradas com data?
+
+--- ErrorContext (src/contexts/ErrorContext.tsx) ---
+Interface: ErrorRecord (linhas 18-55)
+Campos principais:
+- id, user_id, question, correctAnswer, yourAnswer, area (legado), discipline_id, topic, type, source, source_lista_id, comment, repetitions, status ('ativo'|'resolvido'|'arquivado'), flashcardId, createdAt, updated_at, isDeleted
+- Campos enriquecidos: questao_origem_id, tipo_questao, alternativas[], gabarito_ce, imagem_url, comentario_geral, sublinhados_*, negritos_*, italicos_*
+
+>>> O QUE GUARDA:
+- Última resposta errada por questão (dedup por question+discipline_id via addOrIncrementError)
+- Incrementa 'repetitions' se a mesma questão for errada novamente
+- createdAt = data da PRIMEIRA vez que errou
+- updated_at = data da ÚLTIMA atualização (incremento ou edição)
+- NÃO guarda histórico completo de TODAS as tentativas (só a última + contador)
+
+>>> NÃO SERVE COMO HISTÓRICO DE TENTATIVAS COM DATA:
+- Só tem createdAt (primeira ocorrência) e updated_at (última)
+- Não tem array de tentativas com timestamp individual
+- repetitions conta quantas vezes errou, mas não QUANDO cada vez
+
+2.3 Se NÃO existir histórico de tentativas com data e resultado, diga isso claramente.
+
+>>> CONFIRMADO: NÃO EXISTE histórico granular de tentativas com data/resultado por questão fora de banco_tentativas.
+- banco_tentativas TEM (uma linha por resposta, created_at, acertou, resposta, tempo)
+- ErrorContext NÃO TEM (só agregado + repetitions)
+- resultados_lista/simulado/caderno NÃO TÊM (só agregado final)
+
+================================================================================
+3. ESTRUTURA DE DADOS
+================================================================================
+
+3.1 Liste as coleções do RxDB (nome, campos, versão do schema, migrationStrategies) e as tabelas do Supabase correspondentes.
+
+--- COLEÇÕES RxDB (src/lib/db.ts) ---
+Ordem de declaração no addCollections:
+
+1. decks (v0) ↔ decks
+2. flashcards (v16) ↔ flashcards
+3. disciplines (v0) ↔ disciplines
+4. topics (v0) ↔ topics
+5. errors (v0) ↔ errors
+6. revisoes (v0) ↔ revisoes
+7. study_records (v1) ↔ study_records
+8. study_sessions (v0) ↔ study_sessions
+9. areas (v0) ↔ (sem tabela Supabase direta)
+10. pending_operations (v0) ↔ (fila local, não sincroniza)
+11. user_settings (v0) ↔ user_settings
+12. listas (v0) ↔ listas
+13. listas_pastas (v0) ↔ listas_pastas
+14. questoes_lista (v0) ↔ questoes_lista
+15. listas_questoes (v0) ↔ listas_questoes
+16. progresso_lista (v0) ↔ progresso_lista
+17. resultados_lista (v0) ↔ resultados_lista
+18. simulados (v0) ↔ simulados
+19. simulados_pastas (v0) ↔ simulados_pastas
+20. questoes (v0) ↔ questoes (simulado_questoes)
+21. alternativas (v0) ↔ alternativas
+22. progresso_simulado (v0) ↔ progresso_simulado
+23. resultados_simulado (v0) ↔ resultados_simulado
+24. pdf_highlights (v0) ↔ (sem tabela)
+25. pdf_notes (v0) ↔ (sem tabela)
+26. pdf_text_boxes (v0) ↔ (sem tabela)
+27. files (v0) ↔ files
+28. aula_materiais (v0) ↔ aula_materiais
+29. anotacoes_questao (v0) ↔ anotacoes_questao
+30. planos (v0) ↔ planos
+31. plano_feitos (v0) ↔ plano_feitos
+32. subtopicos (v0) ↔ subtopicos
+33. revisoes_subtopico (v0) ↔ revisoes_subtopico
+34. banco_questoes (v0) ↔ banco_questoes
+35. pastas_caderno (v0) ↔ pastas_caderno
+36. cadernos (v0) ↔ cadernos
+37. caderno_questoes (v0) ↔ caderno_questoes
+38. caderno_resultados (v0) ↔ caderno_resultados
+39. banco_tentativas (v1) ↔ banco_tentativas
+    migrationStrategies: { 1: (oldDoc) => ({ ...oldDoc, updated_at: oldDoc.updated_at || new Date().toISOString(), isdeleted: false }) }
+40. study_tasks (v0) ↔ study_tasks
+41. study_theme_timelines (v1) ↔ study_theme_timelines
+42. study_weekly_blocks (v0) ↔ study_weekly_blocks
+43. study_extra_events (v0) ↔ study_extra_events
+44. study_occurrences (v0) ↔ study_occurrences
+45. study_plan_pauses (v0) ↔ study_plan_pauses
+
+--- Tabelas Supabase (constants/index.ts SUPABASE.TABELAS + migrations) ---
+- study_records
+- decks
+- flashcards
+- disciplines
+- topics
+- errors
+- revisoes
+- study_sessions
+- listas
+- listas_pastas
+- questoes_lista
+- listas_questoes
+- progresso_lista
+- resultados_lista
+- simulados
+- simulados_pastas
+- questoes (simulado_questoes)
+- alternativas
+- progresso_simulado
+- resultados_simulado
+- pdf_highlights (não confirmada)
+- pdf_notes (não confirmada)
+- pdf_text_boxes (não confirmada)
+- files
+- aula_materiais
+- anotacoes_questao
+- planos
+- plano_feitos
+- subtopicos
+- revisoes_subtopico
+- banco_questoes
+- pastas_caderno
+- cadernos
+- caderno_questoes
+- caderno_resultados
+- banco_tentativas  ← Migration: supabase/migrations/20261125_banco_tentativas_isdeleted.sql
+- study_tasks
+- study_theme_timelines
+- study_weekly_blocks
+- study_extra_events
+- study_occurrences
+- study_plan_pauses
+
+>>> OBS: banco_questoes, questoes_lista, listas_questoes, banco_tentativas NÃO TÊM migration versionada no Supabase (ver memória supabase-questoes-sem-migration). Foram criadas via SQL direto ou RPC.
+
+3.2 Como o syncWithSupabase funciona e como eu registraria uma coleção nova nele?
+
+--- syncWithSupabase (src/lib/db.ts linhas ~1400-1980) ---
+Função assíncrona, guarda global isSyncing para evitar concorrência.
+Fluxo:
+1. processPendingOperations() — envia fila de operações offline (queueService)
+2. Lê lastSyncGlobal por usuário (localStorage lastSyncTimestamp_{userId})
+3. Para cada coleção em `collectionsToCheck`:
+   - Verifica se coleção local está vazia → força pull completo
+4. Para cada coleção em `collections` (lista de pull/push):
+   - Define pullFrom (lastSyncGlobal ou 1970 se vazia/especial)
+   - PULL: busca no Supabase com .gte('updated_at', pullFrom) + .eq('user_id', userId)
+     - Exceções: study_records/user_settings usam RPC; listas_questoes/caderno_questoes puxam por IDs de listas/cadernos do usuário; questoes_lista puxa por IDs das listas_questoes locais
+   - Merge: upsert local (se updated_at remoto > local)
+   - PUSH: busca docs locais com updated_at > lastSyncGlobal
+     - study_records/user_settings usam RPC batch
+     - listas_questoes/caderno_questoes têm bloco dedicado
+     - Demais usam pushWithConflictCheck (compara updated_at remoto vs local, servidor vence se mais novo)
+5. Blocos especiais: files, aula_materiais, resultados_lista, resultados_simulado, caderno_questoes, listas_questoes, simulados/questoes/alternativas, study_sessions
+6. Se sem erro: writeLastSync(userId, syncStartTime)
+7. Callback onComplete()
+
+--- Como registrar coleção nova ---
+PASSO 1: Adicionar schema em db.ts (addCollections)
+PASSO 2: Adicionar nome na const `collectionsToCheck` (para detecção de vazio)
+PASSO 3: Adicionar nome na const `collections` (loop principal pull/push)
+PASSO 4: Se a coleção NÃO tem user_id (ex: listas_questoes, caderno_questoes), adicionar bloco dedicado após o loop principal (como feito para essas duas)
+PASSO 5: Se a coleção precisa pull por IDs relacionados (ex: questoes_lista), adicionar bloco dedicado
+PASSO 6: Adicionar tabela correspondente no Supabase (com RLS, updated_at, isdeleted)
+PASSO 7: Em queueService.ts UPSERT_CONFLICT, adicionar entrada se a tabela tem UNIQUE lógico (ex: progresso_lista: 'lista_id,user_id')
+PASSO 8: Em supabaseClient.ts, criar helpers create/get/update/delete se necessário
+
+3.3 Como o userId é obtido nos contextos?
+
+--- UserContext (src/contexts/UserContext.tsx) ---
+- Online: useClerkUser() → clerkUser.user?.id
+- Offline: localStorage.getItem('revisaflash_user_id')
+- Seta localStorage 'revisaflash_user_id' = clerkUser.user.id quando online
+- Limpa localStorage no logout (useEffect clerkUser.isSignedIn === false)
+
+--- Uso nos contexts/serviços ---
+- const { user } = useAppUser() → user.id
+- getCurrentUserId() em queueService.ts → localStorage.getItem('revisaflash_user_id')
+- readLastSync/writeLastSync em db.ts → mesma chave
+- supabaseClient.getClerkToken() → window.Clerk.session.getToken({ template: 'supabase1' })
+
+>>> PADRÃO: userId = Clerk user.id (string UUID). Offline usa cache no localStorage.
+
+================================================================================
+4. PADRÕES
+================================================================================
+
+4.1 Quais constantes (CAMPOS, STATUS, etc.) existem e como devo estendê-las.
+
+--- src/constants/index.ts ---
+
+CAMPOS (objeto aninhado por domínio):
+- ESTUDO, DECK, FLASHCARD, DISCIPLINA, TOPICO, ERRO, REVISAO, SESSAO
+- Cada um mapeia nome lógico → nome do campo no banco (snake_case/camelCase)
+
+TIPOS_ESTUDO: { TEORICO: 'teorico', PRATICO: 'pratico' }
+STATUS_TOPICO: { NAO_ESTUDADO, ESTUDANDO, REVISADO, DOMINADO }
+LISTA_TIPOS_ESTUDO, LISTA_STATUS_TOPICO (arrays readonly)
+
+ROTAS: objeto com paths das páginas
+
+DB_NAME: 'revisaflash_db_v17' (atual)
+
+AULA_MATERIAIS: { COLECAO, BUCKET, MIME_TYPE, MAX_SIZE_BYTES, MAX_SIZE_MB }
+
+VIDEO_OFFLINE: configurações de download
+
+SUPABASE: { URL, ANON_KEY, TABELAS: { STUDY_RECORDS, DECKS, FLASHCARDS, DISCIPLINES, TOPICS, ERRORS, REVISOES, STUDY_SESSIONS } }
+
+--- Como estender ---
+1. Adicionar novo domínio em CAMPOS (ex: TENTATIVA: { ID, USER_ID, QUESTAO_ID, ACERTOU, ... })
+2. Adicionar status/tipos em objetos const as const
+3. Adicionar em LISTA_* se precisar em selects
+4. Adicionar tabela em SUPABASE.TABELAS
+5. Seguir convenção: chave em MAIÚSCULO, valor = nome do campo no banco (snake_case para Supabase, camelCase para RxDB conforme padrão do domínio)
+
+4.2 Como as datas são armazenadas (ISO string? timestamp?) e se há helpers de data.
+
+--- Formato ---
+TODAS as datas: ISO 8601 string (new Date().toISOString()) — ex: '2026-11-24T14:30:00.000Z'
+Campos: created_at, updated_at, importado_em, createdAt, data, date, dueDate, nextReviewDate, lastReview, etc.
+NÃO usa timestamp numérico (epoch ms) nos bancos.
+
+--- Helpers de data ---
+src/utils/helpers.ts (não li, mas padrão do projeto):
+- nowIso(): string — usado em services (bancoQuestoesService.ts, cadernoService.ts, listaService.ts, etc.)
+- formatarTempo(segundos): string — HH:MM (BancoPlayerInline, ListaPlayer)
+- Provavelmente há parseISO, addDays, startOfDay, etc. em utils/date ou similar (NÃO ENCONTRADO arquivo dedicado — helpers inline)
+
+--- Timezone ---
+Todas as datas UTC (ISO Z). Conversão para horário local (Brasil UTC-3) feita no frontend via new Date(iso).toLocaleString('pt-BR') ou Intl.DateTimeFormat.
+NÃO há armazenamento com offset — sempre UTC.
+
+================================================================================
+5. REGRAS DAS FUNCIONALIDADES QUE QUERO IMPLEMENTAR
+================================================================================
+
+5.1 (a) Filtro no banco de questões: opção para NÃO repetir questões que o usuário já fez.
+
+--- Análise de encaixe na arquitetura ---
+FONTES DE "JÁ FEZ":
+1. banco_tentativas (RxDB + Supabase) — tem TODAS as tentativas avulsas do banco de questões (contexto='avulso')
+   - Query: SELECT DISTINCT questao_banco_id FROM banco_tentativas WHERE user_id = ? AND contexto = 'avulso'
+   - RxDB: db.banco_tentativas.find({ selector: { user_id, contexto: 'avulso' } }).exec() → map para Set de IDs
+
+2. caderno_resultados + caderno_questoes — questões feitas via cadernos
+   - Precisa join: caderno_resultados (user_id) → caderno_questoes (caderno_id) → questao_banco_id
+
+3. resultados_lista + listas_questoes + questoes_lista — questões feitas via listas
+   - Join similar
+
+4. resultados_simulado + questoes (simulado) — questões feitas via simulados
+   - Join: resultados_simulado → questoes (simulado_id)
+
+--- Implementação sugerida ---
+- NOVO CAMPO no filtro UI: "Ocultar já respondidas" (checkbox)
+- Quando ativo: buscar Set de IDs "já feitas" (fontes acima) e filtrar `filtradas` excluindo esses IDs
+- Como é client-side (RxDB), performance OK para ~10k questões
+- Para Supabase: não necessário (filtro é local)
+
+--- RISCOS ---
+- banco_tentativas pode não ter updated_at nas linhas antigas (migration v1 adiciona na migração local, mas linhas legadas no Supabase podem não ter)
+- Join caderno/listas/simulados exige múltiplas queries RxDB → pode ser lento na primeira vez
+- Cache do Set de IDs "já feitas" deve invalidar ao finalizar nova tentativa
+
+5.2 (b) Caderno de erros semanal:
+   - Semana: segunda a sexta (contam erros nesse período)
+   - Fecha (gera snapshot) no sábado de manhã
+   - Disponível para resolução até domingo à noite
+   - Fuso horário local do usuário (Brasil, UTC-3)
+   - Erros sábado/domingo entram na semana seguinte
+
+--- Análise de encaixe na arquitetura (offline-first, sem servidor/cron) ---
+>>> SNAPSHOT GERADO AO ABRIR APP A PARTIR DE SÁBADO DE MANHÃ
+
+Mecanismo:
+1. Ao carregar app (qualquer rota), verificar:
+   - now = new Date() no timezone local (Intl.DateTimeFormat().resolvedOptions().timeZone → 'America/Sao_Paulo')
+   - dayOfWeek = now.getDay() (0=Dom, 1=Seg, ..., 6=Sáb)
+   - hour = now.getHours()
+   - isSaturdayMorning = dayOfWeek === 6 && hour >= 6 (ex: 6h da manhã)
+   - isSundayNight = dayOfWeek === 0 && hour >= 18
+
+2. Se isSaturdayMorning E não existe weeklyNotebook para semana atual:
+   - Calcular semana: segunda anterior a sábado = now - (dayOfWeek - 1) dias
+   - Buscar erros em banco_tentativas (contexto='avulso') + ErrorContext (status='ativo') + caderno/listas/simulados da semana (seg-sex)
+   - Criar documento em nova coleção weekly_notebooks:
+     - id, user_id, week_start (ISO date segunda), week_end (sexta), status: 'aberto' | 'resolvido' | 'expirado'
+     - erros: array de { questao_id, enunciado, resposta_usuario, resposta_correta, disciplina, assunto, data_erro, fonte }
+     - created_at (sábado manhã), expires_at (domingo 23:59:59 local)
+   - Marcar erros incluídos (opcional: flag no banco_tentativas? ou só referencia)
+
+3. UI: Nova aba/rota "Caderno Semanal" mostra weekly_notebooks com status 'aberto'
+   - Permite resolver (marcar como revisado)
+   - Ao resolver todos ou no domingo noite → status = 'resolvido' | 'expirado'
+
+--- Coleções necessárias ---
+NOVA COLEÇÃO: weekly_notebooks (RxDB + Supabase)
+Schema:
+- id, user_id, week_start (ISO date), week_end (ISO date), status, erros (JSON), created_at, updated_at, expires_at, isdeleted
+
+--- Timezone handling ---
+- SEMPRE calcular semana baseado em TZ local do usuário (não UTC)
+- Armazenar week_start/week_end como ISO date (YYYY-MM-DD) sem hora
+- expires_at = domingo 23:59:59 TZ local → converter para UTC para armazenar
+- Função helper: getLocalWeekBounds(now: Date) → { weekStart: Date, weekEnd: Date, expiresAt: Date }
+
+--- Integração com syncWithSupabase ---
+- Adicionar 'weekly_notebooks' nas arrays collectionsToCheck e collections
+- RLS no Supabase: user_id = auth.uid()
+- Push/Pull standard (tem user_id, updated_at)
+
+================================================================================
+6. RISCOS
+================================================================================
+
+6.1 Inconsistências de nomenclatura ou schema que possam atrapalhar coleção nova "tentativas" e "weeklyNotebooks".
+
+--- RISCOS IDENTIFICADOS ---
+
+1. NOME DA COLEÇÃO RxDB vs TABELA SUPABASE
+   - RxDB: camelCase plural (banco_tentativas, study_tasks, weekly_notebooks)
+   - Supabase: snake_case plural (banco_tentativas, study_tasks, weekly_notebooks) — OK, consistente
+   - MAS: algumas coleções RxDB usam singular (deck, flashcard, error) outras plural (decks, flashcards, errors) — inconsistência histórica
+   - PADRÃO ATUAL: plural para novas (banco_tentativas, study_tasks, weekly_notebooks)
+
+2. CAMPO user_id vs USUARIO_ID
+   - CAMPOS.ESTUDO.USUARIO_ID = 'user_id' (snake_case)
+   - CAMPOS.DECK.USUARIO_ID = 'user_id'
+   - CAMPOS.FLASHCARD.USUARIO_ID = 'user_id'
+   - TODOS usam 'user_id' no banco — OK
+   - MAS: constants usam USUARIO_ID (maiúsculo) como chave, valor 'user_id'
+
+3. CAMPO updated_at vs updatedAt vs ATUALIZADO_EM
+   - RxDB schemas: 'updated_at' (snake_case) — padrão Supabase
+   - CAMPOS.FLASHCARD.ATUALIZADO_EM = 'updatedAt' (camelCase) — INCONSISTÊNCIA
+   - CAMPOS.TOPICO.ATUALIZADO_EM = 'updatedAt'
+   - CAMPOS.REVISAO.ATUALIZADO_EM = 'updatedAt'
+   - CAMPOS.SESSAO.CRIADO_EM = 'createdAt' (camelCase) mas schema usa 'createdAt'
+   - Constants misturam camelCase e snake_case — CUIDADO ao estender
+
+4. CAMPO isdeleted vs isDeleted vs ISDELETED
+   - Schemas RxDB: 'isdeleted' (lowercase) — padrão Supabase
+   - CAMPOS.DECK.DELETADO_EM = 'deletedAt' (camelCase)
+   - CAMPOS.FLASHCARD.DELETADO_EM = 'deletedAt'
+   - Migration v1 banco_tentativas usa 'isdeleted' (lowercase)
+   - Supabase migrations usam 'isdeleted' (lowercase) — OK no banco, constants divergem
+
+5. BANCO_TENTATIVAS SEM updated_at HISTÓRICO
+   - Migration v1 local adiciona updated_at = now() para docs legados
+   - Mas no Supabase, linhas antigas PODEM não ter updated_at (não há migration versionada)
+   - pushWithConflictCheck compara updated_at → se null/undefined, trata como '1970-01-01' → servidor vence sempre
+   - RISCO: dados locais mais novos podem ser sobrescritos por dados antigos do servidor
+
+6. QUESTOES_LINHA / LISTAS_QUESTOES / CADERNO_QUESTOES SEM user_id
+   - Essas tabelas de ligação NÃO têm user_id (FK para lista/caderno/questao)
+   - Sync faz join manual via IDs do usuário — complexo e propenso a erro
+   - Nova coleção weekly_notebooks DEVE ter user_id direto para simplificar sync
+
+7. FALTA MIGRATION SUPABASE PARA BANCO_QUESTOES, QUESTOES_LISTA, BANCO_TENTATIVAS
+   - Memória supabase-questoes-sem-migration: tabelas criadas via SQL direto/RPC
+   - Schema pode divergir entre RxDB e Supabase (campos extras, tipos)
+   - Nova coleção: CRIAR migration versionada no Supabase ANTES de adicionar no RxDB
+
+8. CAMPO hash_dedup EM BANCO_QUESTOES — DEDUP GLOBAL
+   - hash_dedup é único global (sem user_id)
+   - importarQuestoesNoBanco verifica hash_dedup SEM filtro de user_id
+   - Se weekly_notebooks referenciar questões por id, OK (id é único por usuário)
+
+9. TIMEZONE NO SYNC
+   - lastSyncTimestamp salvo como ISO UTC
+   - Pull usa .gte('updated_at', lastSync) — updated_at no Supabase é UTC
+   - OK se ambos UTC, mas cálculo de semana (seg-sex) usa TZ local → pode haver desvio de 1 dia nas bordas
+
+10. QUEUE SERVICE UPSERT_CONFLICT
+    - banco_tentativas: 'id' (PK) — OK
+    - weekly_notebooks: precisará adicionar 'id' ou 'user_id,week_start' se unique lógico
+
+================================================================================
+7. PROPOSTA
+================================================================================
+
+7.1 Arquivos a criar/alterar para (a) Filtro "Não repetir questões já feitas"
+
+ORDEM SUGERIDA:
+
+1. src/services/bancoQuestoesService.ts
+   - NOVA FUNÇÃO: async getQuestoesJaFeitasIds(userId: string): Promise<Set<string>>
+     - Busca em banco_tentativas (contexto='avulso') + caderno_resultados + resultados_lista + resultados_simulado
+     - Retorna Set de questao_banco_id únicos
+
+2. src/components/BancoQuestoesTab.tsx
+   - NOVO STATE: const [ocultarJaFeitas, setOcultarJaFeitas] = useState(false)
+   - NOVO useEffect: ao carregar/mudar filtros, se ocultarJaFeitas → buscar IDs via getQuestoesJaFeitasIds e setar em state/ref
+   - NOVO CHECKBOX na UI de filtros (próximo a "Tipo:")
+   - MODIFICAR useMemo filtradas: excluir q.id presentes no Set de já feitas
+
+3. src/components/BancoPlayerInline.tsx (opcional)
+   - Ao finalizar prática, invalidar cache de "já feitas" (callback para BancoQuestoesTab recarregar)
+
+4. src/lib/db.ts (se necessário)
+   - Adicionar índice em banco_tentativas para query por user_id + contexto (RxDB index não declarada explicitamente — verifica performance)
+
+7.2 Arquivos a criar/alterar para (b) Caderno de erros semanal
+
+ORDEM SUGERIDA:
+
+1. src/constants/index.ts
+   - ADICIONAR em CAMPOS: WEEKLY_NOTEBOOK: { ID, USER_ID, WEEK_START, WEEK_END, STATUS, ERROS, CREATED_AT, UPDATED_AT, EXPIRES_AT, ISDELETED }
+   - ADICIONAR em SUPABASE.TABELAS: WEEKLY_NOTEBOOKS: 'weekly_notebooks'
+
+2. src/lib/db.ts
+   - NOVO SCHEMA: weeklyNotebookSchema (version 0, PK id, user_id, week_start, week_end, status, erros[], created_at, updated_at, expires_at, isdeleted)
+   - ADICIONAR em addCollections: weekly_notebooks: { schema: weeklyNotebookSchema }
+   - ADICIONAR 'weekly_notebooks' em collectionsToCheck e collections (syncWithSupabase)
+
+3. supabase/migrations/YYYYMMDD_create_weekly_notebooks.sql (NOVO ARQUIVO)
+   - CREATE TABLE weekly_notebooks (...)
+   - ALTER TABLE ... ENABLE ROW LEVEL SECURITY
+   - CREATE POLICY ... USING (user_id = auth.uid())
+   - CREATE INDEX idx_weekly_notebooks_user_week ON weekly_notebooks(user_id, week_start)
+
+4. src/services/weeklyNotebookService.ts (NOVO ARQUIVO)
+   - generateWeeklyNotebook(userId: string): Promise<WeeklyNotebook>
+     - Calcula semana (seg-sex) em TZ local
+     - Busca erros da semana em: banco_tentativas, ErrorContext (ativo), caderno_resultados, resultados_lista, resultados_simulado
+     - Cria documento weekly_notebooks
+   - getWeeklyNotebooks(userId: string): Promise<WeeklyNotebook[]>
+   - getActiveWeeklyNotebook(userId: string): Promise<WeeklyNotebook | null>
+   - resolveWeeklyNotebook(notebookId: string, resolucoes: Resolucao[]): Promise<void>
+   - checkAndGenerateOnAppLoad(userId: string): Promise<void> — chamado no App inicialização
+
+5. src/utils/dateHelpers.ts (NOVO ARQUIVO OU EXISTENTE)
+   - getLocalWeekBounds(now?: Date): { weekStart: Date, weekEnd: Date, expiresAt: Date }
+   - isSaturdayMorning(now: Date): boolean
+   - isSundayNight(now: Date): boolean
+   - formatWeekLabel(weekStart: Date): string — "24/11 a 28/11"
+
+6. src/contexts/WeeklyNotebookContext.tsx (NOVO ARQUIVO — OPCIONAL)
+   - Provider com state/listeners para weekly_notebooks (similar a ErrorContext)
+   - Ou usar hook direto no componente da aba
+
+7. src/routes/simulados.tsx OU nova rota /caderno-semanal
+   - NOVA ABA "Caderno Semanal" (ou nova rota)
+   - Componente WeeklyNotebookTab.tsx (NOVO)
+     - Lista cadernos da semana atual + anteriores
+     - Botão "Resolver" abre player com questões do caderno
+     - Mostra status: Aberto / Resolvido / Expirado
+
+8. src/components/WeeklyNotebookTab.tsx (NOVO)
+   - UI similar a BancoQuestoesTab mas para weekly_notebooks
+
+9. queueService.ts
+   - ADICIONAR em UPSERT_CONFLICT: 'weekly_notebooks': 'id'
+
+10. src/lib/supabaseClient.ts
+    - ADICIONAR helpers create/get/update/delete para weekly_notebooks (opcional, sync usa direto)
+
+================================================================================
+VERIFICAÇÃO FINAL: git status --porcelain
+================================================================================
