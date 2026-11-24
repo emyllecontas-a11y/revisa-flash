@@ -1026,7 +1026,10 @@ export default function ConteudoPage() {
                 <Plus className="h-3.5 w-3.5" /> Nova disciplina
               </button>
               <button
-                onClick={() => { setIsListaPadraoModalOpen(true); setErrorMessage(""); }}
+                onClick={() => {
+                  if (!userId) { toast.error('Identificando usuário... tente novamente em um instante.'); return; }
+                  setIsListaPadraoModalOpen(true); setErrorMessage("");
+                }}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground/65 hover:bg-surface-2 hover:border-primary transition-colors"
               >
                 <Layers className="h-3.5 w-3.5" /> Adicionar da lista padrão
@@ -1067,7 +1070,10 @@ export default function ConteudoPage() {
                       Temos 7 áreas e mais de 100 matérias prontas. Escolha o que precisa e adicione de uma vez.
                     </p>
                     <button
-                      onClick={() => { setIsListaPadraoModalOpen(true); setErrorMessage(""); }}
+                      onClick={() => {
+                        if (!userId) { toast.error('Identificando usuário... tente novamente em um instante.'); return; }
+                        setIsListaPadraoModalOpen(true); setErrorMessage("");
+                      }}
                       className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                     >
                       <Layers className="h-4 w-4" /> Adicionar da lista padrão

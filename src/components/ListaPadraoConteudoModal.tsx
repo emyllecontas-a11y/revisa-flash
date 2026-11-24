@@ -357,7 +357,7 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
 
         {/* Loading taxonomia */}
         {carregandoTaxonomia && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex-1 flex items-center justify-center py-12 min-h-0">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
             <span className="ml-2 text-sm text-foreground/60">Carregando lista padrão...</span>
           </div>
