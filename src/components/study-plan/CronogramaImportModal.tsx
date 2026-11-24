@@ -4,6 +4,16 @@ import { toast } from "sonner";
 import { CRONOGRAMA_IMPORT_PROMPT } from "@/services/cronogramaPrompt";
 import { parseCronogramaExcel, validateCronograma, buildImportPreview, type ValidationResult, type ImportPreview } from "@/services/cronogramaImporter";
 import { upsertStudyTaskByName, upsertStudyWeeklyBlock, upsertStudyThemeTimeline } from "@/services/studyPlanService";
+import {
+  carregarConteudoExistente,
+  calcularConteudoNovo,
+  criarConteudoSelecionado,
+  normalizarNome,
+  type EntradaConteudo,
+  type ConteudoNovo,
+  type SelecaoConteudo,
+  type MapaIds,
+} from "@/services/conteudoSugestaoService";
 
 interface CronogramaImportModalProps {
   userId: string;
@@ -21,6 +31,11 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
   const [validatedData, setValidatedData] = useState<ValidationResult | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Novos estados para sugestão de criação de disciplinas/tópicos
+  const [conteudoNovo, setConteudoNovo] = useState<ConteudoNovo | null>(null);
+  const [selecaoConteudo, setSelecaoConteudo] = useState<SelecaoConteudo>({ disciplinas: [], topicos: [] });
+  const [isLoadingConteudo, setIsLoadingConteudo] = useState(false);
 
   if (!isOpen) return null;
 
@@ -61,6 +76,43 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
       setValidatedData(validated);
       const previewData = buildImportPreview(validated);
       setPreview(previewData);
+
+      // Calcular conteúdos novos (disciplinas/tópicos que não existem)
+      try {
+        setIsLoadingConteudo(true);
+        const { disciplinas, topicos } = await carregarConteudoExistente(userId);
+
+        // Construir entradas a partir de timelines e blocks
+        const entradas: EntradaConteudo[] = [];
+
+        // Timelines têm disciplina e tópico
+        for (const tl of validated.timelines) {
+          entradas.push({ disciplina: tl.discipline, topico: tl.topic });
+        }
+
+        // Blocks têm disciplina e tópico opcional
+        for (const bl of validated.blocks) {
+          entradas.push({ disciplina: bl.discipline, topico: bl.topic });
+        }
+
+        const novo = calcularConteudoNovo(entradas, disciplinas, topicos);
+        setConteudoNovo(novo);
+
+        // Inicializar seleção com tudo marcado
+        if (novo.disciplinasNovas.length > 0 || novo.topicosNovos.length > 0) {
+          setSelecaoConteudo({
+            disciplinas: [...novo.disciplinasNovas],
+            topicos: novo.topicosNovos.map(t => ({ disciplina: t.disciplina, nome: t.nome })),
+          });
+        }
+      } catch (err) {
+        // Se falhar, segue sem a seção de sugestão
+        console.warn('[CronogramaImportModal] Falha ao calcular conteúdos novos:', err);
+        setConteudoNovo(null);
+      } finally {
+        setIsLoadingConteudo(false);
+      }
+
       toast.success("Validação concluída!");
     } catch (err: any) {
       toast.error(`Erro ao validar: ${err.message}`);
@@ -79,6 +131,15 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
       let createdTasks = 0, updatedTasks = 0, skippedTasks = 0;
       let createdTimelines = 0, updatedTimelines = 0, skippedTimelines = 0;
       let createdBlocks = 0, updatedBlocks = 0, skippedBlocks = 0;
+      let createdDisciplinas = 0, createdTopicos = 0;
+
+      // 0. Criar disciplinas e tópicos selecionados (se houver)
+      let mapaIds: MapaIds = { disciplinas: new Map(), topicos: new Map() };
+      if (conteudoNovo && (selecaoConteudo.disciplinas.length > 0 || selecaoConteudo.topicos.length > 0)) {
+        mapaIds = await criarConteudoSelecionado(userId, selecaoConteudo);
+        createdDisciplinas = selecaoConteudo.disciplinas.length;
+        createdTopicos = selecaoConteudo.topicos.length;
+      }
 
       // 1. Tasks (biblioteca)
       for (const task of validatedData.tasks) {
@@ -94,10 +155,20 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
         else skippedTasks++;
       }
 
-      // 2. Timelines (linha do tempo) - topic_ids via match
+      // 2. Timelines (linha do tempo) - topic_ids via mapaIds (disciplina+tópico) ou topicMatches (fallback)
       for (const timeline of validatedData.timelines) {
-        const topicId = validatedData.topicMatches.get(timeline.topic);
-        const topicIds = topicId ? [topicId] : [];
+        let topicIds: string[] = [];
+        const chave = `${normalizarNome(timeline.discipline)}::${normalizarNome(timeline.topic)}`;
+
+        const topicIdFromMap = mapaIds.topicos.get(chave);
+        if (topicIdFromMap) {
+          topicIds = [topicIdFromMap];
+        } else {
+          // Fallback para o match solto original
+          const topicIdFromMatch = validatedData.topicMatches.get(timeline.topic);
+          if (topicIdFromMatch) topicIds = [topicIdFromMatch];
+        }
+
         const result = await upsertStudyThemeTimeline({
           period_type: timeline.period_type,
           period_start: timeline.period_start,
@@ -105,9 +176,6 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
           topic_ids: topicIds,
         });
         if (result.id) {
-          // upsertStudyThemeTimeline não retorna action, vamos assumir created se novo
-          // A função cria ou atualiza baseado em period_type + period_start
-          // Para simplificar, contamos como created (pode ter atualizado)
           createdTimelines++;
         }
       }
@@ -141,12 +209,16 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
         else skippedBlocks++;
       }
 
-      toast.success(
-        `Importação concluída! ` +
+      let toastMsg = `Importação concluída! ` +
         `Tarefas: ${createdTasks}C/${updatedTasks}A/${skippedTasks}P | ` +
         `Períodos: ${createdTimelines}C/${updatedTimelines}A/${skippedTimelines}P | ` +
-        `Blocos: ${createdBlocks}C/${updatedBlocks}A/${skippedBlocks}P`
-      );
+        `Blocos: ${createdBlocks}C/${updatedBlocks}A/${skippedBlocks}P`;
+
+      if (createdDisciplinas > 0 || createdTopicos > 0) {
+        toastMsg += ` | Conteúdos: ${createdDisciplinas} disciplinas e ${createdTopicos} tópicos criados`;
+      }
+
+      toast.success(toastMsg);
       onClose();
     } catch (err: any) {
       toast.error(`Erro ao importar: ${err.message}`);
@@ -158,6 +230,74 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
   const parseTimeToMinutes = (time: string): number => {
     const [h, m] = time.split(':').map(Number);
     return h * 60 + m;
+  };
+
+  // Helpers para checkboxes da seção de conteúdos novos
+  const toggleDisciplina = (nome: string) => {
+    setSelecaoConteudo(prev => {
+      const isSelected = prev.disciplinas.includes(nome);
+      let novasDisciplinas = isSelected
+        ? prev.disciplinas.filter(d => d !== nome)
+        : [...prev.disciplinas, nome];
+
+      // Se desmarcar disciplina, desmarcar tópicos dela
+      let novosTopicos = prev.topicos;
+      if (isSelected) {
+        novosTopicos = prev.topicos.filter(t => t.disciplina !== nome);
+      }
+
+      return { disciplinas: novasDisciplinas, topicos: novosTopicos };
+    });
+  };
+
+  const toggleTopico = (disciplina: string, nome: string) => {
+    setSelecaoConteudo(prev => {
+      const chave = `${disciplina}::${nome}`;
+      const isSelected = prev.topicos.some(t => `${t.disciplina}::${t.nome}` === chave);
+      let novosTopicos = isSelected
+        ? prev.topicos.filter(t => `${t.disciplina}::${t.nome}` !== chave)
+        : [...prev.topicos, { disciplina, nome }];
+
+      // Se marcar tópico, garantir que a disciplina está marcada
+      let novasDisciplinas = prev.disciplinas;
+      if (!isSelected && !prev.disciplinas.includes(disciplina)) {
+        novasDisciplinas = [...prev.disciplinas, disciplina];
+      }
+
+      // Se desmarcar último tópico de uma disciplina nova, desmarcar a disciplina
+      if (isSelected) {
+        const restantesDaDisc = novosTopicos.filter(t => t.disciplina === disciplina);
+        if (restantesDaDisc.length === 0 && conteudoNovo?.disciplinasNovas.includes(disciplina)) {
+          novasDisciplinas = novasDisciplinas.filter(d => d !== disciplina);
+        }
+      }
+
+      return { disciplinas: novasDisciplinas, topicos: novosTopicos };
+    });
+  };
+
+  const isDisciplinaSelecionada = (nome: string) => selecaoConteudo.disciplinas.includes(nome);
+  const isTopicoSelecionado = (disciplina: string, nome: string) =>
+    selecaoConteudo.topicos.some(t => t.disciplina === disciplina && t.nome === nome);
+
+  const marcarTodos = () => {
+    if (!conteudoNovo) return;
+    setSelecaoConteudo({
+      disciplinas: [...conteudoNovo.disciplinasNovas],
+      topicos: conteudoNovo.topicosNovos.map(t => ({ disciplina: t.disciplina, nome: t.nome })),
+    });
+  };
+
+  const desmarcarTodos = () => {
+    setSelecaoConteudo({ disciplinas: [], topicos: [] });
+  };
+
+  const totalSelecionados = () => {
+    if (!conteudoNovo) return { disciplinas: 0, topicos: 0 };
+    return {
+      disciplinas: selecaoConteudo.disciplinas.length,
+      topicos: selecaoConteudo.topicos.length,
+    };
   };
 
   const btn = "rf-button inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors";
@@ -278,6 +418,88 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
                 ))}
               </div>
             )}
+
+            {/* Seção: Conteúdos novos para a aba Conteúdos */}
+            {conteudoNovo && (conteudoNovo.disciplinasNovas.length > 0 || conteudoNovo.topicosNovos.length > 0) && (
+              <div className="rounded-xl border border-border bg-muted/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-foreground">Conteúdos novos para a aba Conteúdos</h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {totalSelecionados().disciplinas} disciplinas e {totalSelecionados().topicos} tópicos selecionados
+                    </span>
+                    <button onClick={marcarTodos} className="text-xs text-primary hover:underline" disabled={isLoadingConteudo}>
+                      Marcar todos
+                    </button>
+                    <button onClick={desmarcarTodos} className="text-xs text-primary hover:underline" disabled={isLoadingConteudo}>
+                      Desmarcar todos
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-3 max-h-60 overflow-y-auto">
+                  {conteudoNovo.disciplinasNovas.map((discNome) => {
+                    const topicosDaDisc = conteudoNovo.topicosNovos.filter(t => t.disciplina === discNome);
+                    const discSelecionada = isDisciplinaSelecionada(discNome);
+                    return (
+                      <div key={discNome} className="space-y-2 pl-2 border-l-2 border-border">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <span
+                            className="h-4 w-4 rounded border-2 border-border flex items-center justify-center transition-colors"
+                            style={{
+                              backgroundColor: discSelecionada ? 'var(--primary)' : 'transparent',
+                              borderColor: discSelecionada ? 'var(--primary)' : 'var(--border)',
+                              color: discSelecionada ? 'var(--primary-foreground)' : 'transparent',
+                            }}
+                          >
+                            {discSelecionada && <Check className="h-3 w-3" />}
+                          </span>
+                          <span className="text-sm font-medium text-foreground">{discNome}</span>
+                        </label>
+                        {topicosDaDisc.length > 0 && (
+                          <div className="space-y-1 ml-6">
+                            {topicosDaDisc.map((tp) => (
+                              <label key={tp.nome} className="flex items-center gap-2 cursor-pointer">
+                                <span
+                                  className="h-4 w-4 rounded border border-border flex items-center justify-center transition-colors"
+                                  style={{
+                                    backgroundColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'transparent',
+                                    borderColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'var(--border)',
+                                    color: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary-foreground)' : 'transparent',
+                                  }}
+                                >
+                                  {isTopicoSelecionado(tp.disciplina, tp.nome) && <Check className="h-3 w-3" />}
+                                </span>
+                                <span className="text-sm text-foreground">{tp.nome}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {conteudoNovo.disciplinasNovas.length === 0 && conteudoNovo.topicosNovos.length > 0 && (
+                    <div className="space-y-2 pl-2">
+                      {conteudoNovo.topicosNovos.map((tp) => (
+                        <label key={`${tp.disciplina}::${tp.nome}`} className="flex items-center gap-2 cursor-pointer">
+                          <span
+                            className="h-4 w-4 rounded border border-border flex items-center justify-center transition-colors"
+                            style={{
+                              backgroundColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'transparent',
+                              borderColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'var(--border)',
+                              color: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary-foreground)' : 'transparent',
+                            }}
+                          >
+                            {isTopicoSelecionado(tp.disciplina, tp.nome) && <Check className="h-3 w-3" />}
+                          </span>
+                          <span className="text-sm text-foreground">{tp.nome} <span className="text-muted-foreground">({tp.disciplina})</span></span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-between">
               <button onClick={() => setStep(1)} className={outline}><ArrowLeft className="h-4 w-4" /> Voltar</button>
               <button
