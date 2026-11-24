@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import {
   Plus, RotateCw, ChevronLeft, Layers, Sparkles, Trash2, Edit,
@@ -22,7 +22,7 @@ import { useAppUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/useToast";
 
 // ============================================================
-// Ã°Å¸â€Â¥ FUNÃƒâ€¡ÃƒÆ’O PARA RENDERIZAR TEXTO COM FORMATAÃƒâ€¡ÃƒÆ’O
+// 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO
 // ============================================================
 function renderFormattedText(text: string): string {
   if (!text) return '';
@@ -165,13 +165,13 @@ export default function FlashcardsPage() {
   const [allCardsInDeck, setAllCardsInDeck] = useState<any[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
   
-  // Ã°Å¸â€Â¥ ESTADO PARA PESQUISA
+  // 🔥 ESTADO PARA PESQUISA
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Ã°Å¸â€Â¥ ESTADO PARA MOSTRAR/OCULTAR O GRÃƒÂFICO
+  // 🔥 ESTADO PARA MOSTRAR/OCULTAR O GRÁFICO
   const [showChart, setShowChart] = useState(false);
 
-  // Ã°Å¸â€Â¥ ESTADOS DOS SUB-BARALHOS
+  // 🔥 ESTADOS DOS SUB-BARALHOS
   const [filtroTopico, setFiltroTopico] = useState<string | null>(null);
   const [isSubBaralhosModalOpen, setIsSubBaralhosModalOpen] = useState(false);
   const [editandoSub, setEditandoSub] = useState<string | null>(null);
@@ -209,7 +209,7 @@ export default function FlashcardsPage() {
   }, [selectedDeckId, getAllCardsByDeck]);
 
   // ============================================================
-  // CARREGAR INFORMAÃƒâ€¡Ãƒâ€¢ES DOS MEMBROS
+  // CARREGAR INFORMAÇÕES DOS MEMBROS
   // ============================================================
   useEffect(() => {
     if (isMembersModalOpen && selectedDeckId) {
@@ -271,7 +271,7 @@ export default function FlashcardsPage() {
   }, [allCardsInDeck, filterStatus, searchTerm, filtroTopico]);
 
   // ============================================================
-  // Ã°Å¸â€Â¥ LISTA DE SUB-BARALHOS DO BARALHO ABERTO
+  // 🔥 LISTA DE SUB-BARALHOS DO BARALHO ABERTO
   // ============================================================
   const subBaralhosDoDeck = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -288,7 +288,7 @@ export default function FlashcardsPage() {
   }, [allCardsInDeck]);
 
   // ============================================================
-  // ESTATÃƒÂSTICAS DOS DECKS
+  // ESTATÍSTICAS DOS DECKS
   // ============================================================
   const getDeckStats = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
@@ -308,7 +308,7 @@ export default function FlashcardsPage() {
   }, [getAllFlashcards]);
 
   // ============================================================
-  // DADOS DO GRÃƒÂFICO
+  // DADOS DO GRÁFICO
   // ============================================================
   const getStabilityOverTime = useCallback((deckId: string) => {
     const allFlashcards = getAllFlashcards();
@@ -353,7 +353,7 @@ export default function FlashcardsPage() {
   };
 
   // ============================================================
-  // FORMATAÃƒâ€¡ÃƒÆ’O
+  // FORMATAÇÃO
   // ============================================================
   const applyFormatting = (
     ref: React.RefObject<HTMLTextAreaElement>, 
@@ -424,7 +424,7 @@ export default function FlashcardsPage() {
       setIsModalOpen(false);
       setErrorMessage("");
     } catch (error: any) {
-      console.error("Ã¢ÂÅ’ Erro ao criar baralho:", error);
+      console.error("❌ Erro ao criar baralho:", error);
       setErrorMessage("Erro ao criar baralho: " + (error.message || "Erro desconhecido"));
     } finally {
       setIsSaving(false);
@@ -455,7 +455,7 @@ export default function FlashcardsPage() {
       const updatedCards = await getAllCardsByDeck(selectedDeckId);
       setAllCardsInDeck(updatedCards);
     } catch (error: any) {
-      console.error("Ã¢ÂÅ’ Erro ao adicionar flashcard:", error);
+      console.error("❌ Erro ao adicionar flashcard:", error);
       setErrorMessage("Erro ao adicionar flashcard: " + (error.message || "Erro desconhecido"));
     } finally {
       setIsSaving(false);
@@ -959,7 +959,7 @@ export default function FlashcardsPage() {
   }, [getCardMeta]);
 
   // ============================================================
-  // RENDERIZAÃƒâ€¡ÃƒÆ’O
+  // RENDERIZAÇÃO
   // ============================================================
   let conteudo = null;
 
@@ -974,7 +974,7 @@ export default function FlashcardsPage() {
         : null;
 
       conteudo = (
-        <AppShell breadcrumb="Flashcards Ã‚Â· Estudo">
+        <AppShell breadcrumb="Flashcards · Estudo">
           <button
             onClick={() => { 
               setModo("decks"); 
@@ -995,14 +995,14 @@ export default function FlashcardsPage() {
               <span className="font-medium uppercase tracking-widest text-primary">
                 {selectedDeckId ? deck?.name || "Estudo" : "Estudo de Hoje"}
                 {topicoEstudoAtivo && topicoEstudoAtivo !== "__sem_topico__" && (
-                  <span className="ml-2 text-foreground/60">Ã‚Â· {topicoEstudoAtivo}</span>
+                  <span className="ml-2 text-foreground/60">· {topicoEstudoAtivo}</span>
                 )}
                 {topicoEstudoAtivo === "__sem_topico__" && (
-                  <span className="ml-2 text-foreground/60">Ã‚Â· Sem sub-baralho</span>
+                  <span className="ml-2 text-foreground/60">· Sem sub-baralho</span>
                 )}
-                {/* Ã°Å¸â€Â¥ ETIQUETA ADICIONADA AQUI: flash-sanguessuga */}
+                {/* 🔥 ETIQUETA ADICIONADA AQUI: flash-sanguessuga */}
                 {isLeech && (
-                  <span data-tour="flash-sanguessuga" className="ml-2 text-accent">Ã°Å¸Â©Â¸ Sanguessuga</span>
+                  <span data-tour="flash-sanguessuga" className="ml-2 text-accent">🩸 Sanguessuga</span>
                 )}
               </span>
               <span className="tabular-nums text-foreground/50">Card {currentCardIndex + 1} de {sessaoCards.length}</span>
@@ -1026,7 +1026,7 @@ export default function FlashcardsPage() {
                   <FormattedText text={currentCard.back} />
                   {nextReviewTime && (
                     <p className="mt-4 text-xs text-muted-foreground">
-                      Ã¢ÂÂ³ PrÃƒÂ³xima revisÃƒÂ£o: {nextReviewTime}
+                      ⏳ Próxima revisão: {nextReviewTime}
                     </p>
                   )}
                 </>
@@ -1040,17 +1040,17 @@ export default function FlashcardsPage() {
               backImageUrl={currentCard.back_image_url}
             />
             {virado && (
-              // Ã°Å¸â€Â¥ ETIQUETA ADICIONADA AQUI: flash-botoes
+              // 🔥 ETIQUETA ADICIONADA AQUI: flash-botoes
               <div className="mt-6 grid grid-cols-4 gap-2 rf-fade-in" data-tour="flash-botoes">
                 <FsrsButton label="Errei" hint="10 min" variant="again" onClick={() => handleRating("again")} disabled={isRating} />
-                <FsrsButton label="DifÃƒÂ­cil" hint="2 dias" variant="hard" onClick={() => handleRating("hard")} disabled={isRating} />
+                <FsrsButton label="Difícil" hint="2 dias" variant="hard" onClick={() => handleRating("hard")} disabled={isRating} />
                 <FsrsButton label="Bom" hint="4 dias" variant="good" onClick={() => handleRating("good")} disabled={isRating} />
-                <FsrsButton label="FÃƒÂ¡cil" hint="12 dias" variant="easy" onClick={() => handleRating("easy")} disabled={isRating} />
+                <FsrsButton label="Fácil" hint="12 dias" variant="easy" onClick={() => handleRating("easy")} disabled={isRating} />
               </div>
             )}
             {!virado && (
               <div className="mt-6 flex items-center justify-center gap-2 text-xs text-foreground/40">
-                <RotateCw className="h-3 w-3" /> EspaÃƒÂ§o para virar Ã‚Â· 1/2/3/4 para avaliar
+                <RotateCw className="h-3 w-3" /> Espaço para virar · 1/2/3/4 para avaliar
               </div>
             )}
           </div>
@@ -1067,7 +1067,7 @@ export default function FlashcardsPage() {
       : 0;
     
     conteudo = (
-      <AppShell breadcrumb="Flashcards Ã‚Â· ConcluÃƒÂ­do">
+      <AppShell breadcrumb="Flashcards · Concluído">
         <div className="mx-auto max-w-2xl text-center">
           <div className="rf-card p-8 sm:p-12">
             <div className="mb-4 flex justify-center">
@@ -1075,20 +1075,20 @@ export default function FlashcardsPage() {
                 <CheckCircle className="h-12 w-12 text-success" />
               </div>
             </div>
-            <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">Ã°Å¸Å½â€° RevisÃƒÂ£o concluÃƒÂ­da!</h2>
+            <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">🎉 Revisão concluída!</h2>
             <p className="mt-2 text-sm text-foreground/55">
-              VocÃƒÂª revisou {sessaoCards.length} flashcards {selectedDeckId ? `do baralho ${deck?.name}` : "de hoje"}.
+              Você revisou {sessaoCards.length} flashcards {selectedDeckId ? `do baralho ${deck?.name}` : "de hoje"}.
             </p>
             
             {stats && (
               <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
                 <div className="rounded-lg bg-background/40 p-4">
                   <div className="text-2xl font-bold text-success">{stats.good + stats.easy}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Acertos (Bom/FÃƒÂ¡cil)</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Acertos (Bom/Fácil)</div>
                 </div>
                 <div className="rounded-lg bg-background/40 p-4">
                   <div className="text-2xl font-bold text-accent">{stats.again + stats.hard}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Erros (Errei/DifÃƒÂ­cil)</div>
+                  <div className="text-[10px] uppercase tracking-wider text-foreground/40">Erros (Errei/Difícil)</div>
                 </div>
                 <div className="rounded-lg bg-background/40 p-4">
                   <div className="text-2xl font-bold text-primary">{stats.novos}</div>
@@ -1139,7 +1139,7 @@ export default function FlashcardsPage() {
     );
   } else if (selectedDeckId) {
     // ============================================================
-    // MODO DECKS - VISUALIZAÃƒâ€¡ÃƒÆ’O DE UM DECK ESPECÃƒÂFICO
+    // MODO DECKS - VISUALIZAÇÃO DE UM DECK ESPECÍFICO
     // ============================================================
     const deck = decks.find(d => d.id === selectedDeckId);
     if (!deck) {
@@ -1157,7 +1157,7 @@ export default function FlashcardsPage() {
       const todayCards = dueCards.filter(c => c.deck_id === selectedDeckId);
       
       conteudo = (
-        <AppShell breadcrumb={`Flashcards Ã‚Â· ${deck.name}`}>
+        <AppShell breadcrumb={`Flashcards · ${deck.name}`}>
           <button onClick={voltarParaDecks} className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-foreground/55 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" /> Voltar aos decks
           </button>
@@ -1182,17 +1182,17 @@ export default function FlashcardsPage() {
                   )}
                 </span>
                 <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{deck.name}</h1>
-                <p className="mt-1 text-sm text-foreground/55">{deck.description || "Sem descriÃƒÂ§ÃƒÂ£o"}</p>
+                <p className="mt-1 text-sm text-foreground/55">{deck.description || "Sem descrição"}</p>
                 {deck.is_shared && (
                   <p className="mt-1 text-xs text-foreground/40">
-                    Ã°Å¸â€˜Â¥ {deck.shared_with.length + 1} membros (Dono + {deck.shared_with.length} convidadas)
+                    👥 {deck.shared_with.length + 1} membros (Dono + {deck.shared_with.length} convidadas)
                   </p>
                 )}
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {isOwner && (
-                // Ã°Å¸â€Â¥ ETIQUETA ADICIONADA AQUI: flash-compartilhar
+                // 🔥 ETIQUETA ADICIONADA AQUI: flash-compartilhar
                 <button
                   onClick={() => {
                     setIsMembersModalOpen(true);
@@ -1230,8 +1230,8 @@ export default function FlashcardsPage() {
               >
                 <span className="flex items-center gap-2">
                   <TrendingUp className="h-4 w-4 text-primary" />
-                  <span className="font-display text-sm font-bold text-foreground">EvoluÃƒÂ§ÃƒÂ£o da Estabilidade MÃƒÂ©dia</span>
-                  <span className="text-xs text-foreground/40">(por mÃƒÂªs)</span>
+                  <span className="font-display text-sm font-bold text-foreground">Evolução da Estabilidade Média</span>
+                  <span className="text-xs text-foreground/40">(por mês)</span>
                 </span>
                 <span className="rfm-meta shrink-0">
                   {showChart ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -1252,7 +1252,7 @@ export default function FlashcardsPage() {
                       <Tooltip 
                         contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px' }}
                         labelStyle={{ color: 'var(--foreground)' }}
-                        formatter={(value: any) => [`${value}`, 'Estabilidade mÃƒÂ©dia']}
+                        formatter={(value: any) => [`${value}`, 'Estabilidade média']}
                       />
                       <Line type="monotone" dataKey="stability" stroke="var(--primary)" strokeWidth={2} dot={{ fill: 'var(--primary)', r: 4 }} />
                     </LineChart>
@@ -1260,7 +1260,7 @@ export default function FlashcardsPage() {
                 </div>
               )}
               <p className="mt-2 text-[10px] text-foreground/30">
-                {chartData.length} {chartData.length === 1 ? "mÃƒÂªs" : "meses"} de dados Ã‚Â· MÃƒÂ©dia geral: {(chartData.reduce((acc, d) => acc + d.stability, 0) / chartData.length).toFixed(1)}
+                {chartData.length} {chartData.length === 1 ? "mês" : "meses"} de dados · Média geral: {(chartData.reduce((acc, d) => acc + d.stability, 0) / chartData.length).toFixed(1)}
               </p>
             </div>
           )}
@@ -1317,7 +1317,7 @@ export default function FlashcardsPage() {
                 </select>
               </div>
 
-              {/* BotÃƒÂ£o gerenciar sub-baralhos */}
+              {/* Botão gerenciar sub-baralhos */}
               <button
                 type="button"
                 onClick={() => setIsSubBaralhosModalOpen(true)}
@@ -1327,7 +1327,7 @@ export default function FlashcardsPage() {
                 <FolderTree className="h-3.5 w-3.5" /> Gerenciar sub-baralhos
               </button>
 
-              {/* BotÃƒÂ£o estudar sÃƒÂ³ o sub-baralho atual */}
+              {/* Botão estudar só o sub-baralho atual */}
               {filtroTopico !== null && deckCards.length > 0 && (
                 <button
                   type="button"
@@ -1338,7 +1338,7 @@ export default function FlashcardsPage() {
                   {isStarting
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : <Sparkles className="h-3.5 w-3.5" />}
-                  Estudar sÃƒÂ³ {filtroTopico === "__sem_topico__" ? "Sem sub-baralho" : `"${filtroTopico}"`}
+                  Estudar só {filtroTopico === "__sem_topico__" ? "Sem sub-baralho" : `"${filtroTopico}"`}
                 </button>
               )}
 
@@ -1350,7 +1350,7 @@ export default function FlashcardsPage() {
             <label className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
-                placeholder="Buscar nesse baralhoÃ¢â‚¬Â¦"
+                placeholder="Buscar nesse baralho…"
                 className="rfm-input w-full py-2 pl-9 sm:w-64"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -1394,7 +1394,7 @@ export default function FlashcardsPage() {
                     <div className="rfm-fcard__foot">
                       <div className="flex min-w-0 flex-col gap-0.5 text-[10px] text-muted-foreground">
                         {(card.topico || meta.topico) && (
-                          <span className="truncate text-primary">Ã°Å¸ÂÂ· {card.topico || meta.topico}</span>
+                          <span className="truncate text-primary">🏷 {card.topico || meta.topico}</span>
                         )}
                         <span className="flex gap-2">
                           <span>Erros: {card.lapses || 0}</span>
@@ -1447,19 +1447,19 @@ export default function FlashcardsPage() {
       <AppShell breadcrumb="Flashcards" title="Decks">
         <div id="flashcards-header">
         {errorMessage && (
-          <div className={`mb-4 rounded-xl border p-3 text-sm ${errorMessage.includes("Ã°Å¸Å½â€°") || errorMessage.includes("Ã¢Å“â€¦") ? "border-success/20 bg-success/20 text-success" : "border-destructive/20 bg-destructive/20 text-destructive"}`}>
+          <div className={`mb-4 rounded-xl border p-3 text-sm ${errorMessage.includes("🎉") || errorMessage.includes("✅") ? "border-success/20 bg-success/20 text-success" : "border-destructive/20 bg-destructive/20 text-destructive"}`}>
             {errorMessage}
           </div>
         )}
         <div className="-mt-4 mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="max-w-xl text-sm text-foreground/55">
-              Algoritmo de repetiÃƒÂ§ÃƒÂ£o espaÃƒÂ§ada FSRS. Cards sÃƒÂ£o apresentados no momento ideal para fixar o conteÃƒÂºdo.
+              Algoritmo de repetição espaçada FSRS. Cards são apresentados no momento ideal para fixar o conteúdo.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-foreground/40">
-              <span>Ã°Å¸â€œÅ  Limite diÃƒÂ¡rio: <strong className="text-foreground">{settings?.daily_limit || 100}</strong></span>
-              <span>Ã¢Å“â€¦ Revisados hoje: <strong className="text-foreground">{reviewedToday}</strong></span>
-              <span>Ã°Å¸Å¸Â¢ Restantes: <strong className="text-foreground">{remainingToday}</strong></span>
+              <span>📊 Limite diário: <strong className="text-foreground">{settings?.daily_limit || 100}</strong></span>
+              <span>✅ Revisados hoje: <strong className="text-foreground">{reviewedToday}</strong></span>
+              <span>🟢 Restantes: <strong className="text-foreground">{remainingToday}</strong></span>
               <button
                 onClick={() => navigate('/configuracoes#flashcards')}
                 className="inline-flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
@@ -1474,7 +1474,7 @@ export default function FlashcardsPage() {
               className="rfm-btn rfm-btn--outline"
               style={{ "--tone": "var(--accent)" } as CSSProperties}
             >
-              <Flame className="h-4 w-4" /> Cards difÃƒÂ­ceis
+              <Flame className="h-4 w-4" /> Cards difíceis
             </button>
             <button
               onClick={() => iniciarEstudo()}
@@ -1484,7 +1484,7 @@ export default function FlashcardsPage() {
               {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Estudar hoje
             </button>
-            {/* Ã°Å¸â€Â¥ ETIQUETA ADICIONADA AQUI: flash-novo */}
+            {/* 🔥 ETIQUETA ADICIONADA AQUI: flash-novo */}
             <button
               onClick={() => { setIsModalOpen(true); setErrorMessage(""); }}
               data-tour="flash-novo"
@@ -1513,8 +1513,8 @@ export default function FlashcardsPage() {
                   name={deck.name}
                   description={
                     meta.disciplina
-                      ? `${meta.disciplina}${deck.description ? ' Ã‚Â· ' + deck.description : ''}`
-                      : deck.description || "Sem descriÃƒÂ§ÃƒÂ£o"
+                      ? `${meta.disciplina}${deck.description ? ' · ' + deck.description : ''}`
+                      : deck.description || "Sem descrição"
                   }
                   total={stats.total}
                   due={stats.due}
@@ -1524,7 +1524,7 @@ export default function FlashcardsPage() {
                   onOpen={() => setSelectedDeckId(deck.id)}
                   onStudy={() => iniciarEstudo(deck.id)}
                   studyDisabled={stats.due === 0 || isStarting || remainingToday <= 0}
-                  studyLabel={isStarting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> CarregandoÃ¢â‚¬Â¦</> : undefined}
+                  studyLabel={isStarting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando…</> : undefined}
                   actions={
                     <>
                       <button
@@ -1556,7 +1556,7 @@ export default function FlashcardsPage() {
           </div>
         ) : (
           <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/10">
-            <p className="text-sm text-foreground/40">Nenhum baralho criado. Clique em "Novo baralho" para comeÃƒÂ§ar.</p>
+            <p className="text-sm text-foreground/40">Nenhum baralho criado. Clique em "Novo baralho" para começar.</p>
           </div>
         )}
       </div>
@@ -1610,10 +1610,10 @@ export default function FlashcardsPage() {
             />
           </div>
           <div>
-            <label className="rfm-label">DescriÃƒÂ§ÃƒÂ£o</label>
+            <label className="rfm-label">Descrição</label>
             <textarea
               rows={2}
-              placeholder="Descreva o conteÃƒÂºdo do baralho"
+              placeholder="Descreva o conteúdo do baralho"
               value={deckDescription}
               onChange={(e) => setDeckDescription(e.target.value)}
               className="rfm-input"
@@ -1660,7 +1660,7 @@ export default function FlashcardsPage() {
           </label>
           {isShared && (
             <div>
-              <label className="rfm-label">IDs das convidadas (separados por vÃƒÂ­rgula)</label>
+              <label className="rfm-label">IDs das convidadas (separados por vírgula)</label>
               <input
                 type="text"
                 placeholder="Ex: user_abc123, user_def456"
@@ -1669,7 +1669,7 @@ export default function FlashcardsPage() {
                 className="rfm-input"
               />
               <p className="mt-1 text-[10px] text-foreground/40">
-                Ã°Å¸â€™Â¡ Digite o user_id de cada amiga. Elas verÃƒÂ£o os cards, mas com estatÃƒÂ­sticas prÃƒÂ³prias.
+                💡 Digite o user_id de cada amiga. Elas verão os cards, mas com estatísticas próprias.
               </p>
             </div>
           )}
@@ -1705,7 +1705,7 @@ export default function FlashcardsPage() {
               disabled={isSaving}
               className="btn-sun px-5 py-2.5 text-sm disabled:opacity-40"
             >
-              {isSaving ? "Salvando..." : "Salvar cartÃƒÂ£o"}
+              {isSaving ? "Salvando..." : "Salvar cartão"}
             </button>
           </>
         }
@@ -1715,11 +1715,11 @@ export default function FlashcardsPage() {
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="rfm-tag">Pergunta</span>
-                <span className="text-xs text-foreground/45">Frente do cartÃƒÂ£o</span>
+                <span className="text-xs text-foreground/45">Frente do cartão</span>
               </div>
               <div className="rfm-toolbar">
                 <button type="button" onClick={() => applyFormatting(newFrenteRef, 'bold', setNewCardFrente)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
-                <button type="button" onClick={() => applyFormatting(newFrenteRef, 'italic', setNewCardFrente)} aria-label="ItÃƒÂ¡lico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newFrenteRef, 'italic', setNewCardFrente)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
                 <button type="button" onClick={() => applyFormatting(newFrenteRef, 'list', setNewCardFrente)} aria-label="Lista"><List className="h-3 w-3" /></button>
               </div>
             </div>
@@ -1736,11 +1736,11 @@ export default function FlashcardsPage() {
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="rfm-tag">Resposta</span>
-                <span className="text-xs text-foreground/45">Verso do cartÃƒÂ£o</span>
+                <span className="text-xs text-foreground/45">Verso do cartão</span>
               </div>
               <div className="rfm-toolbar">
                 <button type="button" onClick={() => applyFormatting(newVersoRef, 'bold', setNewCardVerso)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
-                <button type="button" onClick={() => applyFormatting(newVersoRef, 'italic', setNewCardVerso)} aria-label="ItÃƒÂ¡lico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(newVersoRef, 'italic', setNewCardVerso)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
                 <button type="button" onClick={() => applyFormatting(newVersoRef, 'list', setNewCardVerso)} aria-label="Lista"><List className="h-3 w-3" /></button>
               </div>
             </div>
@@ -1754,7 +1754,7 @@ export default function FlashcardsPage() {
             />
           </div>
           <div>
-            <label className="rfm-label">Sub-baralho (TÃƒÂ³pico)</label>
+            <label className="rfm-label">Sub-baralho (Tópico)</label>
             <input
               type="text"
               placeholder="Ex: Osteologia, Arritmias..."
@@ -1769,7 +1769,7 @@ export default function FlashcardsPage() {
               ))}
             </datalist>
             <p className="mt-1 text-[10px] text-foreground/40">
-              Ã°Å¸â€™Â¡ Digite o nome do sub-baralho. Se jÃƒÂ¡ existir, ele ÃƒÂ© reaproveitado.
+              💡 Digite o nome do sub-baralho. Se já existir, ele é reaproveitado.
             </p>
           </div>
         </div>
@@ -1813,10 +1813,10 @@ export default function FlashcardsPage() {
             />
           </div>
           <div>
-            <label className="rfm-label">DescriÃƒÂ§ÃƒÂ£o</label>
+            <label className="rfm-label">Descrição</label>
             <input
               type="text"
-              placeholder="Nova descriÃƒÂ§ÃƒÂ£o (opcional)"
+              placeholder="Nova descrição (opcional)"
               value={renameDescription}
               onChange={(e) => setRenameDescription(e.target.value)}
               className="rfm-input"
@@ -1890,7 +1890,7 @@ export default function FlashcardsPage() {
               disabled={isSaving}
               className="btn-sun px-5 py-2.5 text-sm disabled:opacity-40"
             >
-              {isSaving ? "Salvando..." : "Salvar alteraÃƒÂ§ÃƒÂµes"}
+              {isSaving ? "Salvando..." : "Salvar alterações"}
             </button>
           </>
         }
@@ -1898,9 +1898,9 @@ export default function FlashcardsPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-foreground/55">
             <span className="rounded-full bg-white/5 px-2 py-0.5 font-medium">Card #{editCardId ? editCardId.slice(-3) : '--'}</span>
-            <span>Ã‚Â·</span>
+            <span>·</span>
             <span>{decks.find(d => d.id === selectedDeckId)?.name || "Baralho"}</span>
-            <span>Ã‚Â·</span>
+            <span>·</span>
             <span className="inline-flex items-center gap-1 text-primary">
               <Sparkles className="h-3 w-3" /> 
               {(() => {
@@ -1928,7 +1928,7 @@ export default function FlashcardsPage() {
             className="rfm-btn rfm-btn--outline"
             style={{ "--tone": "var(--destructive)" } as CSSProperties}
           >
-            <Trash2 className="h-3.5 w-3.5" /> Excluir cartÃƒÂ£o
+            <Trash2 className="h-3.5 w-3.5" /> Excluir cartão
           </button>
         </div>
         <div className="space-y-4">
@@ -1936,11 +1936,11 @@ export default function FlashcardsPage() {
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="rfm-tag">Pergunta</span>
-                <span className="text-xs text-foreground/45">Frente do cartÃƒÂ£o</span>
+                <span className="text-xs text-foreground/45">Frente do cartão</span>
               </div>
               <div className="rfm-toolbar">
                 <button type="button" onClick={() => applyFormatting(editFrenteRef, 'bold', setEditFrente)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
-                <button type="button" onClick={() => applyFormatting(editFrenteRef, 'italic', setEditFrente)} aria-label="ItÃƒÂ¡lico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editFrenteRef, 'italic', setEditFrente)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
                 <button type="button" onClick={() => applyFormatting(editFrenteRef, 'list', setEditFrente)} aria-label="Lista"><List className="h-3 w-3" /></button>
               </div>
             </div>
@@ -1965,7 +1965,7 @@ export default function FlashcardsPage() {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     if (!isValidImageFile(file)) {
-                      toast.error("Tipo de arquivo nÃƒÂ£o suportado. Use PNG, JPEG ou WebP.");
+                      toast.error("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.");
                       return;
                     }
                     setEditFrontImageFile(file);
@@ -2001,7 +2001,7 @@ export default function FlashcardsPage() {
                 {editRemoveFrontImage && editFrontImageUrl && (
                   <div className="flex items-center gap-2 text-sm text-foreground/60">
                     <Trash2Icon className="h-4 w-4 text-red-500" />
-                    <span>Imagem serÃƒÂ¡ removida ao salvar</span>
+                    <span>Imagem será removida ao salvar</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -2015,18 +2015,18 @@ export default function FlashcardsPage() {
                   </div>
                 )}
               </div>
-              <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP Ã¢â‚¬Â¢ mÃƒÂ¡x. 0.5 MB apÃƒÂ³s compressÃƒÂ£o</span>
+              <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP • máx. 0.5 MB após compressão</span>
             </div>
           </div>
           <div className="rfm-face" style={{ "--tone": "var(--accent)" } as CSSProperties}>
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="rfm-tag">Resposta</span>
-                <span className="text-xs text-foreground/45">Verso do cartÃƒÂ£o</span>
+                <span className="text-xs text-foreground/45">Verso do cartão</span>
               </div>
               <div className="rfm-toolbar">
                 <button type="button" onClick={() => applyFormatting(editVersoRef, 'bold', setEditVerso)} aria-label="Negrito"><Bold className="h-3 w-3" /></button>
-                <button type="button" onClick={() => applyFormatting(editVersoRef, 'italic', setEditVerso)} aria-label="ItÃƒÂ¡lico"><Italic className="h-3 w-3" /></button>
+                <button type="button" onClick={() => applyFormatting(editVersoRef, 'italic', setEditVerso)} aria-label="Itálico"><Italic className="h-3 w-3" /></button>
                 <button type="button" onClick={() => applyFormatting(editVersoRef, 'list', setEditVerso)} aria-label="Lista"><List className="h-3 w-3" /></button>
               </div>
             </div>
@@ -2051,7 +2051,7 @@ export default function FlashcardsPage() {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     if (!isValidImageFile(file)) {
-                      toast.error("Tipo de arquivo nÃƒÂ£o suportado. Use PNG, JPEG ou WebP.");
+                      toast.error("Tipo de arquivo não suportado. Use PNG, JPEG ou WebP.");
                       return;
                     }
                     setEditBackImageFile(file);
@@ -2087,7 +2087,7 @@ export default function FlashcardsPage() {
                 {editRemoveBackImage && editBackImageUrl && (
                   <div className="flex items-center gap-2 text-sm text-foreground/60">
                     <Trash2Icon className="h-4 w-4 text-red-500" />
-                    <span>Imagem serÃƒÂ¡ removida ao salvar</span>
+                    <span>Imagem será removida ao salvar</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -2101,11 +2101,11 @@ export default function FlashcardsPage() {
                   </div>
                 )}
               </div>
-              <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP Ã¢â‚¬Â¢ mÃƒÂ¡x. 0.5 MB apÃƒÂ³s compressÃƒÂ£o</span>
+              <span className="mt-1 block text-[11px] text-foreground/40">PNG, JPEG ou WebP • máx. 0.5 MB após compressão</span>
             </div>
           </div>
           <div>
-            <label className="rfm-label">Sub-baralho (TÃƒÂ³pico)</label>
+            <label className="rfm-label">Sub-baralho (Tópico)</label>
             <input
               type="text"
               placeholder="Ex: Osteologia, Arritmias..."
@@ -2120,19 +2120,19 @@ export default function FlashcardsPage() {
               ))}
             </datalist>
             <p className="mt-1 text-[10px] text-foreground/40">
-              Ã°Å¸â€™Â¡ Deixe vazio para o card ficar em "Sem sub-baralho".
+              💡 Deixe vazio para o card ficar em "Sem sub-baralho".
             </p>
           </div>
           {editCardId && (
             <div className="rfm-stat">
               <header className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-foreground/40">
-                <History className="h-3 w-3 text-primary" /> HistÃƒÂ³rico de revisÃƒÂµes
+                <History className="h-3 w-3 text-primary" /> Histórico de revisões
               </header>
               <ul className="space-y-2 text-xs">
                 {(() => {
                   const history = getCardHistory(editCardId);
-                  if (history.length === 0 || history[0]?.message === 'Nenhuma revisÃƒÂ£o ainda') {
-                    return <li className="text-foreground/45 italic">Nenhuma revisÃƒÂ£o ainda</li>;
+                  if (history.length === 0 || history[0]?.message === 'Nenhuma revisão ainda') {
+                    return <li className="text-foreground/45 italic">Nenhuma revisão ainda</li>;
                   }
                   return history.map((h, i) => (
                     <li key={i} className="flex items-center justify-between border-b border-border/60 pb-2 last:border-0 last:pb-0">
@@ -2178,7 +2178,7 @@ export default function FlashcardsPage() {
                     <UserCheck className="h-4 w-4 text-primary/60 shrink-0" />
                     <span className="text-sm font-medium text-foreground truncate">
                       {displayName}{displayEmail}
-                      {isYou && <span className="ml-2 text-[10px] text-primary shrink-0">(vocÃƒÂª)</span>}
+                      {isYou && <span className="ml-2 text-[10px] text-primary shrink-0">(você)</span>}
                       {isOwner && <span className="ml-2 text-[10px] text-foreground/40 shrink-0">(dona)</span>}
                     </span>
                   </div>
@@ -2223,7 +2223,7 @@ export default function FlashcardsPage() {
             </button>
           </div>
           <p className="mt-1 text-[10px] text-foreground/40">
-            Ã°Å¸â€™Â¡ Digite o e-mail cadastrado na conta da pessoa.
+            💡 Digite o e-mail cadastrado na conta da pessoa.
           </p>
           {copyProgress && copyProgress.total > 0 && (
             <div className="mt-3">
@@ -2247,11 +2247,11 @@ export default function FlashcardsPage() {
         </div>
       </RfModal>
 
-      {/* MODAL: CARDS MAIS DIFÃƒÂCEIS */}
+      {/* MODAL: CARDS MAIS DIFÍCEIS */}
       <RfModal
         open={isHardestModalOpen}
         onClose={() => setIsHardestModalOpen(false)}
-        title="Cards mais difÃƒÂ­ceis"
+        title="Cards mais difíceis"
         icon={<Flame className="h-4 w-4" />}
         tone="var(--accent)"
         width="44rem"
@@ -2285,14 +2285,14 @@ export default function FlashcardsPage() {
         <div className="max-h-[50vh] overflow-y-auto pr-1" style={{ "--tone": "var(--accent)" } as CSSProperties}>
           {hardestTab === "hoje" ? (
             <HardestList 
-              title="Cards mais difÃƒÂ­ceis de hoje"
+              title="Cards mais difíceis de hoje"
               titleIcon={<Flame className="h-3.5 w-3.5 text-accent" />}
               cards={getHardestCardsToday(15)}
               getCardMeta={getCardMeta}
             />
           ) : (
             <HardestList 
-              title="Todos os cards mais difÃƒÂ­ceis"
+              title="Todos os cards mais difíceis"
               titleIcon={<BarChart3 className="h-3.5 w-3.5 text-primary" />}
               cards={getHardestCards(20)}
               getCardMeta={getCardMeta}
@@ -2319,12 +2319,12 @@ export default function FlashcardsPage() {
         }
       >
         <p className="text-xs text-foreground/50 mb-4">
-          Renomeie ou exclua os sub-baralhos deste baralho. Excluir um sub-baralho <strong>nÃƒÂ£o apaga os cards</strong> Ã¢â‚¬â€ eles voltam para "Sem sub-baralho".
+          Renomeie ou exclua os sub-baralhos deste baralho. Excluir um sub-baralho <strong>não apaga os cards</strong> — eles voltam para "Sem sub-baralho".
         </p>
 
         {subBaralhosDoDeck.lista.length === 0 && subBaralhosDoDeck.semTopico === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">
-            Nenhum sub-baralho criado ainda. Adicione cards com o campo "TÃƒÂ³pico" preenchido para criar.
+            Nenhum sub-baralho criado ainda. Adicione cards com o campo "Tópico" preenchido para criar.
           </p>
         ) : (
           <div className="space-y-2">
@@ -2396,7 +2396,7 @@ export default function FlashcardsPage() {
                         onClick={async () => {
                           const ok = await confirmDialog({
                             title: `Excluir sub-baralho "${s.nome}"?`,
-                            description: "Os cards nÃƒÂ£o serÃƒÂ£o apagados Ã¢â‚¬â€ eles voltam para 'Sem sub-baralho'.",
+                            description: "Os cards não serão apagados — eles voltam para 'Sem sub-baralho'.",
                             confirmText: "Excluir",
                             cancelText: "Cancelar",
                             destructive: true,
@@ -2435,7 +2435,7 @@ export default function FlashcardsPage() {
 }
 
 // ============================================================
-// BOTÃƒâ€¢ES FSRS
+// BOTÕES FSRS
 // ============================================================
 
 function FsrsButton({ label, hint, variant = "default", onClick, disabled }: {
@@ -2471,7 +2471,7 @@ function FsrsButton({ label, hint, variant = "default", onClick, disabled }: {
 }
 
 // ============================================================
-// LISTA DE CARDS DIFÃƒÂCEIS
+// LISTA DE CARDS DIFÍCEIS
 // ============================================================
 function HardestList({ title, titleIcon, cards, getCardMeta }: { 
   title: string; 
@@ -2505,7 +2505,7 @@ function HardestList({ title, titleIcon, cards, getCardMeta }: {
                 <FormattedText text={card.front} />
               </p>
               {topico && (
-                <span className="text-[10px] text-primary">Ã°Å¸ÂÂ· {topico}</span>
+                <span className="text-[10px] text-primary">🏷 {topico}</span>
               )}
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="rfm-meta"><X className="h-3 w-3 text-destructive" /> Erros: <b className="text-accent">{lapses}</b></span>

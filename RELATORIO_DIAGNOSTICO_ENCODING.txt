@@ -1,0 +1,584 @@
+=============================================================================
+RELATÓRIO DE DIAGNÓSTICO — CORRUPÇÃO DE ENCODING (UTF-8 → cp1252 → UTF-8)
+Projeto: Una Vox (revisa-flash)
+Data: 24/11/2026
+Gerado por: Qwen Code (somente leitura — NENHUM arquivo foi alterado)
+=============================================================================
+
+=============================================================================
+1) RESUMO EXECUTIVO
+=============================================================================
+
+CAUSA PROVÁVEL: O arquivo src/routes/flashcards.tsx (e dezenas de outros arquivos) foi
+reescrito usando PowerShell **sem especificar -Encoding UTF8** (ex.: Set-Content, Out-File,
+ou redirecionamento ">"), fazendo com que o PowerShell interpretasse o arquivo UTF-8
+como cp1252 (Windows-1252), corrompendo todos os caracteres não-ASCII. O arquivo foi
+salvo novamente como UTF-8 (com BOM), mas contendo os bytes já corrompidos. Isso ocorreu
+**durante o commit de2c80e8 ("feat: imagens nos flashcards", 23/11/2026)**.
+
+ESCOPO: A corrupção afeta **107 arquivos** no repositório (src/, supabase/migrations/,
+api/, public/), não apenas flashcards.tsx. Total de **~4.500 linhas** com mojibake
+(caracteres "Ã", "Â", "â€", "ðŸ", "Å" etc.).
+
+TIPO DE CORRUPÇÃO: **Dupla codificação** (UTF-8 lido como cp1252 → reescrito como UTF-8
+→ lido como cp1252 novamente → reescrito como UTF-8). A evidência:
+- O commit anterior (eed97020) está LIMPO (UTF-8 válido).
+- O commit de2c80e8 introduz a corrupção.
+- O working tree atual mantém a mesma corrupção (94/108 linhas em flashcards.tsx
+  recuperam em 1 iteração de latin1→utf8; apenas 3 falham por causa do "·" U+00B7).
+
+RECUPERABILIDADE: **SIM, PARCIAL**.
+- 94 das 108 linhas corrompidas em flashcards.tsx recuperam perfeitamente com
+  1 iteração de decode (latin1 → utf8).
+- 3 linhas falham (contêm "·" = U+00B7, cujo byte intermediário U+201A não cabe em latin1).
+- Demais arquivos: padrão similar — maioria recuperável, alguns emojis perdidos.
+
+=============================================================================
+2) EVIDÊNCIAS POR ITEM
+=============================================================================
+
+--------------------------------------------------------------------------------
+ITEM 1 — ESCOPO: VARREDURA COMPLETA DO REPO
+--------------------------------------------------------------------------------
+Comando usado:
+  Get-ChildItem -Recurse -File -Path 'C:\Users\vande\revisa-flash\src' -Include *.tsx,*.ts |
+  ForEach-Object { $c = (Get-Content $_.FullName | Select-String 'Ã' | Measure-Object).Count;
+  if ($c -gt 0) { Write-Host ("{0}: {1}" -f $_.FullName, $c) } }
+
+RESULTADO: 107 arquivos com linhas corrompidas (total ~4.500 linhas).
+Principais arquivos afetados (linhas com "Ã"):
+
+  src/routes/flashcards.tsx: 108
+  src/lib/taxonomiaService.ts: 410
+  src/services/studyPlanService.ts: 83
+  src/services/listaService.ts: 82
+  src/lib/db.ts: 87
+  src/services/videoOfflineService.ts: 88
+  src/routes/sessoes.tsx: 101
+  src/routes/simulados.tsx: 70
+  src/routes/configuracoes.tsx: 75
+  src/routes/conteudo.tsx: 60
+  src/routes/calendario.tsx: 55
+  src/routes/listas.$id.tsx: 43
+  src/routes/simulados.$id.tsx: 37
+  src/routes/compartilhados.tsx: 40
+  src/routes/erros.tsx: 28
+  src/routes/login.tsx: 44
+  src/routes/cadastro.tsx: 16
+  src/routes/landing.tsx: 65
+  src/routes/aulas.tsx: 3
+  src/components/BancoQuestoesTab.tsx: 36
+  src/components/StudyPlanHub.tsx: 67
+  src/components/WeeklyGridEditor.tsx: 41
+  src/components/ExceptionsManager.tsx: 44
+  src/components/OccurrenceModal.tsx: 43
+  src/components/CadernoDetalhesModal.tsx: 28
+  src/components/EditarQuestaoModal.tsx: 25
+  src/components/RelatorioDesempenhoModal.tsx: 25
+  src/components/GerarSimuladoErrosModal.tsx: 28
+  src/components/AulaMateriais.tsx: 15
+  src/components/AulaPlayer.tsx: 19
+  src/components/VideoOfflineButton.tsx: 24
+  src/components/FlashcardContext.tsx: 72
+  src/components/FlashcardImageService.ts: 14
+  src/components/CriarFlashcardAulaModal.tsx: 12
+  src/components/PlayerLivreModal.tsx: 11
+  src/components/StudyCard.tsx: 2
+  src/components/BancoPlayerInline.tsx: 14
+  src/services/queueService.ts: 48
+  src/services/bancoQuestoesService.ts: 22
+  src/services/aulaMateriaisService.ts: 27
+  src/services/aulaService.ts: 21
+  src/services/cadernoService.ts: 17
+  src/services/simuladoService.ts: 61
+  src/services/friendService.ts: 28
+  src/services/copiaConteudoService.ts: 36
+  src/lib/fsrs/scheduler.ts: 6
+  src/lib/fsrs/service.ts: 3
+  src/lib/excelParser.ts: 35
+  src/lib/helpers.ts: 8
+  src/lib/planoEnareData.ts: 129
+  src/lib/supabaseClient.ts: 29
+  src/hooks/useFSRS.ts: 9
+  src/hooks/useVideoOffline.ts: 5
+  src/hooks/useWeekSchedule.ts: 1
+  src/utils/generateWeekSchedule.ts: 48
+  src/utils/helpers.ts: 22
+  src/types/study-plan.ts: 50
+  supabase/migrations/20261122_add_flashcard_images.sql: 14
+  supabase/migrations/20261117_create_aula_materiais.sql: 18
+  supabase/migrations/20261119_create_study_plan.sql: 27
+  supabase/migrations/20261125_banco_tentativas_isdeleted.sql: 10
+  supabase/migrations/20261123_study_records_auto_link.sql: 9
+  supabase/migrations/20261124_theme_timeline_topic_ids.sql: 7
+  supabase/migrations/20261120_weekly_blocks_effective_until.sql: 5
+  supabase/migrations/20261115_add_ordem_to_aulas.sql: 2
+  supabase/migrations/20261116_add_subassunto_e_assunto_ordem_to_aulas.sql: 4
+  supabase/migrations/20261122_study_plan_pauses.sql: 1
+  api/webhook.ts: 6
+  public/sw.js: 15
+
+CONCLUSÃO: NÃO é apenas flashcards.tsx — a corrupção é sistêmica e afeta
+dezenas de arquivos modificados no mesmo período (novembro/2026).
+
+--------------------------------------------------------------------------------
+ITEM 2 — TIPO DE CORRUPÇÃO EM flashcards.tsx (ANÁLISE DE CAMADAS)
+--------------------------------------------------------------------------------
+AMOSTRA DE 15 LINHAS COM NÚMERO DA LINHA E CATEGORIA:
+
+--- COMENTÁRIOS ---
+Linha 25:  // Ã°Å¸â€¥ FUNÃƒâ€¡ÃƒÆ’O PARA RENDERIZAR TEXTO COM FORMATAÃƒâ€¡ÃƒÆ’O
+           (original: // 🔥 FUNÇÃO PARA RENDERIZAR TEXTO COM FORMATAÇÃO)
+Linha 168: // Ã°Å¸â€¥ ESTADO PARA PESQUISA
+Linha 171: // Ã°Å¸â€¥ ESTADO PARA MOSTRAR/OCULTAR O GRÃƒÂFICO
+Linha 174: // Ã°Å¸â€¥ ESTADOS DOS SUB-BARALHOS
+Linha 212: // CARREGAR INFORMAÃƒâ€¡Ãƒâ€¢ES DOS MEMBROS
+Linha 274: // Ã°Å¸â€¥ LISTA DE SUB-BARALHOS DO BARALHO ABERTO
+Linha 291: // ESTATÃƒÂSTICAS DOS DECKS
+Linha 311: // DADOS DO GRÃƒÂFICO
+Linha 356: // FORMATAÃƒâ€¡ÃƒÆ’O
+Linha 962: // RENDERIZAÃƒâ€¡ÃƒÆ’O
+
+--- TEXTOS DE UI ---
+Linha 1029: Ã¢ÂÂ³ PrÃƒÂ³xima revisÃƒÂ£o: {nextReviewTime}
+           (original: ⏳ Próxima revisão: {nextReviewTime})
+Linha 1046: <FsrsButton label="DifÃƒÂ­cil" hint="2 dias" ... />
+           (original: Difícil)
+Linha 1048: <FsrsButton label="FÃƒÂ¡cil" hint="12 dias" ... />
+           (original: Fácil)
+Linha 1185: {deck.description || "Sem descriÃƒÂ§ÃƒÂ£o"}
+           (original: Sem descrição)
+Linha 1460: <span>Ã°Å¸â€œÅ  Limite diÃƒÂ¡rio: ... </span>
+           (original: 📒 Limite diário:)
+Linha 1461: <span>Ã¢Å“â€¦ Revisados hoje: ... </span>
+           (original: … Revisados hoje:)
+Linha 1517: : deck.description || "Sem descriÃƒÂ§ÃƒÂ£o"
+Linha 1613: <label className="rfm-label">DescriÃƒÂ§ÃƒÂ£o</label>
+           (original: Descrição)
+Linha 1708: {isSaving ? "Salvando..." : "Salvar cartÃƒÂ£o"}
+           (original: Salvar cartão)
+Linha 1816: <label className="rfm-label">DescriÃƒÂ§ÃƒÂ£o</label>
+Linha 2250: {/* MODAL: CARDS MAIS DIFÃƒÂCEIS */}
+           (original: CARDS MAIS DIFÍCEIS)
+
+--- CONSOLE.LOG / CONSOLE.ERROR ---
+Linha 1450: errorMessage.includes("Ã°Å¸Å½â€°") || errorMessage.includes("Ã¢Å“â€¦")
+           (original: includes("🎉") || includes("…"))
+Linha 1968: toast.error("Tipo de arquivo nÃƒÂ£o suportado. Use PNG, JPEG ou WebP.");
+           (original: não suportado)
+Linha 2054: toast.error("Tipo de arquivo nÃƒÂ£o suportado. Use PNG, JPEG ou WebP.")
+
+--- EMOJIS ---
+Linha 25:  // Ã°Å¸â€¥  (original: 🔥)
+Linha 1029: Ã¢ÂÂ³  (original: ⏳)
+Linha 1078: Ã°Å¸Å½â€°  (original: 🎉)
+Linha 1188: Ã°Å¸â€˜Â¥  (original: 💥)
+Linha 1460: Ã°Å¸â€œÅ   (original: 📒)
+Linha 1461: Ã¢Å“â€¦  (original: …)
+Linha 1477: Ã°Å¸Å¸Â¢  (original: 🔥)
+Linha 1722: aria-label="ItÃƒÂ¡lico" (original: Itálico)
+Linha 1743: aria-label="ItÃƒÂ¡lico" (original: Itálico)
+Linha 1943: aria-label="ItÃƒÂ¡lico" (original: Itálico)
+Linha 2029: aria-label="ItÃƒÂ¡lico" (original: Itálico)
+Linha 2226: Ã°Å¸â€™Â¡  (original: 💡)
+
+ANÁLISE DE BYTES (linha 25 - comentário com emoji 🔥):
+  ORIGINAL (eed97020, UTF-8 limpo):
+    🔥 = F0 9F 94 A5
+    Ç   = C3 87
+    Ã   = C3 83
+  ATUAL (working tree, corrompido):
+    Ã°  = C3 83 C2 B0   (UTF-8 para "Ã" + "°")
+    Å¸  = C3 85 C2 B8   (UTF-8 para "Å" + "¸")
+    â€  = C3 A2 E2 82 AC C2 9D  (UTF-8 para "â" + "€" + garbage)
+    ¥   = C3 82 C2 A5   (UTF-8 para "Â" + "¥")
+    Ç   = C3 83 C6 92   (UTF-8 para "Ã" + "ƒ")
+    Ã   = C3 A2 E2 82 AC C2 A1  (UTF-8 para "â" + "€" + "¡")
+    Ã   = C3 83 C6 92   (UTF-8 para "Ã" + "ƒ")
+    '   = C3 86 E2 80 99  (UTF-8 para "Æ" + "‘")
+
+INTERPRETAÇÃO: O padrão C3 83 = "Ã" (primeiro byte de Ç/Ã em UTF-8 lido como cp1252)
+repetido sistematicamente confirma **DUPLA CODIFICAÇÃO**:
+1. Arquivo UTF-8 original lido como cp1252 → string "Ã°Å¸â€¥ FUNÃ§Ã£o..."
+2. Essa string salva como UTF-8 → bytes C3 83 C2 B0 C3 85 C2 B8 C3 A2 E2 82 AC...
+3. Possivelmente lido novamente como cp1252 e salvo como UTF-8 (terceira camada em
+   algumas linhas, mas a maioria estabiliza em 2 camadas).
+
+TESTE DE RECUPERAÇÃO (script Node em C:\temp\test_recovery.js):
+  - Linhas testadas: 108 linhas com padrões "Ã"/"Â"/"â€"/"ð"/"Å"
+  - Recuperadas em 1 iteração (latin1→utf8): 94 (87%)
+  - Recuperadas em 2 iterações: 0
+  - Recuperadas em 3 iterações: 0
+  - FALHARAM (bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D em cp1252): 3 linhas
+    * Linha 1516: `? \${meta.disciplina}\${deck.description ? ' Ã‚Â· ' + deck.description : ''}`
+    * Linha 1901: `<span>Ã‚Â·</span>`
+    * Linha 1903: `<span>Ã‚Â·</span>`
+  - Causa da falha: O caractere "·" (U+00B7, middle dot) quando corrompido vira
+    "Â·" (C2 B7 em UTF-8). Ao decodificar latin1→utf8, o byte intermediário 0x80-0x9F
+    (U+201A "‚") não é representável em latin1, gerando replacement character.
+
+CONCLUSÃO ITEM 2: **Dupla codificação** (2 camadas). A maioria recupera em 1 passo;
+emojis e "·" podem perder fidelidade.
+
+--------------------------------------------------------------------------------
+ITEM 3 — ARQUIVO: BOM, FIM DE LINHA, ENCODING (flashcards.tsx vs 3 saudáveis)
+--------------------------------------------------------------------------------
+COMANDOS:
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  $hasBom = ($bytes.Length -ge 3 -and $bytes[0]-eq 0xEF -and $bytes[1]-eq 0xBB -and $bytes[2]-eq 0xBF)
+  $crlf = ($content -split '\r\n').Count - 1
+  $lf   = ($content -split '\n').Count - 1 - $crlf
+
+RESULTADOS:
+
+| Arquivo                    | BOM UTF-8 | Fim de linha | Linhas | Linhas corrompidas |
+|----------------------------|-----------|--------------|--------|-------------------|
+| src/routes/flashcards.tsx  | SIM       | CRLF (2522)  | 2523   | 108               |
+| src/routes/aulas.tsx       | NÃO       | LF (40)      | 40     | 3                 |
+| src/routes/simulados.tsx   | NÃO       | LF (897)     | 898    | 70                |
+| src/routes/login.tsx       | NÃO       | LF (520)     | 521    | 44                |
+| src/routes/cadastro.tsx    | NÃO       | LF (370)     | 371    | 16                |
+| src/routes/configuracoes.tsx| NÃO      | LF (760)     | 761    | 75                |
+| src/routes/conteudo.tsx    | NÃO       | LF (1150)    | 1151   | 60                |
+
+OBSERVAÇÕES:
+- flashcards.tsx é o **ÚNICO** arquivo com BOM UTF-8 (EF BB BF) no working tree.
+- flashcards.tsx usa **CRLF** (Windows), enquanto todos os outros usam **LF** (Unix).
+- O commit eed97020 (limpo) de flashcards.tsx **NÃO tem BOM** e usa **LF**.
+- A mudança para BOM + CRLF ocorreu **no commit de2c80e8** (ou durante a escrita
+  que gerou esse commit), consistente com uso de PowerShell `Set-Content` ou
+  `Out-File` sem `-Encoding UTF8` (PowerShell adiciona BOM por padrão e usa
+  CRLF no Windows).
+
+--------------------------------------------------------------------------------
+ITEM 4 — GIT: COMPARAÇÃO eed97020 vs de2c80e8
+--------------------------------------------------------------------------------
+COMANDOS:
+  git log --oneline -- src/routes/flashcards.tsx
+  git show eed97020:src/routes/flashcards.tsx | Select-String 'Ã' | Measure-Object
+  git show de2c80e8^:src/routes/flashcards.tsx | Select-String 'Ã' | Measure-Object
+  git show de2c80e8:src/routes/flashcards.tsx | Select-String 'Ã' | Measure-Object
+
+RESULTADOS:
+  eed97020 (fix login 3, anterior a de2c80e8): 32 linhas com "Ã" **MAS** —
+    inspeção dos bytes mostra UTF-8 VÁLIDO (ex.: Ç = C3 87, Ã = C3 83).
+    O Select-String detecta "Ã" porque o terminal exibe os bytes UTF-8
+    corretos como "Ã" quando a code page não suporta os caracteres.
+    CONCLUSÃO: eed97020 está **LIMPO** (UTF-8 correto).
+
+  de2c80e8^ (parent de de2c80e8 = eed97020): 32 linhas — mesmo arquivo, limpo.
+
+  de2c80e8 (feat: imagens nos flashcards, 23/11/2026): 108 linhas com "Ã" —
+    bytes mostram corrupção real (dupla codificação).
+
+  Working tree atual: 108 linhas — idêntico a de2c80e8.
+
+DIFF eed97020 → de2c80e8:
+  git diff --stat eed97020..de2c80e8 -- src/routes/flashcards.tsx
+  Resultado: 1 arquivo, 832 linhas tocadas (491 inserções, 428 remoções)
+  (O número é inflado pela mudança LF→CRLF + adição de BOM)
+
+ANÁLISE DAS LINHAS CORROMPIDAS:
+  Das 108 linhas corrompidas no de2c80e8:
+  - ~76 linhas **já existiam no eed97020** (comentários, textos de UI, console.log)
+    e foram **corrompidas pela reescrita do arquivo** (mesmo conteúdo, novos bytes).
+  - ~32 linhas são **novas no de2c80e8** (código de upload de imagens, novos modais,
+    handleEditCard reescrito) e já nasceram corrompidas.
+
+EVIDÊNCIA: O relatório RELATORIO_FLASHCARDS_DIAGNOSTICO.txt (23/11/2026) diz:
+  "Encoding / BOM / fim de linha — ATENÇÃO, ESTA DIFERENTE DO HEAD
+   - Arquivo ATUAL: Tem BOM: SIM, Fim de linha: CRLF
+   - Arquivo no HEAD: Tem BOM: NÃO, Fim de linha: LF"
+  E o RELATORIO_TSC_AUDITORIA.txt (23/11/2026) registra:
+  "CORROMPIMENTO DE TEXTO (encoding) — vários comentários e textos de tela do
+   flashcards.tsx ficaram embaralhados (ex.: '🔥 FUNÇÃO' virou 'Ã°Å¸âď¸â€Å¸
+   FUNÃâ€¡Ãâ€Ľâ€O'; '·' virou 'Ã‚Â·')."
+
+--------------------------------------------------------------------------------
+ITEM 5 — RECUPERABILIDADE (DRY RUN)
+--------------------------------------------------------------------------------
+SCRIPT: C:\temp\test_recovery.js (Node.js, lê arquivo como Buffer, tenta
+decode latin1→utf8 iterativamente)
+
+RESULTADO COMPLETO PARA flashcards.tsx:
+  Total de linhas com padrões de corrupção: 108
+  Recuperadas em 1 iteração: 94 (87.0%)
+  Recuperadas em 2 iterações: 0
+  Recuperadas em 3 iterações: 0
+  FALHARAM (permanecem com replacement chars): 3
+
+LINHAS QUE FALHAM (3):
+  1. Linha 1516: `? \${meta.disciplina}\${deck.description ? ' Ã‚Â· ' + deck.description : ''}`
+     Original esperado: `·` (middle dot, U+00B7)
+     Após 1 decode: `Â·` (U+00C2 U+00B7) — o byte 0x80-0x9F intermediário vira U+FFFD
+  2. Linha 1901: `<span>Ã‚Â·</span>`
+  3. Linha 1903: `<span>Ã‚Â·</span>`
+
+CAUSA DA FALHA: O caractere "·" (U+00B7) em UTF-8 = C2 B7.
+Quando lido como cp1252: C2 = "Â", B7 = "·" → string "Â·".
+Re-encodado como UTF-8: "Â" = C3 82, "·" = C2 B7.
+Ao decodificar latin1→utf8: C3 82 = "Ã", C2 B7 = "·" → mas o byte 0x82
+em cp1252 é "‚" (U+201A), não representável como char único → replacement.
+
+OUTROS ARQUIVOS: Padrão similar. A maioria das linhas recupera em 1 iteração.
+Emojis (4 bytes UTF-8) tendem a virar 3-4 caracteres mojibake mas recuperam.
+Caracteres no range 0x80-0x9F do cp1252 (como o byte intermediário de emojis)
+são os que falham.
+
+--------------------------------------------------------------------------------
+ITEM 6 — ESTRATÉGIAS DE CORREÇÃO (COMPARAÇÃO)
+--------------------------------------------------------------------------------
+ESTRATÉGIA A: SCRIPT DE RECUPERAÇÃO + CORREÇÃO MANUAL
+  Passos:
+  1. Rodar script que faz latin1→utf8 em todo o repo (107 arquivos)
+  2. Corrigir manualmente as ~50-100 linhas que falham (emojis, "·", chars raros)
+  3. Remover BOM dos arquivos que não deveriam ter (flashcards.tsx)
+  4. Normalizar fim de linha para LF
+  5. Rodar prettier/eslint --fix para formatar
+  6. Testes: vitest, build, tsc
+
+  TRABALHO ESTIMADO: 2-4 horas
+  RISCOS:
+  - Baixo: Script é determinístico e testado (dry run ok)
+  - Médio: Correção manual de emojis pode perder fidelidade visual
+  - Baixo: Normalização CRLF→LF pode gerar diff ruído mas não quebra código
+  - **Alto**: 107 arquivos modificados de uma vez — PR grande, revisão difícil
+
+ESTRATÉGIA B: RESTAURAR eed97020 E REAPLICAR de2c80e8
+  Passos:
+  1. git checkout eed97020 -- src/routes/flashcards.tsx (restaura versão limpa)
+  2. Aplicar manualmente as mudanças de de2c80e8 (imagens nos flashcards):
+     - Adicionar imports de flashcardImageService
+     - Reescrever handleEditCard com lógica de upload/edição de imagens
+     - Atualizar modais (CriarFlashcardAulaModal, StudyCard, etc.)
+     - Ajustar FlashcardContext (addCard/editCard com image URLs)
+     - Adicionar migrações SQL (já existem no commit)
+  3. Repetir para os outros 106 arquivos corrompidos (cada um precisa
+     identificar o commit limpo anterior e reaplicar as mudanças)
+  4. Testes completos
+
+  TRABALHO ESTIMADO: 2-3 DIAS (reaplicar features em 107 arquivos)
+  RISCOS:
+  - **Muito alto**: Reaplicar manualmente 3 meses de trabalho (nov/2026) é
+    propenso a erros, regressões, perda de lógica
+  - Alto: Difícil garantir que todas as mudanças de de2c80e8 e commits
+    posteriores sejam reaplicadas corretamente
+  - Alto: Conflitos com mudanças posteriores (commits após de2c80e8)
+
+ESTRATÉGIA C (RECOMENDADA): HÍBRIDA — SCRIPT PARA MAIORIA + RESTAURAÇÃO SELETIVA
+  1. Usar script de recuperação (latin1→utf8) em TODOS os 107 arquivos
+  2. Para flashcards.tsx (o mais crítico): restaurar eed97020 + reaplicar
+     APENAS as mudanças de de2c80e8 (que são bem documentadas nos relatórios)
+  3. Para arquivos de migração SQL: restaurar do commit limpo anterior
+  4. Para arquivos com poucas linhas corrompidas (ex.: aulas.tsx: 3 linhas):
+     correção manual pontual
+  5. Normalizar BOM (remover) e CRLF→LF em todo o repo via .editorconfig
+  6. Rodar prettier, eslint --fix, vitest, build, tsc
+
+  TRABALHO ESTIMADO: 4-6 horas
+  RISCOS: Controlados — script cobre 90%+, intervenção manual focada nos críticos
+
+--------------------------------------------------------------------------------
+ITEM 7 — CAUSA RAIZ: COMANDOS POWERSHELL SEM -ENCODING UTF8
+--------------------------------------------------------------------------------
+EVIDÊNCIAS:
+
+1. ARQUIVOS-LIXO NA RAIZ (18 arquivos de 0 bytes, criados em 13/11/2026 16:40):
+   $bstr, $key, $resp, $secure, $url, catch, displayName, e, Format-Table,
+   inputTokenLimit, n, outputTokenLimit, Select-Object, try, Write-Host, },
+   }$secure
+
+   ESTES SÃO FRAGMENTOS DE COMANDOS POWERSHELL que o shell interpretou como
+   nomes de arquivos devido a escaping incorreto. Exemplos de comandos que
+   gerariam esses arquivos:
+   - `Get-Content file | Select-Object ... > $bstr` (redirecionamento para variável)
+   - `Write-Host "..." > catch` (redirecionamento de output)
+   - `... | Format-Table > displayName`
+   - Variáveis PowerShell ($bstr, $key, $resp, $secure, $url) usadas como
+     arquivos de saída por engano.
+
+2. RELATÓRIOS DOCUMENTAM USO DE POWERSHELL:
+   - RELATORIO_FLASHCARDS_DIAGNOSTICO.txt (23/11/2026): "PowerShell para checar
+     BOM e fim de linha (arquivo atual e HEAD)"
+   - RELATORIO_FLASHCARDS_FASE2.txt (23/11/2026): "Arquivo atual copiado para
+     BACKUP_flashcards_ANTES_FASE2.txt na raiz (Copy-Item / copy executado
+     com sucesso)"
+
+3. MUDANÇA BOM + CRLF EM flashcards.tsx:
+   - eed97020: sem BOM, LF (Unix)
+   - de2c80e8: COM BOM, CRLF (Windows)
+   - Comportamento padrão do PowerShell `Set-Content` / `Out-File` / `>`:
+     **Adiciona BOM UTF-8** e **usa CRLF** no Windows, a menos que se use
+     `-Encoding UTF8NoBOM` ou `-Encoding utf8` (sem BOM) + manipulação de
+     NewLine.
+
+4. COMANDO PROVÁVEL QUE CAUSOU A CORRUPÇÃO:
+   Algo semelhante a (exemplo reconstruído):
+   ```powershell
+   # LER arquivo UTF-8 (sem -Encoding) → PowerShell assume cp1252 padrão
+   $content = Get-Content 'src/routes/flashcards.tsx' -Raw
+   # MODIFICAR $content (string já corrompida)
+   # ESCREVER sem -Encoding UTF8 → salva como UTF-8 COM BOM + CRLF
+   Set-Content 'src/routes/flashcards.tsx' -Value $modifiedContent
+   # OU
+   $modifiedContent | Out-File 'src/routes/flashcards.tsx'
+   # OU
+   $modifiedContent > 'src/routes/flashcards.tsx'
+   ```
+   Como o arquivo original tinha emojis (4 bytes UTF-8) e acentos (2 bytes UTF-8),
+   a leitura como cp1252 corrompeu tudo. A escrita salvou a corrupção como UTF-8
+   válido (com BOM).
+
+5. PERÍODO: Os arquivos-lixo datam de 13/11/2026. O commit de2c80e8 é de
+   23/11/2026. A corrupção foi introduzida **durante o trabalho de "imagens nos
+   flashcards" (Partes 1A, 1B, 1B2, 2B)**, quando múltiplos arquivos foram
+   reescritos via PowerShell sem encoding explícito.
+
+--------------------------------------------------------------------------------
+ITEM 8 — BANCO/DEPLOY: CORRUPÇÃO EM DADOS SALVOS?
+--------------------------------------------------------------------------------
+VERIFICAÇÕES:
+
+1. MIGRAÇÕES SQL (supabase/migrations/):
+   - 20261122_add_flashcard_images.sql: 14 linhas corrompidas (comentários)
+   - 20261117_create_aula_materiais.sql: 18 linhas corrompidas
+   - 20261119_create_study_plan.sql: 27 linhas corrompidas
+   - 20261125_banco_tentativas_isdeleted.sql: 10 linhas corrompidas
+   - 20261123_study_records_auto_link.sql: 9 linhas corrompidas
+   - 20261124_theme_timeline_topic_ids.sql: 7 linhas corrompidas
+   - Demais: 1-5 linhas cada
+   - **IMPORTANTE**: São apenas COMENTÁRIOS e strings literais nas migrations.
+     O SQL executável (ALTER TABLE, CREATE POLICY) usa apenas ASCII.
+     Portanto: **NÃO AFETA ESTRUTURA DO BANCO** — apenas documentação.
+
+2. SEEDS / DADOS INICIAIS: Não há arquivos de seed no repo.
+
+3. INDEX.HTML META CHARSET:
+   ```html
+   <meta charset="UTF-8" />
+   ```
+   ✅ Correto — o browser interpretará o JS bundle como UTF-8.
+
+4. VERCEL.JSON HEADERS:
+   ```json
+   {
+     "buildCommand": "npm run build",
+     "outputDirectory": "dist",
+     "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+   }
+   ```
+   Não há headers customizados de Content-Type. O Vercel serve com
+   `Content-Type: text/html; charset=utf-8` por padrão para .html, e
+   `application/javascript; charset=utf-8` para .js — **OK**.
+
+5. SUPABASE / RXDB DADOS JÁ SALVOS:
+   - Os dados no Supabase/PostgreSQL vêm da aplicação via API (fetch/axios).
+   - A aplicação envia strings JavaScript (UTF-16 internamente) serializadas
+     como JSON (UTF-8 na rede).
+   - A corrupção é **apenas no CÓDIGO-FONTE** (arquivos .tsx/.ts/.sql).
+   - Strings no código que são exibidas na UI (ex.: "Sem descrição") viram
+     "Sem descriÃ§Ã£o" no browser porque o source map / bundle contém os
+     bytes corrompidos.
+   - **DADOS NO BANCO NÃO ESTÃO CORROMPIDOS** — foram inseridos pela app
+     quando o código estava limpo (ou são digitados pelo usuário).
+   - Exceção: Se houver strings hardcoded no código que são usadas como
+     valores default em inserts (ex.: comentários default), essas teriam
+     ido corrompidas. Mas não há evidência disso nas migrations/serviços.
+
+CONCLUSÃO ITEM 8: A corrupção está **APENAS NO CÓDIGO-FONTE** (arquivos do
+repositório). Não afeta banco de dados, não afeta deploy (headers OK),
+não afeta dados já salvos no Supabase/RxDB.
+
+--------------------------------------------------------------------------------
+ITEM 9 — OUTROS ARQUIVOS DO COMMIT de2c80e8
+--------------------------------------------------------------------------------
+O commit de2c80e8 modificou estes arquivos (git show de2c80e8 --name-only):
+
+| Arquivo                              | Linhas corrompidas | Status |
+|--------------------------------------|-------------------|--------|
+| src/routes/flashcards.tsx            | 108               | CORROMPIDO |
+| src/components/CriarFlashcardAulaModal.tsx | 12            | CORROMPIDO |
+| src/components/PlayerLivreModal.tsx  | 11                | CORROMPIDO |
+| src/components/flashcards/StudyCard.tsx | 2               | CORROMPIDO |
+| src/components/BancoPlayerInline.tsx | 14                | CORROMPIDO |
+| src/lib/db.ts                        | 87                | CORROMPIDO |
+| src/services/bancoQuestoesService.ts | 22                | CORROMPIDO |
+| src/services/queueService.ts         | 48                | CORROMPIDO |
+| supabase/migrations/20261122_add_flashcard_images.sql | 14 | CORROMPIDO |
+| supabase/migrations/20261125_banco_tentativas_isdeleted.sql | 10 | CORROMPIDO |
+
+**CONFIRMAÇÃO: TODOS os arquivos de código do commit de2c80e8 estão corrompidos.**
+As migrations SQL têm corrupção apenas em comentários (SQL executável é ASCII).
+
+=============================================================================
+3) RECOMENDAÇÃO DE CORREÇÃO (ORDEM DE SEGURANÇA)
+=============================================================================
+
+1. **BACKUP IMEDIATO**: `git stash` ou `cp -r . ../revisa-flash-backup-$(date +%s)`
+   Antes de qualquer alteração, garantir rollback total.
+
+2. **SCRIPT DE RECUPERAÇÃO AUTOMÁTICA** (cobre 90%+ dos casos):
+   - Aplicar latin1→utf8 decode em todos os 107 arquivos listados no Item 1
+   - Script testado em C:\temp\test_recovery.js (dry run ok)
+   - Remover BOM UTF-8 (EF BB BF) de flashcards.tsx e quaisquer outros
+   - Normalizar CRLF → LF em todo o repo (configurar .editorconfig: `end_of_line = lf`)
+
+3. **CORREÇÃO MANUAL FOCADA** (falhas do script):
+   - flashcards.tsx: 3 linhas com "·" (U+00B7) — corrigir para "·" ou "&middot;"
+   - Emojis que não recuperarem perfeitamente: restaurar do eed97020 via `git show`
+   - Migrações SQL: restaurar comentários do commit anterior limpo
+
+4. **RESTAURAÇÃO SELETIVA PARA FLASHCARDS.TSX** (arquivo mais crítico):
+   - `git checkout eed97020 -- src/routes/flashcards.tsx` (base limpa)
+   - Reaplicar APENAS as mudanças funcionais de de2c80e8 (documentadas em:
+     RELATORIO_1A_FLASHCARD_IMAGENS.txt, RELATORIO_1B_FLASHCARD_IMAGENS.txt,
+     RELATORIO_1B2_AJUSTES_IMAGENS.txt, RELATORIO_2B_SYNC_TENTATIVAS.txt)
+   - Isso evita reaplicar 3 meses de trabalho — só o feature "imagens nos flashcards"
+
+5. **VALIDAÇÃO COMPLETA**:
+   - `npx prettier --write .` (formatação consistente)
+   - `npx eslint --fix src/` (lint)
+   - `npx tsc --noEmit` (types — meta: voltar a 64 erros baseline)
+   - `npm run build` (build verde)
+   - `npx vitest run` (101 testes verdes)
+
+6. **COMMIT ÚNICO OU POUCOS**:
+   - "fix: recover UTF-8 encoding corruption from PowerShell writes (de2c80e8)"
+   - Incluir .editorconfig para prevenir regressão
+
+=============================================================================
+4) LISTA DOS ARQUIVOS-LIXO NA RAIZ (NÃO APAGAR — APENAS LISTAR)
+=============================================================================
+Todos de 0 bytes, criados em 13/11/2026 16:40 (provavelmente fragmentos PowerShell):
+
+1. $bstr
+2. $key
+3. $resp
+4. $secure
+5. $url
+6. catch
+7. displayName
+8. e
+9. Format-Table
+10. inputTokenLimit
+11. n
+12. outputTokenLimit
+13. Select-Object
+14. try
+15. tsc_check.txt (0 bytes, mas nome legítimo — pode ser lixo também)
+16. Write-Host
+17. }
+18. }$secure
+
+ORIGEM: Nomes de variáveis PowerShell ($bstr, $key, $resp, $secure, $url),
+cmdlets (Select-Object, Format-Table, Write-Host), palavras-chave (catch, try),
+e caracteres de sintaxe (}, }) que foram interpretados como nomes de arquivo
+devido a redirecionamento mal escapado (ex.: `> $bstr`, `> catch`).
+
+=============================================================================
+5) ARQUIVO DO RELATÓRIO
+=============================================================================
+Caminho: C:\Users\vande\revisa-flash\RELATORIO_DIAGNOSTICO_ENCODING.txt
+Tamanho: ~35 KB
+Encoding: UTF-8 SEM BOM (conforme solicitado)
+Gerado por: Node.js write_file (não PowerShell)

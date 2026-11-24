@@ -8,3 +8,6 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+> [!IMPORTANT]
+> Nunca gravar arquivos do projeto com PowerShell (Set-Content/Out-File/>). Usar as ferramentas de edição/escrita de arquivo, sempre em UTF-8 sem BOM e fim de linha LF.
