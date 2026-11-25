@@ -566,35 +566,53 @@ export default function CalendarioPage() {
                     const checkinsDia = checkinsPorDia[dataDia] ?? [];
                     const primeiroCheckin = checkinsDia[0];
                     const primeiraFotoUrl = primeiroCheckin?.photos?.[0]?.url ?? null;
+                    const temFoto = !checkinsLoading && Boolean(primeiraFotoUrl);
 
                     return (
                       <button
                         key={i}
                         onClick={() => setDiaSelecionado(d)}
                         className={[
-                          "relative rounded-2xl p-2 transition-all aspect-square sm:aspect-auto sm:h-[68px] w-full text-left",
-                          isSelecionado
-                            ? "bg-primary text-primary-foreground"
-                            : isHoje
-                            ? "bg-surface-2/60 ring-1 ring-inset ring-primary/50 hover:bg-accent/40 text-foreground/80"
-                            : "bg-surface-2/60 hover:bg-accent/40 text-foreground/80",
+                          "relative transition-all aspect-square w-full text-left",
+                          temFoto
+                            ? [
+                                "rounded-full p-0 sm:h-[68px] sm:w-[68px] sm:mx-auto text-white",
+                                isSelecionado
+                                  ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
+                                  : isHoje
+                                  ? "ring-1 ring-primary/60 ring-offset-1 ring-offset-background"
+                                  : "hover:brightness-110",
+                              ].join(" ")
+                            : [
+                                "rounded-2xl p-2 sm:aspect-auto sm:h-[68px]",
+                                isSelecionado
+                                  ? "bg-primary text-primary-foreground"
+                                  : isHoje
+                                  ? "bg-surface-2/60 ring-1 ring-inset ring-primary/50 hover:bg-accent/40 text-foreground/80"
+                                  : "bg-surface-2/60 hover:bg-accent/40 text-foreground/80",
+                              ].join(" "),
                         ].join(" ")}
                       >
                         <span
-                          className={[
-                            "text-xs font-medium tabular-nums",
-                            isSelecionado ? "" : "text-foreground/80",
-                          ].join(" ")}
+                          className={
+                            temFoto
+                              ? "absolute inset-0 z-10 grid place-items-center text-sm font-bold tabular-nums text-white"
+                              : [
+                                  "text-xs font-medium tabular-nums",
+                                  isSelecionado ? "" : "text-foreground/80",
+                                ].join(" ")
+                          }
+                          style={temFoto ? { textShadow: "0 1px 3px rgba(0,0,0,.85)" } : undefined}
                         >
                           {d}
                         </span>
-                        {e && (
+                        {e && !temFoto && (
                           <div className="absolute bottom-1.5 left-2 flex gap-1">
                             {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
                             {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
                           </div>
                         )}
-                        {/* Miniatura do check-in (canto superior direito) */}
+                        {/* Foto do check-in: círculo cheio com o número por cima; sem foto, miniatura no canto */}
                         {checkinsDia.length > 0 && (
                           <CheckinDayThumb
                             checkins={checkinsDia}

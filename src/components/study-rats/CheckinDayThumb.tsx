@@ -18,13 +18,15 @@ export function CheckinDayThumb({ checkins, firstPhotoUrl, loading }: CheckinDay
   }
 
   if (firstPhotoUrl) {
+    // Foto ocupa o círculo inteiro do dia; o número do dia fica por cima (renderizado no calendário).
     return (
       <>
-        <span className="srx-thumb absolute top-1.5 right-1.5 h-5 w-5 sm:h-7 sm:w-7 rounded-full overflow-hidden ring-2 ring-background bg-surface-2">
+        <span className="srx-thumb absolute inset-0 rounded-full overflow-hidden bg-surface-2" aria-hidden="true">
           <img src={firstPhotoUrl} alt="" className="h-full w-full object-cover" />
+          <span className="absolute inset-0 bg-black/35" />
         </span>
         {hasMultiple && (
-          <span className="srx-count absolute bottom-0.5 right-0.5 min-w-[14px] h-4 rounded-full px-1 text-[9px] font-bold text-center bg-accent text-accent-foreground">
+          <span className="srx-count absolute bottom-0.5 right-0.5 z-20 grid min-w-[16px] h-4 place-items-center rounded-full px-1 text-[9px] font-bold bg-accent text-accent-foreground">
             {count}
           </span>
         )}
