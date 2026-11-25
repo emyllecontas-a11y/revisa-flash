@@ -1144,6 +1144,15 @@ export default function ConteudoPage() {
             </div>
           </div>
         )}
+
+        {isListaPadraoModalOpen && (
+          <ListaPadraoConteudoModal
+            isOpen={isListaPadraoModalOpen}
+            onClose={() => setIsListaPadraoModalOpen(false)}
+            userId={userId!}
+            onSuccess={loadData}
+          />
+        )}
       </>
     );
   }
@@ -1237,14 +1246,6 @@ export default function ConteudoPage() {
           </div>
         )}
 
-        {isListaPadraoModalOpen && (
-          <ListaPadraoConteudoModal
-            isOpen={isListaPadraoModalOpen}
-            onClose={() => setIsListaPadraoModalOpen(false)}
-            userId={userId!}
-            onSuccess={loadData}
-          />
-        )}
       </>
     );
   }
