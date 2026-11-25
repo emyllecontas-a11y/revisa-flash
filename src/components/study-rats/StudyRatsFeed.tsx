@@ -219,9 +219,11 @@ export function StudyRatsFeed() {
 
   // Renderização
   const filtros = ["Tudo", "Check-ins", ...STUDY_RATS_CATEGORIAS.map(c => c.label)];
+  // Coluna lateral só aparece no desktop quando há algo "Em alta" para mostrar
+  const mostrarLateral = view === "feed" && trendingPosts.length > 0;
 
   return (
-    <div className={`mx-auto grid max-w-[1000px] gap-8 ${view === "feed" ? "lg:grid-cols-[minmax(0,560px)_320px] lg:justify-center" : ""}`}>
+    <div className={`mx-auto grid gap-8 ${mostrarLateral ? "max-w-[1000px] lg:grid-cols-[minmax(0,560px)_320px] lg:justify-center" : view === "feed" ? "max-w-[560px]" : "max-w-[1000px]"}`}>
       <StudyRatsStyles />
       <div className="min-w-0 space-y-5">
         {/* Seletor Feed / Perfil */}
@@ -255,6 +257,11 @@ export function StudyRatsFeed() {
                 <div className="min-w-0">
                   <h2 className="text-lg font-bold leading-tight">Study Rats</h2>
                   <p className="text-sm opacity-80">A comunidade de quem estuda junto.</p>
+                </div>
+                {/* Seu dia */}
+                <div className="ml-auto shrink-0 rounded-2xl bg-background/25 px-3 py-1.5 text-right">
+                  <p className="text-lg font-bold leading-tight">{fmtDuracao(minHoje) || "0min"}</p>
+                  <p className="text-[11px] font-medium opacity-80">estudadas hoje</p>
                 </div>
               </div>
               <button onClick={() => setCriando("escolher")} className="mt-4 flex w-full items-center gap-3 rounded-full bg-background/25 p-2 pr-4 text-left text-sm transition hover:bg-background/35">
@@ -433,31 +440,19 @@ export function StudyRatsFeed() {
       </div>
 
       {/* Lateral (desktop) - irmão direto da coluna do feed */}
-      {view === "feed" && (
+      {mostrarLateral && (
         <aside className="hidden lg:block">
           <div className="sticky top-24 space-y-4">
-            {/* Seu dia */}
-            <div className="srx-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Seu dia</p>
-              <p className="mt-1 text-2xl font-bold text-foreground">{fmtDuracao(minHoje) || "0min"}</p>
-              <p className="text-xs text-muted-foreground">estudadas hoje</p>
-              <button onClick={() => setCriando("checkin")} className="srx-fab mt-3 flex w-full items-center justify-center gap-2 rounded-full py-2 text-sm font-bold">
-                <CalendarCheck className="h-4 w-4" /> Fazer check-in
-              </button>
-            </div>
-
             {/* Em alta na comunidade */}
-            {trendingPosts.length > 0 && (
-              <div className="srx-card p-4">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Em alta na comunidade</p>
-                {trendingPosts.map((post, i) => (
-                  <p key={post.id} className="flex justify-between py-1 text-sm">
-                    <span className="font-semibold text-foreground">{post.title ?? post.caption?.slice(0, 30) ?? "Post"}</span>
-                    <span className="text-xs text-muted-foreground">{post.likesCount} curtidas</span>
-                  </p>
-                ))}
-              </div>
-            )}
+            <div className="srx-card p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Em alta na comunidade</p>
+              {trendingPosts.map((post) => (
+                <p key={post.id} className="flex justify-between gap-3 py-1 text-sm">
+                  <span className="truncate font-semibold text-foreground">{post.title ?? post.caption?.slice(0, 30) ?? "Post"}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{post.likesCount} curtidas</span>
+                </p>
+              ))}
+            </div>
           </div>
         </aside>
       )}

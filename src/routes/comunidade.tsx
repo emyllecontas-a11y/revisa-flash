@@ -13,7 +13,7 @@ import { StudyRatsFeed } from "@/components/study-rats/StudyRatsFeed";
 
 type Tab = "ranking" | "amizades" | "compartilhado" | "studyrats";
 
-const TAB_PADRAO: Tab = "ranking";
+const TAB_PADRAO: Tab = "studyrats";
 
 function isTab(v: string | null): v is Tab {
   return v === "compartilhado" || v === "amizades" || v === "ranking" || v === "studyrats";
@@ -91,7 +91,16 @@ export default function ComunidadePage() {
       <div className={`mx-auto ${tab === "studyrats" ? "max-w-5xl" : "max-w-2xl"}`}>
         <div className="mb-6 flex gap-1 border-b border-border overflow-x-auto">
 
-          {/* ABA 1: RANKING */}
+          {/* ABA 1: STUDY RATS */}
+          <BotaoTab
+            ativo={tab === "studyrats"}
+            onClick={() => trocarTab("studyrats")}
+            label="Study Rats"
+            icon={<Users className="h-4 w-4" />}
+            data-tour="com-studyrats"
+          />
+
+          {/* ABA 2: RANKING */}
           <BotaoTab
             ativo={tab === "ranking"}
             onClick={() => trocarTab("ranking")}
@@ -100,7 +109,7 @@ export default function ComunidadePage() {
             data-tour="com-ranking"
           />
 
-          {/* ABA 2: AMIZADES */}
+          {/* ABA 3: AMIZADES */}
           <BotaoTab
             ativo={tab === "amizades"}
             onClick={() => trocarTab("amizades")}
@@ -110,22 +119,13 @@ export default function ComunidadePage() {
             data-tour="com-amizades"
           />
 
-          {/* ABA 3: COMPARTILHADO */}
+          {/* ABA 4: COMPARTILHADO */}
           <BotaoTab
             ativo={tab === "compartilhado"}
             onClick={() => trocarTab("compartilhado")}
             label="Compartilhado comigo"
             badge={sharedCount}
             data-tour="com-compartilhado"
-          />
-
-          {/* ABA 4: STUDY RATS */}
-          <BotaoTab
-            ativo={tab === "studyrats"}
-            onClick={() => trocarTab("studyrats")}
-            label="Study Rats"
-            icon={<Users className="h-4 w-4" />}
-            data-tour="com-studyrats"
           />
 
         </div>
