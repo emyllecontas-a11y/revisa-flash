@@ -184,37 +184,42 @@ export async function calcularRanking(userIdLogado: string, periodo: 'semanal' |
   if (indexLogado !== -1) {
     posicaoAtual = indexLogado + 1;
 
-    const { data: snapshotAnterior } = await supabase
-      .from('ranking_snapshots')
-      .select('posicao')
-      .eq('user_id', userIdLogado)
-      .eq('periodo_tipo', periodo)
-      .order('data_referencia', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Buscar snapshot anterior e inserir snapshot do dia (tratar erro 400 se tabelas não existirem)
+    try {
+      const { data: snapshotAnterior } = await supabase
+        .from('ranking_snapshots')
+        .select('posicao')
+        .eq('user_id', userIdLogado)
+        .eq('periodo_tipo', periodo)
+        .order('data_referencia', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (snapshotAnterior) {
-      const diferenca = snapshotAnterior.posicao - posicaoAtual;
-      listaFinal[indexLogado].variacao = diferenca;
-      if (diferenca > 0) subiuDePosicao = true;
-    }
+      if (snapshotAnterior) {
+        const diferenca = snapshotAnterior.posicao - posicaoAtual;
+        listaFinal[indexLogado].variacao = diferenca;
+        if (diferenca > 0) subiuDePosicao = true;
+      }
 
-    const { data: snapHoje } = await supabase
-      .from('ranking_snapshots')
-      .select('id')
-      .eq('user_id', userIdLogado)
-      .eq('periodo_tipo', periodo)
-      .eq('data_referencia', dataRefIso)
-      .maybeSingle();
+      const { data: snapHoje } = await supabase
+        .from('ranking_snapshots')
+        .select('id')
+        .eq('user_id', userIdLogado)
+        .eq('periodo_tipo', periodo)
+        .eq('data_referencia', dataRefIso)
+        .maybeSingle();
 
-    if (!snapHoje) {
-      await supabase.from('ranking_snapshots').insert({
-        user_id: userIdLogado,
-        periodo_tipo: periodo,
-        data_referencia: dataRefIso,
-        posicao: posicaoAtual,
-        pontos: listaFinal[indexLogado].pontos,
-      });
+      if (!snapHoje) {
+        await supabase.from('ranking_snapshots').insert({
+          user_id: userIdLogado,
+          periodo_tipo: periodo,
+          data_referencia: dataRefIso,
+          posicao: posicaoAtual,
+          pontos: listaFinal[indexLogado].pontos,
+        });
+      }
+    } catch (snapError) {
+      console.warn('[RANKING] ranking_snapshots não disponível (tabela pode não existir):', snapError);
     }
   }
 
@@ -269,8 +274,21 @@ export async function getMedalhas(userId: string): Promise<{ semanais: Medal[], 
   const { semanaIso, mesIso, refSemana, refMes } = getPeriodos();
   const supabase = await getSupabaseWithToken();
 
-  const { data: historico } = await supabase.from('ranking_conquistas').select('conquista_id, periodo_referencia').eq('user_id', userId);
-  const conquistasPassadas = new Set(historico?.map(h => `${h.conquista_id}-${h.periodo_referencia}`) || []);
+  // Buscar histórico de conquistas (tratar erro 400 se tabelas não existirem)
+  let conquistasPassadas = new Set<string>();
+  try {
+    const { data: historico, error: histError } = await supabase
+      .from('ranking_conquistas')
+      .select('conquista_id, periodo_referencia')
+      .eq('user_id', userId);
+    if (!histError && historico) {
+      conquistasPassadas = new Set(historico.map(h => `${h.conquista_id}-${h.periodo_referencia}`));
+    } else if (histError) {
+      console.warn('[RANKING] ranking_conquistas não disponível (tabela pode não existir):', histError.message);
+    }
+  } catch (e) {
+    console.warn('[RANKING] Falha ao buscar histórico de conquistas:', e);
+  }
 
   const recordsSemana = await db.study_records.find({ selector: { user_id: userId, date: { $gte: semanaIso } } }).exec();
   const recordsMes = await db.study_records.find({ selector: { user_id: userId, date: { $gte: mesIso } } }).exec();
@@ -285,9 +303,13 @@ export async function getMedalhas(userId: string): Promise<{ semanais: Medal[], 
     const chave = `${id}-${ref}`;
     const jaConquistada = conquistasPassadas.has(chave) || isConquistada;
     if (isConquistada && !conquistasPassadas.has(chave)) {
-      await supabase.from('ranking_conquistas').insert({
-        user_id: userId, tipo: 'medalha', conquista_id: id, periodo_tipo: ref.includes('W') ? 'semanal' : 'mensal', periodo_referencia: ref
-      });
+      try {
+        await supabase.from('ranking_conquistas').insert({
+          user_id: userId, tipo: 'medalha', conquista_id: id, periodo_tipo: ref.includes('W') ? 'semanal' : 'mensal', periodo_referencia: ref
+        });
+      } catch (insertError) {
+        console.warn('[RANKING] Falha ao inserir conquista (tabela pode não existir):', insertError);
+      }
     }
     return { conquistada: jaConquistada, progresso: jaConquistada ? 1 : progresso };
   };

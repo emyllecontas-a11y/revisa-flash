@@ -13,7 +13,6 @@ import { getSupabaseWithToken } from '@/lib/supabaseClient';
 import { STUDY_RATS } from '@/constants';
 import { uid } from '@/utils/helpers';
 import { localDateStr, localMonthRange, localTimeStr } from '@/utils/date';
-import { invalidateStudyFeedCache } from '@/hooks/useStudyRats';
 import type {
   CreatedStudyPost,
   CreateStudyPostInput,
@@ -909,10 +908,7 @@ export async function getStories(): Promise<StudyStory[]> {
       },
     };
   });
-}
-
-// Re-export do hook para uso em componentes
-export { invalidateStudyFeedCache } from '@/hooks/useStudyRats';
+});
 
 export async function markStoryViewed(storyId: string): Promise<void> {
   const userId = getCurrentUserId();

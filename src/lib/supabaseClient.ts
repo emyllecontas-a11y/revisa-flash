@@ -19,8 +19,10 @@ console.log('✅ Supabase client (anon) inicializado!');
 // ============================================================
 let cachedSupabaseClient: any = null;
 let cachedToken: string | null = null;
-let cachedTokenExp: number | null = null;
 let _clientCreateCount = 0;
+
+// Token atual para ser usado pelo custom fetch (atualizado sem recriar o cliente)
+let currentAuthToken: string | null = null;
 
 // ============================================================
 // FUNÇÃO PARA OBTER O TOKEN DO CLERK (via window.Clerk)
@@ -79,7 +81,7 @@ export const getSupabaseWithToken = async () => {
     // Limpa o cache
     cachedSupabaseClient = null;
     cachedToken = null;
-    cachedTokenExp = null;
+    currentAuthToken = null;
     // LANÇA O ERRO - quem chamar precisa tratar
     throw new Error('Usuário não autenticado');
   }
@@ -95,33 +97,40 @@ export const getSupabaseWithToken = async () => {
   }
 
   const agora = Date.now();
-  const tokenExpirouOuProximo = agora > (tokenExp - 30_000); // 30s antes de expirar
 
-  // Se o token mudou OU expirou OU não temos cliente, recria/atualiza
-  if (cachedToken !== token || tokenExpirouOuProximo || !cachedSupabaseClient) {
+  // Se o token mudou OU não temos cliente, atualiza
+  if (cachedToken !== token || !cachedSupabaseClient) {
     if (cachedToken !== token) {
       _clientCreateCount++;
       console.log('[Supabase] clientes criados:', _clientCreateCount);
     } else {
-      console.log('[Supabase] token expirou/próximo — atualizando header');
+      console.log('[Supabase] token atualizado — reutilizando cliente');
     }
 
     cachedToken = token;
-    cachedTokenExp = tokenExp;
+    // Atualiza o token que o custom fetch vai usar
+    currentAuthToken = token;
 
-    // Auth DESLIGADO no cliente autenticado — evitamos GoTrueClient duplicados
-    cachedSupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
+    // Cria o cliente apenas na PRIMEIRA vez
+    if (!cachedSupabaseClient) {
+      cachedSupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
         },
-      },
-    });
+        global: {
+          // Custom fetch que injeta o Authorization header dinamicamente
+          fetch: async (url, options = {}) => {
+            const headers = new Headers(options.headers);
+            if (currentAuthToken) {
+              headers.set('Authorization', `Bearer ${currentAuthToken}`);
+            }
+            return fetch(url, { ...options, headers });
+          },
+        },
+      });
+    }
   } else {
     console.log('♻️ Reutilizando cliente Supabase com token (cache)');
   }

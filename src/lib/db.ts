@@ -2078,6 +2078,26 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     // de que tinham questões (questoes_lista OU resultados_lista/progresso_lista),
     // forçar re-push de questoes_lista e listas_questoes locais.
     // ============================================================
+    // Chave localStorage para rastrear quais listas já tiveram AutoHeal tentado
+    const AUTOHEAL_ATTEMPTED_KEY = `autoheal_attempted_${userIdStr}`;
+
+    function getAutoHealAttempted(): Set<string> {
+      try {
+        const raw = localStorage.getItem(AUTOHEAL_ATTEMPTED_KEY);
+        return raw ? new Set(JSON.parse(raw)) : new Set();
+      } catch { return new Set(); }
+    }
+
+    function markAutoHealAttempted(listaId: string): void {
+      try {
+        const set = getAutoHealAttempted();
+        set.add(listaId);
+        localStorage.setItem(AUTOHEAL_ATTEMPTED_KEY, JSON.stringify(Array.from(set)));
+      } catch { /* ignore */ }
+    }
+
+    const autoHealAttempted = getAutoHealAttempted();
+
     try {
       const listasCollection = database.collections.listas;
       const linksCollection = database.collections.listas_questoes;
@@ -2093,6 +2113,11 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
         for (const listaDoc of userListas) {
           const lista = listaDoc.toJSON();
           const listaId = lista.id;
+
+          // Pular se AutoHeal já foi tentado para esta lista
+          if (autoHealAttempted.has(listaId)) {
+            continue;
+          }
 
           // Contar vínculos locais para esta lista
           const localLinks = await linksCollection.find({
@@ -2164,6 +2189,9 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
               } else {
                 console.warn(`⚠️ [AutoHeal] Servidor também não tem vínculos para lista ${listaId}. Dados podem estar perdidos no servidor.`);
               }
+
+              // Marcar que AutoHeal foi tentado para esta lista (evita repetir a cada sync)
+              markAutoHealAttempted(listaId);
             }
           }
         }
