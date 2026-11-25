@@ -88,7 +88,7 @@ export default function ComunidadePage() {
 
   return (
     <AppShell breadcrumb="Comunidade" title="Comunidade">
-      <div className="mx-auto max-w-2xl">
+      <div className={`mx-auto ${tab === "studyrats" ? "max-w-5xl" : "max-w-2xl"}`}>
         <div className="mb-6 flex gap-1 border-b border-border overflow-x-auto">
 
           {/* ABA 1: RANKING */}

@@ -220,7 +220,7 @@ export function StudyRatsFeed() {
   const filtros = ["Tudo", "Check-ins", ...STUDY_RATS_CATEGORIAS.map(c => c.label)];
 
   return (
-    <div className="mx-auto grid max-w-[1000px] gap-8 lg:grid-cols-[minmax(0,520px)_300px] lg:justify-center">
+    <div className={`mx-auto grid max-w-[1000px] gap-8 ${view === "feed" ? "lg:grid-cols-[minmax(0,560px)_320px] lg:justify-center" : ""}`}>
       <StudyRatsStyles />
       <div className="min-w-0 space-y-5">
         {/* Seletor Feed / Perfil */}
@@ -289,40 +289,41 @@ export function StudyRatsFeed() {
                   const seen = hasStory ? meuGrupo.stories.every((s: StudyStory) => s.viewedByMe) : false;
 
                   return (
-                    <div className="relative flex w-16 shrink-0 flex-col items-center gap-1.5">
-                      {/* Botão principal - clica no círculo abre story se existir */}
-                      <button
-                        onClick={() => {
-                          if (hasStory) {
-                            const idx = groupedStories.findIndex(g => g.isMe);
-                            if (idx >= 0) abrirStory(idx);
-                          } else {
-                            setCriando("escolher");
-                          }
-                        }}
-                        className="relative"
-                      >
-                        <span className={`relative ${hasStory ? "srx-ring" : "grid h-16 w-16 place-items-center rounded-full border-2 border-dashed border-border bg-surface"} `} data-seen={seen}>
-                          <UserAvatar
-                            fotoUrl={currentUserAvatar.fotoUrl}
-                            avatarTipo={currentUserAvatar.avatarTipo}
-                            avatarId={currentUserAvatar.avatarId}
-                            nome={currentUserAvatar.nome}
-                            className="h-[58px] w-[58px]"
-                          />
-                        </span>
-                      </button>
+                    <div className="flex w-16 shrink-0 flex-col items-center gap-1.5">
+                      <div className="relative">
+                        {/* Botão principal - clica no círculo abre story se existir */}
+                        <button
+                          onClick={() => {
+                            if (hasStory) {
+                              const idx = groupedStories.findIndex(g => g.isMe);
+                              if (idx >= 0) abrirStory(idx);
+                            } else {
+                              setCriando("escolher");
+                            }
+                          }}
+                        >
+                          <span className={`relative ${hasStory ? "srx-ring" : "grid h-16 w-16 place-items-center rounded-full border-2 border-dashed border-border bg-surface"} `} data-seen={seen}>
+                            <UserAvatar
+                              fotoUrl={currentUserAvatar.fotoUrl}
+                              avatarTipo={currentUserAvatar.avatarTipo}
+                              avatarId={currentUserAvatar.avatarId}
+                              nome={currentUserAvatar.nome}
+                              className="h-[58px] w-[58px]"
+                            />
+                          </span>
+                        </button>
 
-                      {/* A4: Botão "+" SEMPRE abre modal de criar (irmão do botão, não filho) */}
-                      <button
-                        onClick={() => setCriando("escolher")}
-                        aria-label="Novo story"
-                        className="absolute -bottom-0.5 -right-0.5 grid h-5 w-5 place-items-center rounded-full border-2 border-background bg-accent text-xs font-bold text-accent-foreground"
-                      >
-                        +
-                      </button>
+                        {/* Botão "+" DENTRO da div relative (irmão do botão do avatar) */}
+                        <button
+                          onClick={() => setCriando("escolher")}
+                          aria-label="Novo story"
+                          className="absolute -bottom-0.5 -right-0.5 grid h-5 w-5 place-items-center rounded-full border-2 border-background bg-accent text-xs font-bold text-accent-foreground"
+                        >
+                          +
+                        </button>
+                      </div>
 
-                      <span className="text-[11px] text-muted-foreground">Seu story</span>
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">Seu story</span>
                     </div>
                   );
                 })()}
