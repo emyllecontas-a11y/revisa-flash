@@ -908,7 +908,7 @@ export async function getStories(): Promise<StudyStory[]> {
       },
     };
   });
-});
+}
 
 export async function markStoryViewed(storyId: string): Promise<void> {
   const userId = getCurrentUserId();

@@ -107,17 +107,6 @@ export function BancoQuestoesTab() {
   const [feitasLoading, setFeitasLoading] = useState(false);
   const [questoesFeitasIds, setQuestoesFeitasIds] = useState<Set<string>>(new Set());
 
-  // Listener para atualizar cadernos quando houver mudança externa (ex.: caderno semanal de erros)
-  useEffect(() => {
-    const handleCadernosUpdated = () => {
-      if (user?.id) {
-        load();
-      }
-    };
-    window.addEventListener('cadernos-updated', handleCadernosUpdated);
-    return () => window.removeEventListener('cadernos-updated', handleCadernosUpdated);
-  }, [user?.id, load]);
-
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
@@ -144,6 +133,17 @@ export function BancoQuestoesTab() {
   }, [user?.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Listener para atualizar cadernos quando houver mudança externa (ex.: caderno semanal de erros)
+  useEffect(() => {
+    const handleCadernosUpdated = () => {
+      if (user?.id) {
+        load();
+      }
+    };
+    window.addEventListener('cadernos-updated', handleCadernosUpdated);
+    return () => window.removeEventListener('cadernos-updated', handleCadernosUpdated);
+  }, [user?.id, load]);
 
   // Carrega IDs de questões já feitas (para o filtro "Ocultar questões já feitas")
   useEffect(() => {
