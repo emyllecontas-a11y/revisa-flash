@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Bookmark, BookOpen, CalendarCheck, Camera, ChevronLeft, Clock, Flame, Heart, Lightbulb, MessageCircle, MoreHorizontal, X } from "lucide-react";
 import { useStudyFeed, useStories, invalidateStudyFeedCache, useStudyProfile } from "@/hooks/useStudyRats";
 import { useStudyRatsCheckins } from "@/contexts/StudyRatsContext";
@@ -888,12 +889,16 @@ function ComentariosSheet({ post, onClose, onEnviar, onDeleteComment, currentUse
     }
   };
 
-  return (
-    <div className="srx-overlay fixed inset-0 z-50 flex items-end justify-center sm:items-center" onClick={onClose}>
-      <div className="srx-sheet srx-card w-full max-w-md rounded-b-none p-4 sm:rounded-b-[1.5rem]" onClick={(e) => e.stopPropagation()}>
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
-        <h3 className="mb-3 text-center text-sm font-bold text-foreground">Comentários</h3>
-        <div className="max-h-[45vh] space-y-3 overflow-y-auto">
+  return createPortal(
+    <div className="srx-overlay fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="srx-sheet srx-card flex max-h-[85dvh] w-full max-w-md flex-col p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="relative mb-3 flex items-center justify-center">
+          <h3 className="text-center text-sm font-bold text-foreground">Comentários</h3>
+          <button onClick={onClose} aria-label="Fechar" className="absolute right-0 text-muted-foreground">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
           {comentarios.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Ainda não há comentários. Seja a primeira! 💬</p>}
           {comentarios.map((c) => (
             <div key={c.id} className="flex gap-3">
@@ -953,6 +958,7 @@ function ComentariosSheet({ post, onClose, onEnviar, onDeleteComment, currentUse
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

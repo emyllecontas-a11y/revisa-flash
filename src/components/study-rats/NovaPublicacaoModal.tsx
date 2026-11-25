@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CalendarCheck, Camera, ChevronLeft, ChevronRight, Clock, Lightbulb, Loader2, RotateCcw, X } from "lucide-react";
 import { useStudyRatsCheckins } from "@/contexts/StudyRatsContext";
 import { getDisciplinesLocal } from "@/lib/disciplinesLocal";
@@ -361,9 +362,9 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
 
   // Renderização
   if (!tipo) {
-    return (
-      <div className="srx-overlay fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" onClick={onClose}>
-        <div className="srx-sheet srx-card max-h-[92vh] w-full max-w-md overflow-y-auto rounded-b-none sm:rounded-b-[1.5rem]" onClick={(e) => e.stopPropagation()}>
+    return createPortal(
+      <div className="srx-overlay fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
+        <div className="srx-sheet srx-card max-h-[85dvh] w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <header className="sticky top-0 z-10 flex items-center border-b border-border bg-surface px-4 py-3">
             <button aria-label="Fechar" onClick={onClose} className="text-muted-foreground"><X className="h-5 w-5" /></button>
             <h3 className="mx-auto text-sm font-bold text-foreground">Criar</h3>
@@ -386,7 +387,8 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
             ))}
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
@@ -397,9 +399,9 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
     { value: "motivation", label: "Motivação", emoji: "🔥" },
   ];
 
-  return (
-    <div className="srx-overlay fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" onClick={publicando ? undefined : onClose}>
-      <div className="srx-sheet srx-card max-h-[92vh] w-full max-w-md overflow-y-auto rounded-b-none sm:rounded-b-[1.5rem]" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="srx-overlay fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={publicando ? undefined : onClose}>
+      <div className="srx-sheet srx-card max-h-[85dvh] w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <header className="sticky top-0 z-10 flex items-center border-b border-border bg-surface px-4 py-3">
           <button
             aria-label="Fechar"
@@ -657,7 +659,7 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
 
         {/* Modal de câmera */}
         {mostrarCamera && (
-          <div className="srx-overlay fixed inset-0 z-50 flex items-center justify-center p-4" onClick={pararStream}>
+          <div className="srx-overlay fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={pararStream}>
             <div className="srx-sheet srx-card relative w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
               <header className="sticky top-0 flex items-center justify-between border-b border-border bg-surface px-4 py-3">
                 <span className="text-sm font-semibold text-foreground">Câmera</span>
@@ -690,6 +692,7 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
