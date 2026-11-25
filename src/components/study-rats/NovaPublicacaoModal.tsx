@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarCheck, Camera, ChevronLeft, ChevronRight, Clock, Lightbulb, Loader2, RotateCcw, X } from "lucide-react";
 import { useStudyRatsCheckins } from "@/contexts/StudyRatsContext";
-import { getDisciplines } from "@/lib/supabaseClient";
+import { getDisciplinesLocal } from "@/lib/disciplinesLocal";
 import { createPost, updatePost } from "@/services/studyRatsService";
 import { invalidateStudyFeedCache } from "@/hooks/useStudyRats";
 import { STUDY_RATS } from "@/constants";
@@ -23,9 +23,6 @@ interface NovaPublicacaoModalProps {
 interface Disciplina {
   id: string;
   name: string;
-  user_id: string;
-  created_at: string;
-  isdeleted: boolean;
 }
 
 export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPost }: NovaPublicacaoModalProps) {
@@ -40,6 +37,7 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
   const [destino, setDestino] = useState<Destino>(isEditing ? (editPost?.inFeed ? "feed" : "story") : "feed");
   const [disciplinas, setDisciplinas] = useState<Disciplina[]>([]);
   const [loadingDisciplinas, setLoadingDisciplinas] = useState(true);
+  const [erroDisciplinas, setErroDisciplinas] = useState<string | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [mostrarCamera, setMostrarCamera] = useState(false);
@@ -115,23 +113,30 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
     }
   }, [destino, tipo, fotos.length, previews.length]);
 
-  // Carregar disciplinas da usuária
+  // Carregar disciplinas da usuária (RxDB local, mesma fonte da aba Disciplinas)
   useEffect(() => {
+    if (!userId) return;
     let cancelled = false;
-    if (userId) {
-      getDisciplines(userId).then(result => {
-        if (!cancelled && result.success && result.data) {
-          const validDisciplinas = result.data.filter(d => !d.isdeleted);
-          setDisciplinas(validDisciplinas);
-          if (validDisciplinas.length > 0 && !materia) {
-            setMateria(validDisciplinas[0].name);
-          }
-        }
-        if (!cancelled) setLoadingDisciplinas(false);
-      });
-    }
+    setLoadingDisciplinas(true);
+    setErroDisciplinas(null);
+    getDisciplinesLocal(userId).then(result => {
+      if (cancelled) return;
+      if (result.success) {
+        setDisciplinas(result.data ?? []);
+      } else {
+        setErroDisciplinas(result.error ?? "Não foi possível carregar as disciplinas.");
+      }
+      setLoadingDisciplinas(false);
+    });
     return () => { cancelled = true; };
-  }, [userId, materia]);
+  }, [userId]);
+
+  // Pré-seleciona a primeira disciplina quando a lista chega (sem refazer a busca)
+  useEffect(() => {
+    if (!materia && disciplinas.length > 0) {
+      setMateria(disciplinas[0].name);
+    }
+  }, [disciplinas, materia]);
 
   // Limpar previews e stream ao fechar
   useEffect(() => {
@@ -444,7 +449,13 @@ export function NovaPublicacaoModal({ onClose, onPublicado, tipoInicial, editPos
           </div>
         )}
 
-        {tipo === "checkin" && disciplinas.length === 0 && !loadingDisciplinas && (
+        {tipo === "checkin" && erroDisciplinas && !loadingDisciplinas && (
+          <div className="mx-4 mt-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive">
+            Não foi possível carregar suas disciplinas. Tente fechar e abrir de novo.
+          </div>
+        )}
+
+        {tipo === "checkin" && !erroDisciplinas && disciplinas.length === 0 && !loadingDisciplinas && (
           <div className="mx-4 mt-3 p-3 rounded-xl bg-surface-2 text-sm text-muted-foreground">
             Cadastre uma matéria em Disciplinas para fazer check-in.
           </div>
