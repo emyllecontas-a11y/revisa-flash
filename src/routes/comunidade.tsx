@@ -7,15 +7,16 @@ import { CompartilhadosConteudo } from "./compartilhados";
 import { useAppUser } from "@/contexts/UserContext";
 import { loadFriendsOverview } from "@/services/friendService";
 import { getDb } from "@/lib/db";
-import { Trophy } from "lucide-react";
+import { Trophy, Users } from "lucide-react";
 import { RankingTab } from "@/components/ranking/RankingTab";
+import { StudyRatsFeed } from "@/components/study-rats/StudyRatsFeed";
 
-type Tab = "ranking" | "amizades" | "compartilhado";
+type Tab = "ranking" | "amizades" | "compartilhado" | "studyrats";
 
 const TAB_PADRAO: Tab = "ranking";
 
 function isTab(v: string | null): v is Tab {
-  return v === "compartilhado" || v === "amizades" || v === "ranking";
+  return v === "compartilhado" || v === "amizades" || v === "ranking" || v === "studyrats";
 }
 
 export default function ComunidadePage() {
@@ -89,7 +90,7 @@ export default function ComunidadePage() {
     <AppShell breadcrumb="Comunidade" title="Comunidade">
       <div className="mx-auto max-w-2xl">
         <div className="mb-6 flex gap-1 border-b border-border overflow-x-auto">
-          
+
           {/* ABA 1: RANKING */}
           <BotaoTab
             ativo={tab === "ranking"}
@@ -117,12 +118,22 @@ export default function ComunidadePage() {
             badge={sharedCount}
             data-tour="com-compartilhado"
           />
-          
+
+          {/* ABA 4: STUDY RATS */}
+          <BotaoTab
+            ativo={tab === "studyrats"}
+            onClick={() => trocarTab("studyrats")}
+            label="Study Rats"
+            icon={<Users className="h-4 w-4" />}
+            data-tour="com-studyrats"
+          />
+
         </div>
 
         {tab === "ranking" && <RankingTab />}
         {tab === "amizades" && <AmizadesConteudo />}
         {tab === "compartilhado" && <CompartilhadosConteudo />}
+        {tab === "studyrats" && <StudyRatsFeed />}
       </div>
     </AppShell>
   );

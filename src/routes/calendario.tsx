@@ -22,6 +22,12 @@ import { useToast } from "@/hooks/useToast";
 import { PlanoDiaCard } from "@/components/PlanoDiaCard";
 import { StudyPlanHub } from "@/components/study-plan";
 import { useRevisoesSubtopico } from "@/hooks/useRevisoesSubtopico";
+import { useCalendarCheckins } from "@/hooks/useStudyRats";
+import { CheckinDayThumb } from "@/components/study-rats/CheckinDayThumb";
+import { CheckinDayPanel } from "@/components/study-rats/CheckinDayPanel";
+import { CheckinDetailViewer } from "@/components/study-rats/CheckinDetailViewer";
+import { useNavigate } from "react-router-dom";
+import type { StudyCalendarEntry } from "@/types/studyRats";
 
 interface Revisao {
   id: string;
@@ -85,6 +91,17 @@ export default function CalendarioPage() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [concluindoRevisaoId, setConcluindoRevisaoId] = useState<string | null>(null);
+
+  const navigate = useNavigate();
+
+  // Check-ins do Study Rats (própria usuária)
+  const { byDate: checkinsPorDia, loading: checkinsLoading } =
+    useCalendarCheckins(anoVisivel, mesVisivel + 1); // hook espera mês 1-12
+
+  const [visualizadorCheckin, setVisualizadorCheckin] = useState<{
+    lista: StudyCalendarEntry[];
+    index: number;
+  } | null>(null);
 
   const dataSelecionada = diaSelecionado !== null
     ? `${anoVisivel}-${String(mesVisivel + 1).padStart(2, '0')}-${String(diaSelecionado).padStart(2, '0')}`
@@ -544,6 +561,12 @@ export default function CalendarioPage() {
                     const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
                     const isSelecionado = d === diaSelecionado;
 
+                    // Check-ins deste dia
+                    const dataDia = `${anoVisivel}-${String(mesVisivel + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const checkinsDia = checkinsPorDia[dataDia] ?? [];
+                    const primeiroCheckin = checkinsDia[0];
+                    const primeiraFotoUrl = primeiroCheckin?.photos?.[0]?.url ?? null;
+
                     return (
                       <button
                         key={i}
@@ -570,6 +593,14 @@ export default function CalendarioPage() {
                             {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
                             {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
                           </div>
+                        )}
+                        {/* Miniatura do check-in (canto superior direito) */}
+                        {checkinsDia.length > 0 && (
+                          <CheckinDayThumb
+                            checkins={checkinsDia}
+                            firstPhotoUrl={primeiraFotoUrl}
+                            loading={checkinsLoading}
+                          />
                         )}
                       </button>
                     );
@@ -686,11 +717,37 @@ export default function CalendarioPage() {
                         </div>
                       )}
 
-                      {revisoesDoDia.length === 0 && registrosDoDia.length === 0 && (
-                        <p className="text-center text-sm text-foreground/40 py-6">
-                          Nenhum estudo ou revisão neste dia.
-                        </p>
-                      )}
+                      {/* Check-ins de estudo do Study Rats (depois de registrosDoDia, dentro do rf-card) */}
+                      {(() => {
+                        const checkinsDoDia = dataSelecionada ? (checkinsPorDia[dataSelecionada] ?? []) : [];
+                        if (checkinsDoDia.length > 0) {
+                          return (
+                            <CheckinDayPanel
+                              checkins={checkinsDoDia}
+                              onOpenCheckin={(c) => {
+                                const index = checkinsDoDia.findIndex((item) => item.id === c.id);
+                                setVisualizadorCheckin({ lista: checkinsDoDia, index });
+                              }}
+                              onIrParaComunidade={() => {
+                                navigate("/comunidade?tab=studyrats");
+                              }}
+                            />
+                          );
+                        }
+                        return null;
+                      })()}
+
+                      {(() => {
+                        const checkinsDoDia = dataSelecionada ? (checkinsPorDia[dataSelecionada] ?? []) : [];
+                        if (revisoesDoDia.length === 0 && registrosDoDia.length === 0 && checkinsDoDia.length === 0 && dataSelecionada) {
+                          return (
+                            <p className="text-center text-sm text-foreground/40 py-6">
+                              Nenhum estudo ou revisão neste dia.
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
                     </>
                   ) : (
                     <div className="flex min-h-[100px] items-center justify-center text-center">
@@ -716,6 +773,24 @@ export default function CalendarioPage() {
               </aside>
             </div>
           </div>
+        )}
+
+        {/* Visualizador de check-in do Study Rats */}
+        {visualizadorCheckin && (
+          <CheckinDetailViewer
+            checkin={visualizadorCheckin.lista[visualizadorCheckin.index] ?? null}
+            onClose={() => setVisualizadorCheckin(null)}
+            onPrev={() => {
+              const { lista, index } = visualizadorCheckin;
+              if (index > 0) setVisualizadorCheckin({ lista, index: index - 1 });
+            }}
+            onNext={() => {
+              const { lista, index } = visualizadorCheckin;
+              if (index < lista.length - 1) setVisualizadorCheckin({ lista, index: index + 1 });
+            }}
+            hasPrev={visualizadorCheckin.index > 0}
+            hasNext={visualizadorCheckin.index < visualizadorCheckin.lista.length - 1}
+          />
         )}
       </AppShell>
     );

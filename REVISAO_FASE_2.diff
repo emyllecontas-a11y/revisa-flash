@@ -1,0 +1,2328 @@
+diff --git a/src/client.tsx b/src/client.tsx
+index 11ce452a..0f9b3229 100644
+--- a/src/client.tsx
++++ b/src/client.tsx
+@@ -13,6 +13,7 @@ import { PomodoroProvider } from './contexts/PomodoroContext';
+ import { MusicProvider } from './contexts/MusicContext';
+ import { LoadingProvider } from './contexts/LoadingContext';
+ import { ErrorProvider } from './contexts/ErrorContext';
++import { StudyRatsProvider } from './contexts/StudyRatsContext';
+ import { AulaMateriaisProvider } from './contexts/AulaMateriaisContext';
+ import { ThemeProvider } from './contexts/ThemeContext';
+ import { UserProvider, useAppUser } from './contexts/UserContext';
+@@ -223,11 +224,13 @@ function Root() {
+             <ActiveSessionProvider>
+               <PomodoroProvider>
+                 <MusicProvider>
+-                  <ErrorProvider>
+-                    <AulaMateriaisProvider>
+-                      <AppContent />
+-                    </AulaMateriaisProvider>
+-                  </ErrorProvider>
++                  <StudyRatsProvider>
++                    <ErrorProvider>
++                      <AulaMateriaisProvider>
++                        <AppContent />
++                      </AulaMateriaisProvider>
++                    </ErrorProvider>
++                  </StudyRatsProvider>
+                   <MiniMusicPlayer />
+                 </MusicProvider>
+               </PomodoroProvider>
+diff --git a/src/constants/index.ts b/src/constants/index.ts
+index a6751974..6297375e 100644
+--- a/src/constants/index.ts
++++ b/src/constants/index.ts
+@@ -1,5 +1,7 @@
+ // src/constants/index.ts
+ 
++import type { StudyCategory, StudyDestination, StudyPostKind } from '@/types/studyRats';
++
+ // ============================================================
+ // 📦 NOMES DE CAMPOS (para evitar erros de digitação)
+ // ============================================================
+@@ -211,3 +213,75 @@ export const SUPABASE = {
+     STUDY_SESSIONS: "study_sessions",
+   },
+ } as const;
++
++// ============================================================
++// 🐭 STUDY RATS (feed estilo Instagram da aba Comunidade)
++// ============================================================
++
++export const STUDY_RATS = {
++  TABELAS: {
++    POSTS: "study_posts",
++    POST_PHOTOS: "study_post_photos",
++    POST_LIKES: "study_post_likes",
++    POST_COMMENTS: "study_post_comments",
++    POST_SAVES: "study_post_saves",
++    STORIES: "study_stories",
++    STORY_VIEWS: "study_story_views",
++    PROFILES: "profiles",
++  },
++  COLECOES: {
++    CHECKINS: "study_posts",
++  },
++  BUCKET: "study-rats",
++  RPC: {
++    FEED: "study_feed",
++    STORIES_FEED: "study_stories_feed",
++    PERFIL_RESUMO: "study_perfil_resumo",
++    POST_COMMENTS: "study_post_comments_list",
++    STORY_VIEWERS: "study_story_viewers",
++    STORIES_EXPIRADOS: "study_stories_meus_expirados",
++    STORIES_APAGAR_EXPIRADOS: "study_stories_apagar_expirados",
++  },
++  TIPOS: {
++    CHECKIN: "checkin",
++    POST: "post",
++  },
++  LISTA_TIPOS: ["checkin", "post"] as StudyPostKind[],
++  CATEGORIAS: {
++    DICA: "study_tip",
++    CURIOSIDADE: "curiosity",
++    DUVIDA: "question",
++    MOTIVACAO: "motivation",
++  },
++  LISTA_CATEGORIAS: ["study_tip", "curiosity", "question", "motivation"] as StudyCategory[],
++  DESTINOS: {
++    FEED: "feed",
++    STORY: "story",
++  },
++  LISTA_DESTINOS: ["feed", "story"] as StudyDestination[],
++  LIMITES: {
++    MAX_FOTOS: 10,
++    MAX_BIO: 150,
++    MAX_COMENTARIO: 500,
++    MAX_LEGENDA: 2000,
++    MAX_ARQUIVO_MB: 20,
++    IMAGEM_ALVO_MB: 0.8,
++    IMAGEM_MAX_PX: 1080,
++    PAGINA_FEED: 20,
++    STORY_HORAS: 24,
++    URL_ASSINADA_SEGUNDOS: 3600,
++    URL_ASSINADA_RENOVAR_SEGUNDOS: 3000,
++  },
++} as const;
++
++/** Categorias de publicação com rótulo (português) e emoji usados na interface. */
++export const STUDY_RATS_CATEGORIAS: ReadonlyArray<{
++  value: StudyCategory;
++  label: string;
++  emoji: string;
++}> = [
++  { value: STUDY_RATS.CATEGORIAS.DICA, label: "Dica de estudo", emoji: "💡" },
++  { value: STUDY_RATS.CATEGORIAS.CURIOSIDADE, label: "Curiosidade", emoji: "🔎" },
++  { value: STUDY_RATS.CATEGORIAS.DUVIDA, label: "Dúvida", emoji: "❓" },
++  { value: STUDY_RATS.CATEGORIAS.MOTIVACAO, label: "Motivação", emoji: "🔥" },
++];
+diff --git a/src/contexts/StudyRatsContext.tsx b/src/contexts/StudyRatsContext.tsx
+new file mode 100644
+index 00000000..6d378275
+--- /dev/null
++++ b/src/contexts/StudyRatsContext.tsx
+@@ -0,0 +1,253 @@
++// src/contexts/StudyRatsContext.tsx
++//
++// Contexto offline dos CHECK-INS da própria usuária (alimenta calendário, horas e resumo).
++// O RxDB é somente um cache de LEITURA: criar/editar/apagar vão ao Supabase pelo
++// studyRatsService e, em seguida, atualizam o RxDB e o estado local. Publicar sem
++// internet não é permitido (o serviço devolve erro amigável).
++
++import React, {
++  createContext,
++  useCallback,
++  useContext,
++  useEffect,
++  useMemo,
++  useState,
++  type ReactNode,
++} from 'react';
++import { getDb } from '@/lib/db';
++import { localDateStr, localTimeStr } from '@/utils/date';
++import {
++  createPost,
++  deletePost,
++  updatePost,
++} from '@/services/studyRatsService';
++import type {
++  CreateStudyPostInput,
++  CreatedStudyPost,
++  StudyCheckinRecord,
++  StudyPostKind,
++  UpdateStudyPostInput,
++} from '@/types/studyRats';
++
++interface StudyRatsContextType {
++  /** Check-ins da própria usuária (não apagados), mais recentes primeiro. */
++  checkins: StudyCheckinRecord[];
++  loading: boolean;
++  userId: string | null;
++  /** Publica um check-in (feed ou story) e grava o cache local. */
++  createCheckin: (input: CreateStudyPostInput) => Promise<CreatedStudyPost>;
++  updateCheckin: (id: string, data: UpdateStudyPostInput) => Promise<void>;
++  deleteCheckin: (id: string) => Promise<void>;
++  refresh: () => Promise<void>;
++}
++
++const StudyRatsContext = createContext<StudyRatsContextType | undefined>(undefined);
++
++function readCachedUserId(): string | null {
++  try {
++    return localStorage.getItem('revisaflash_user_id');
++  } catch {
++    return null;
++  }
++}
++
++function sortCheckins(list: StudyCheckinRecord[]): StudyCheckinRecord[] {
++  return [...list].sort((a, b) => {
++    const dataA = `${a.study_date ?? ''} ${a.study_time ?? ''}`;
++    const dataB = `${b.study_date ?? ''} ${b.study_time ?? ''}`;
++    if (dataA !== dataB) return dataB.localeCompare(dataA);
++    return (b.created_at ?? '').localeCompare(a.created_at ?? '');
++  });
++}
++
++export const StudyRatsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
++  const [checkins, setCheckins] = useState<StudyCheckinRecord[]>([]);
++  const [userId, setUserId] = useState<string | null>(null);
++  const [loading, setLoading] = useState(true);
++
++  const loadData = useCallback(async () => {
++    try {
++      setLoading(true);
++      const cachedId = readCachedUserId();
++      if (!cachedId) {
++        console.warn('⚠️ [StudyRatsContext] Nenhum usuário disponível.');
++        setLoading(false);
++        return;
++      }
++
++      setUserId(cachedId);
++
++      const db = await getDb();
++      const docs = await db.study_posts.find({
++        selector: {
++          user_id: cachedId,
++          isDeleted: { $ne: true },
++        },
++      }).exec();
++
++      const loaded = sortCheckins(docs.map((doc: any) => doc.toJSON() as StudyCheckinRecord));
++      setCheckins(loaded);
++      console.log(`🐭 [StudyRatsContext] ${loaded.length} check-in(s) carregado(s) do cache local.`);
++    } catch (error) {
++      console.error('❌ [StudyRatsContext] Erro ao carregar check-ins:', error);
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    loadData();
++  }, [loadData]);
++
++  useEffect(() => {
++    let timeoutId: ReturnType<typeof setTimeout> | null = null;
++    let isSubscribed = true;
++    let subscription: { unsubscribe: () => void } | null = null;
++
++    const subscribe = async () => {
++      try {
++        const db = await getDb();
++        if (!db.collections?.study_posts) return;
++
++        subscription = db.study_posts.$.subscribe(() => {
++          if (timeoutId) clearTimeout(timeoutId);
++          timeoutId = setTimeout(() => {
++            if (isSubscribed) {
++              console.log('🔄 [StudyRatsContext] Mudança nos check-ins; recarregando…');
++              loadData();
++            }
++            timeoutId = null;
++          }, 500);
++        });
++      } catch (error) {
++        console.warn('⚠️ [StudyRatsContext] Não foi possível observar a coleção study_posts:', error);
++      }
++    };
++
++    subscribe();
++
++    return () => {
++      isSubscribed = false;
++      if (timeoutId) clearTimeout(timeoutId);
++      subscription?.unsubscribe();
++    };
++  }, [loadData]);
++
++  const createCheckin = useCallback(
++    async (input: CreateStudyPostInput): Promise<CreatedStudyPost> => {
++      const kind: StudyPostKind = input.kind;
++      if (kind !== 'checkin') {
++        throw new Error('O StudyRatsContext só grava check-ins.');
++      }
++
++      const ownerId = userId ?? readCachedUserId();
++      if (!ownerId) throw new Error('Usuário não autenticado');
++
++      const result = await createPost(input);
++      if (!result.postId) return result;
++
++      const now = new Date().toISOString();
++      const subject = input.subject?.trim() || null;
++      const record: StudyCheckinRecord = {
++        id: result.postId,
++        user_id: ownerId,
++        kind: 'checkin',
++        category: input.category ?? null,
++        title: input.title?.trim() || (subject ? `Check-in de ${subject}` : 'Check-in de estudo'),
++        caption: input.caption?.trim() || null,
++        subject,
++        duration_min: Number(input.durationMin ?? 0),
++        study_date: input.studyDate || localDateStr(),
++        study_time: localTimeStr(),
++        in_feed: input.destination === 'feed',
++        created_at: now,
++        updated_at: now,
++        isDeleted: false,
++        photos: result.photos.map((photo) => ({
++          id: photo.id,
++          path: photo.path,
++          position: photo.position,
++        })),
++      };
++
++      const db = await getDb();
++      const existing = await db.study_posts.findOne({ selector: { id: record.id } }).exec();
++      if (existing) {
++        await existing.patch(record);
++      } else {
++        await db.study_posts.insert(record);
++      }
++
++      setCheckins((prev) =>
++        sortCheckins([record, ...prev.filter((item) => item.id !== record.id)]),
++      );
++      console.log('✅ [StudyRatsContext] Check-in publicado e salvo no cache local:', record.id);
++
++      return result;
++    },
++    [userId],
++  );
++
++  const updateCheckin = useCallback(
++    async (id: string, data: UpdateStudyPostInput): Promise<void> => {
++      await updatePost(id, data);
++
++      const patch: Partial<StudyCheckinRecord> = { updated_at: new Date().toISOString() };
++      if (data.title !== undefined) patch.title = data.title.trim() || null;
++      if (data.caption !== undefined) patch.caption = data.caption.trim() || null;
++      if (data.category !== undefined) patch.category = data.category ?? null;
++      if (data.subject !== undefined) patch.subject = data.subject.trim() || null;
++      if (data.durationMin !== undefined) patch.duration_min = Number(data.durationMin);
++
++      const db = await getDb();
++      const doc = await db.study_posts.findOne({ selector: { id } }).exec();
++      if (doc) await doc.patch(patch);
++
++      setCheckins((prev) =>
++        sortCheckins(prev.map((item) => (item.id === id ? { ...item, ...patch } : item))),
++      );
++      console.log('✏️ [StudyRatsContext] Check-in atualizado:', id);
++    },
++    [],
++  );
++
++  const deleteCheckin = useCallback(async (id: string): Promise<void> => {
++    await deletePost(id);
++
++    const db = await getDb();
++    const doc = await db.study_posts.findOne({ selector: { id } }).exec();
++    if (doc) {
++      await doc.patch({ isDeleted: true, updated_at: new Date().toISOString() });
++    }
++
++    setCheckins((prev) => prev.filter((item) => item.id !== id));
++    console.log('🗑️ [StudyRatsContext] Check-in excluído:', id);
++  }, []);
++
++  const refresh = useCallback(async () => {
++    await loadData();
++  }, [loadData]);
++
++  const value = useMemo(
++    () => ({
++      checkins,
++      loading,
++      userId,
++      createCheckin,
++      updateCheckin,
++      deleteCheckin,
++      refresh,
++    }),
++    [checkins, loading, userId, createCheckin, updateCheckin, deleteCheckin, refresh],
++  );
++
++  return <StudyRatsContext.Provider value={value}>{children}</StudyRatsContext.Provider>;
++};
++
++export const useStudyRatsCheckins = () => {
++  const context = useContext(StudyRatsContext);
++  if (!context) {
++    throw new Error('useStudyRatsCheckins deve ser usado dentro de StudyRatsProvider');
++  }
++  return context;
++};
+diff --git a/src/hooks/useStudyRats.ts b/src/hooks/useStudyRats.ts
+new file mode 100644
+index 00000000..5bfc0ecc
+--- /dev/null
++++ b/src/hooks/useStudyRats.ts
+@@ -0,0 +1,428 @@
++// src/hooks/useStudyRats.ts
++//
++// Hooks do Study Rats. Sem react-query: estado React + cache simples em memória
++// (o queryClient do app existe, mas não é usado em nenhuma tela).
++
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import {
++  getFeed,
++  getProfile,
++  getSignedPhotoUrls,
++  getStories,
++  markStoryViewed,
++  studyRatsErrorMessage,
++  toggleLike,
++  toggleSave,
++} from '@/services/studyRatsService';
++import { useStudyRatsCheckins } from '@/contexts/StudyRatsContext';
++import { isDateInMonth } from '@/utils/date';
++import type {
++  StudyCalendarEntry,
++  StudyFeedCursor,
++  StudyFeedFilter,
++  StudyPost,
++  StudyProfileStats,
++  StudyStory,
++} from '@/types/studyRats';
++
++// ============================================================
++// CACHE EM MEMÓRIA DO FEED
++// ============================================================
++
++interface FeedCacheEntry {
++  posts: StudyPost[];
++  nextCursor: StudyFeedCursor | null;
++  at: number;
++}
++
++const FEED_CACHE_TTL_MS = 60_000;
++const feedCache = new Map<string, FeedCacheEntry>();
++
++function cacheKey(filter?: StudyFeedFilter): string {
++  return JSON.stringify(filter ?? {});
++}
++
++// ============================================================
++// useStudyFeed — paginação infinita + curtir/salvar otimistas
++// ============================================================
++
++export function useStudyFeed(filter?: StudyFeedFilter) {
++  const key = cacheKey(filter);
++  const cached = feedCache.get(key);
++
++  const [posts, setPosts] = useState<StudyPost[]>(cached?.posts ?? []);
++  const [nextCursor, setNextCursor] = useState<StudyFeedCursor | null>(
++    cached?.nextCursor ?? null,
++  );
++  const [loading, setLoading] = useState(!cached);
++  const [loadingMore, setLoadingMore] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const postsRef = useRef<StudyPost[]>(posts);
++  const filterRef = useRef<StudyFeedFilter | undefined>(filter);
++  filterRef.current = filter;
++
++  const commit = useCallback(
++    (next: StudyPost[], cursor?: StudyFeedCursor | null) => {
++      postsRef.current = next;
++      setPosts(next);
++
++      const previous = feedCache.get(key);
++      const nextCursorValue = cursor === undefined ? previous?.nextCursor ?? null : cursor;
++      feedCache.set(key, { posts: next, nextCursor: nextCursorValue, at: Date.now() });
++      setNextCursor(nextCursorValue);
++    },
++    [key],
++  );
++
++  useEffect(() => {
++    const entry = feedCache.get(key);
++    if (entry && Date.now() - entry.at < FEED_CACHE_TTL_MS) {
++      postsRef.current = entry.posts;
++      setPosts(entry.posts);
++      setNextCursor(entry.nextCursor);
++      setError(null);
++      setLoading(false);
++      return;
++    }
++
++    let cancelled = false;
++    setLoading(true);
++    setError(null);
++
++    getFeed({ filter: filterRef.current })
++      .then((page) => {
++        if (cancelled) return;
++        postsRef.current = page.posts;
++        setPosts(page.posts);
++        setNextCursor(page.nextCursor);
++        feedCache.set(key, { posts: page.posts, nextCursor: page.nextCursor, at: Date.now() });
++      })
++      .catch((err) => {
++        if (!cancelled) setError(studyRatsErrorMessage(err));
++      })
++      .finally(() => {
++        if (!cancelled) setLoading(false);
++      });
++
++    return () => {
++      cancelled = true;
++    };
++  }, [key]);
++
++  const refresh = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const page = await getFeed({ filter: filterRef.current });
++      commit(page.posts, page.nextCursor);
++    } catch (err) {
++      setError(studyRatsErrorMessage(err));
++    } finally {
++      setLoading(false);
++    }
++  }, [commit]);
++
++  const loadMore = useCallback(async () => {
++    const cursor = nextCursor;
++    if (!cursor || loadingMore) return;
++
++    setLoadingMore(true);
++    try {
++      const page = await getFeed({ cursor, filter: filterRef.current });
++      const existing = new Set(postsRef.current.map((post) => post.id));
++      const merged = [...postsRef.current, ...page.posts.filter((post) => !existing.has(post.id))];
++      commit(merged, page.nextCursor);
++    } catch (err) {
++      setError(studyRatsErrorMessage(err));
++    } finally {
++      setLoadingMore(false);
++    }
++  }, [nextCursor, loadingMore, commit]);
++
++  const likePost = useCallback(
++    async (postId: string, onlyLike = false) => {
++      const current = postsRef.current.find((post) => post.id === postId);
++      if (!current) return;
++      if (onlyLike && current.likedByMe) return;
++
++      const nextLiked = onlyLike ? true : !current.likedByMe;
++      const optimistic = postsRef.current.map((post) =>
++        post.id === postId
++          ? {
++              ...post,
++              likedByMe: nextLiked,
++              likesCount: Math.max(0, post.likesCount + (nextLiked ? 1 : -1)),
++            }
++          : post,
++      );
++      commit(optimistic);
++
++      try {
++        const result = await toggleLike(postId, { onlyLike });
++        if (result.liked !== nextLiked) {
++          commit(
++            postsRef.current.map((post) =>
++              post.id === postId
++                ? {
++                    ...post,
++                    likedByMe: result.liked,
++                    likesCount: Math.max(0, post.likesCount + (result.liked ? 1 : -1)),
++                  }
++                : post,
++            ),
++          );
++        }
++      } catch (err) {
++        commit(
++          postsRef.current.map((post) =>
++            post.id === postId
++              ? { ...post, likedByMe: current.likedByMe, likesCount: current.likesCount }
++              : post,
++          ),
++        );
++        setError(studyRatsErrorMessage(err));
++      }
++    },
++    [commit],
++  );
++
++  const savePost = useCallback(
++    async (postId: string) => {
++      const current = postsRef.current.find((post) => post.id === postId);
++      if (!current) return;
++
++      const nextSaved = !current.savedByMe;
++      commit(
++        postsRef.current.map((post) =>
++          post.id === postId ? { ...post, savedByMe: nextSaved } : post,
++        ),
++      );
++
++      try {
++        const result = await toggleSave(postId);
++        if (result.saved !== nextSaved) {
++          commit(
++            postsRef.current.map((post) =>
++              post.id === postId ? { ...post, savedByMe: result.saved } : post,
++            ),
++          );
++        }
++      } catch (err) {
++        commit(
++          postsRef.current.map((post) =>
++            post.id === postId ? { ...post, savedByMe: current.savedByMe } : post,
++          ),
++        );
++        setError(studyRatsErrorMessage(err));
++      }
++    },
++    [commit],
++  );
++
++  return {
++    posts,
++    loading,
++    loadingMore,
++    error,
++    hasMore: Boolean(nextCursor),
++    refresh,
++    loadMore,
++    likePost,
++    savePost,
++  };
++}
++
++// ============================================================
++// useStories
++// ============================================================
++
++export function useStories() {
++  const [stories, setStories] = useState<StudyStory[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const list = await getStories();
++      setStories(list);
++    } catch (err) {
++      setError(studyRatsErrorMessage(err));
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    load();
++    // Limpeza em segundo plano; não trava a tela e ignora erros.
++    void import('@/services/studyRatsService').then(({ cleanupExpiredStories }) =>
++      cleanupExpiredStories(),
++    );
++  }, [load]);
++
++  const markViewed = useCallback(async (storyId: string) => {
++    setStories((prev) =>
++      prev.map((story) => (story.id === storyId ? { ...story, viewedByMe: true } : story)),
++    );
++    try {
++      await markStoryViewed(storyId);
++    } catch {
++      // O anel de "visto" nunca deve quebrar a visualização.
++    }
++  }, []);
++
++  return { stories, loading, error, refresh: load, markViewed };
++}
++
++// ============================================================
++// useStudyProfile
++// ============================================================
++
++function readCachedUserId(): string | null {
++  try {
++    return localStorage.getItem('revisaflash_user_id');
++  } catch {
++    return null;
++  }
++}
++
++export function useStudyProfile(userId?: string) {
++  const currentUserId = readCachedUserId();
++  const targetId = userId ?? currentUserId;
++
++  const [profile, setProfile] = useState<StudyProfileStats | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++  const [reloadAt, setReloadAt] = useState(0);
++
++  useEffect(() => {
++    if (!targetId) {
++      setProfile(null);
++      setLoading(false);
++      return;
++    }
++
++    let cancelled = false;
++    setLoading(true);
++    setError(null);
++
++    getProfile(targetId)
++      .then((result) => {
++        if (!cancelled) setProfile(result);
++      })
++      .catch((err) => {
++        if (!cancelled) setError(studyRatsErrorMessage(err));
++      })
++      .finally(() => {
++        if (!cancelled) setLoading(false);
++      });
++
++    return () => {
++      cancelled = true;
++    };
++  }, [targetId, reloadAt]);
++
++  const refresh = useCallback(() => {
++    setReloadAt((value) => value + 1);
++  }, []);
++
++  return {
++    profile,
++    loading,
++    error,
++    refresh,
++    userId: targetId,
++    isMe: Boolean(targetId && currentUserId && targetId === currentUserId),
++  };
++}
++
++// ============================================================
++// useCalendarCheckins — lê do cache local (RxDB) e assina as fotos
++// ============================================================
++
++export function useCalendarCheckins(year: number, month: number) {
++  const { checkins, loading: contextLoading, refresh } = useStudyRatsCheckins();
++  const [urls, setUrls] = useState<Map<string, string>>(new Map());
++  const [urlsLoading, setUrlsLoading] = useState(false);
++
++  const entries = useMemo<StudyCalendarEntry[]>(() => {
++    return checkins
++      .filter((checkin) => isDateInMonth(checkin.study_date, year, month))
++      .map((checkin) => ({
++        id: checkin.id,
++        studyDate: checkin.study_date,
++        studyTime: checkin.study_time,
++        subject: checkin.subject,
++        durationMin: checkin.duration_min,
++        title: checkin.title,
++        caption: checkin.caption,
++        inFeed: checkin.in_feed,
++        createdAt: checkin.created_at,
++        photos: [...(checkin.photos ?? [])]
++          .sort((a, b) => a.position - b.position)
++          .map((photo) => ({
++            path: photo.path,
++            position: photo.position,
++            url: urls.get(photo.path) ?? null,
++          })),
++      }))
++      .sort((a, b) => {
++        const da = `${a.studyDate} ${a.studyTime ?? ''}`;
++        const db = `${b.studyDate} ${b.studyTime ?? ''}`;
++        return da.localeCompare(db);
++      });
++  }, [checkins, year, month, urls]);
++
++  const paths = useMemo(
++    () => entries.flatMap((entry) => entry.photos.map((photo) => photo.path)),
++    [entries],
++  );
++  const pathsKey = paths.join('|');
++
++  useEffect(() => {
++    if (!pathsKey) {
++      setUrls(new Map());
++      return;
++    }
++
++    let cancelled = false;
++    setUrlsLoading(true);
++
++    getSignedPhotoUrls(pathsKey.split('|'))
++      .then((map) => {
++        if (!cancelled) setUrls(map);
++      })
++      .finally(() => {
++        if (!cancelled) setUrlsLoading(false);
++      });
++
++    return () => {
++      cancelled = true;
++    };
++  }, [pathsKey]);
++
++  const byDate = useMemo(() => {
++    const grouped: Record<string, StudyCalendarEntry[]> = {};
++    for (const entry of entries) {
++      (grouped[entry.studyDate] ??= []).push(entry);
++    }
++    return grouped;
++  }, [entries]);
++
++  const totalMinutes = useMemo(
++    () => entries.reduce((sum, entry) => sum + entry.durationMin, 0),
++    [entries],
++  );
++
++  return {
++    entries,
++    byDate,
++    totalMinutes,
++    daysCount: Object.keys(byDate).length,
++    loading: contextLoading || urlsLoading,
++    refresh,
++  };
++}
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 24dde752..5e24df67 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1134,6 +1134,49 @@ const studyPlanPauseSchema = {
+   required: ['id', 'user_id', 'start_date', 'end_date'],
+ };
+ 
++// ============================================================
++// STUDY RATS — CHECK-INS (cache de LEITURA dos check-ins da própria usuária)
++// ============================================================
++// O RxDB guarda uma cópia local dos check-ins (kind = 'checkin') da usuária para
++// o calendário funcionar offline. O sync apenas PUXA estes dados: nunca enfileira
++// escrita (publicar exige internet e passa pelo studyRatsService).
++
++const studyPostSchema = {
++  title: 'study post schema',
++  version: 0,
++  primaryKey: 'id',
++  type: 'object',
++  properties: {
++    id: { type: 'string' },
++    user_id: { type: 'string' },
++    kind: { type: 'string', enum: ['checkin'] },
++    category: { type: ['string', 'null'] },
++    title: { type: ['string', 'null'] },
++    caption: { type: ['string', 'null'] },
++    subject: { type: ['string', 'null'] },
++    duration_min: { type: 'number' },
++    study_date: { type: 'string' },
++    study_time: { type: ['string', 'null'] },
++    in_feed: { type: 'boolean', default: true },
++    created_at: { type: 'string' },
++    updated_at: { type: 'string' },
++    isDeleted: { type: 'boolean', default: false },
++    photos: {
++      type: 'array',
++      items: {
++        type: 'object',
++        properties: {
++          id: { type: 'string' },
++          path: { type: 'string' },
++          position: { type: 'number' },
++        },
++        required: ['id', 'path', 'position'],
++      },
++    },
++  },
++  required: ['id', 'user_id', 'kind', 'study_date', 'created_at', 'updated_at'],
++};
++
+ // ============================================================
+ // INSTÂNCIA
+ // ============================================================
+@@ -1365,6 +1408,8 @@ export async function getDb(): Promise<RxDatabase> {
+       study_occurrences: { schema: studyOccurrenceSchema },
+       // Pausas do Plano de Estudos (ETAPA 7)
+       study_plan_pauses: { schema: studyPlanPauseSchema },
++      // Study Rats — cache de leitura dos check-ins da própria usuária
++      study_posts: { schema: studyPostSchema },
+     });
+ 
+     console.log('✅ Banco local criado com sucesso (v16).');
+@@ -2210,6 +2255,105 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void)
+       console.error('❌ [Integrity] Erro na verificação de integridade:', integrityErr);
+     }
+ 
++    // ============================================================
++    // STUDY RATS — check-ins da própria usuária (somente PULL, nunca push)
++    // ============================================================
++    // A policy de leitura do banco também libera posts de amizades; por isso o
++    // filtro por user_id + kind = 'checkin' é obrigatório aqui, senão cairiam no
++    // cache local e no calendário. Os apagados (is_deleted = true) também vêm para
++    // serem removidos localmente.
++    {
++      const collection = database.collections.study_posts;
++      if (collection) {
++        try {
++          const remoteRows: any[] = [];
++          for (let pagina = 0; pagina < 100; pagina++) {
++            const { data: lote, error: erroLote } = await supabaseClient
++              .from('study_posts')
++              .select('id, user_id, kind, category, title, caption, subject, duration_min, study_date, study_time, in_feed, created_at, updated_at, is_deleted')
++              .eq('user_id', userIdStr)
++              .eq('kind', 'checkin')
++              .order('created_at', { ascending: true })
++              .order('id', { ascending: true })
++              .range(remoteRows.length, remoteRows.length + 999);
++            if (erroLote) throw erroLote;
++            if (!lote || lote.length === 0) break;
++            remoteRows.push(...lote);
++          }
++
++          const photosByPost = new Map<string, Array<{ id: string; path: string; position: number }>>();
++          const ids = remoteRows.map((r) => r.id);
++          for (let i = 0; i < ids.length; i += 100) {
++            const chunk = ids.slice(i, i + 100);
++            const { data: fotos, error: erroFotos } = await supabaseClient
++              .from('study_post_photos')
++              .select('id, post_id, photo_path, position')
++              .in('post_id', chunk)
++              .order('position', { ascending: true });
++            if (erroFotos) throw erroFotos;
++            for (const foto of fotos || []) {
++              const lista = photosByPost.get(foto.post_id) || [];
++              lista.push({ id: foto.id, path: foto.photo_path, position: foto.position });
++              photosByPost.set(foto.post_id, lista);
++            }
++          }
++
++          const remoteIds = new Set<string>();
++          for (const row of remoteRows) {
++            remoteIds.add(row.id);
++            const existing = await collection.findOne({ selector: { id: row.id } }).exec();
++
++            if (row.is_deleted === true) {
++              if (existing) await existing.remove();
++              continue;
++            }
++
++            const doc = {
++              id: row.id,
++              user_id: row.user_id,
++              kind: row.kind,
++              category: row.category ?? null,
++              title: row.title ?? null,
++              caption: row.caption ?? null,
++              subject: row.subject ?? null,
++              duration_min: row.duration_min ?? 0,
++              study_date: row.study_date || '',
++              study_time: row.study_time ?? null,
++              in_feed: row.in_feed === true,
++              created_at: row.created_at,
++              updated_at: row.updated_at || row.created_at,
++              isDeleted: false,
++              photos: (photosByPost.get(row.id) || []).sort((a, b) => a.position - b.position),
++            };
++
++            if (existing) {
++              const localTs = existing.get('updated_at') || '1970-01-01T00:00:00Z';
++              if ((doc.updated_at || '') >= localTs) {
++                await existing.patch(doc);
++              }
++            } else {
++              await collection.insert(doc);
++            }
++          }
++
++          const locais = await collection.find({ selector: { user_id: userIdStr } }).exec();
++          let removidos = 0;
++          for (const local of locais) {
++            if (!remoteIds.has(local.get('id'))) {
++              await local.remove();
++              removidos++;
++            }
++          }
++          console.log(
++            `🐭 Study Rats: ${remoteRows.length} check-in(s) no cache local${removidos ? `, ${removidos} removido(s)` : ''}.`,
++          );
++        } catch (studyRatsErr) {
++          console.error('❌ Pull study_posts:', studyRatsErr);
++          houveErro = true;
++        }
++      }
++    }
++
+     if (houveErro) {
+       console.warn('⚠️ Houve erros durante a sincronização. lastSyncTimestamp NÃO será avançado.');
+     } else {
+diff --git a/src/services/studyRatsService.ts b/src/services/studyRatsService.ts
+new file mode 100644
+index 00000000..73bcad1a
+--- /dev/null
++++ b/src/services/studyRatsService.ts
+@@ -0,0 +1,1062 @@
++// src/services/studyRatsService.ts
++//
++// Study Rats — feed estilo Instagram da aba Comunidade.
++// Regras centrais (Fase 1 aprovada):
++//  * Só a própria usuária e amizades aceitas veem posts/fotos/stories (RLS + RPCs).
++//  * O RxDB é apenas cache de LEITURA dos check-ins da própria usuária; este serviço
++//    nunca enfileira escrita offline. Publicar exige internet.
++//  * Só se publica pela Comunidade. O calendário apenas lê os check-ins.
++//  * Fotos ficam no bucket privado 'study-rats' e são lidas por URL assinada.
++
++import * as imageCompression from 'browser-image-compression';
++import { getSupabaseWithToken } from '@/lib/supabaseClient';
++import { STUDY_RATS } from '@/constants';
++import { uid } from '@/utils/helpers';
++import { localDateStr, localMonthRange, localTimeStr } from '@/utils/date';
++import type {
++  CreatedStudyPost,
++  CreateStudyPostInput,
++  StudyAuthor,
++  StudyCalendarEntry,
++  StudyCategory,
++  StudyComment,
++  StudyFeedCursor,
++  StudyFeedPage,
++  StudyFeedParams,
++  StudyPhoto,
++  StudyPost,
++  StudyPostKind,
++  StudyProfileStats,
++  StudyStory,
++  StudyStoryViewer,
++  UpdateStudyPostInput,
++} from '@/types/studyRats';
++
++// ============================================================
++// ERROS AMIGÁVEIS
++// ============================================================
++
++export class StudyRatsError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'StudyRatsError';
++  }
++}
++
++/** Transforma qualquer erro em uma frase pronta para a tela. */
++export function studyRatsErrorMessage(error: unknown): string {
++  if (error instanceof StudyRatsError) return error.message;
++  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
++    return 'Sem conexão com a internet. Conecte-se e tente de novo.';
++  }
++  const msg = error instanceof Error ? error.message : '';
++  if (/failed to fetch|networkerror|load failed/i.test(msg)) {
++    return 'Não foi possível conectar. Verifique a internet e tente de novo.';
++  }
++  if (/não autenticado|jwt|unauthorized/i.test(msg)) {
++    return 'Sua sessão expirou. Entre novamente.';
++  }
++  return 'Algo deu errado. Tente novamente em instantes.';
++}
++
++function fail(message: string, cause?: unknown): StudyRatsError {
++  if (cause) {
++    const detail = cause instanceof Error ? cause.message : String(cause);
++    console.warn(`⚠️ [studyRats] ${message} (${detail})`);
++  }
++  return new StudyRatsError(message);
++}
++
++function assertOnline(): void {
++  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
++    throw new StudyRatsError(
++      'Sem conexão com a internet. Conecte-se para publicar — o que você digitou continua aqui.',
++    );
++  }
++}
++
++function getCurrentUserId(): string {
++  try {
++    const cached = localStorage.getItem('revisaflash_user_id');
++    if (cached) return cached;
++  } catch {
++    /* ignore */
++  }
++  const clerkId = (window as any)?.Clerk?.user?.id;
++  if (typeof clerkId === 'string' && clerkId) return clerkId;
++  throw new StudyRatsError('Sua sessão expirou. Entre novamente.');
++}
++
++// ============================================================
++// URLs ASSINADAS (cache em memória com renovação antes de expirar)
++// ============================================================
++
++interface SignedUrlEntry {
++  url: string;
++  expiresAt: number;
++}
++
++const signedUrlCache = new Map<string, SignedUrlEntry>();
++const SIGNED_URL_TTL = STUDY_RATS.LIMITES.URL_ASSINADA_SEGUNDOS;
++const SIGNED_URL_RENEW = STUDY_RATS.LIMITES.URL_ASSINADA_RENOVAR_SEGUNDOS;
++
++/**
++ * Devolve URLs assinadas para as fotos informadas. Não lança erro: fotos que
++ * falharem ficam sem URL (a interface mostra um placeholder).
++ */
++export async function getSignedPhotoUrls(paths: string[]): Promise<Map<string, string>> {
++  const unique = Array.from(
++    new Set(paths.filter((p): p is string => typeof p === 'string' && p.length > 0)),
++  );
++  const result = new Map<string, string>();
++  if (unique.length === 0) return result;
++
++  const now = Date.now();
++  const pending: string[] = [];
++
++  for (const path of unique) {
++    const cached = signedUrlCache.get(path);
++    if (cached && cached.expiresAt - now > SIGNED_URL_RENEW * 1000) {
++      result.set(path, cached.url);
++    } else {
++      pending.push(path);
++    }
++  }
++
++  if (pending.length > 0) {
++    try {
++      const supabase = await getSupabaseWithToken();
++      for (let i = 0; i < pending.length; i += 100) {
++        const chunk = pending.slice(i, i + 100);
++        const { data, error } = await supabase.storage
++          .from(STUDY_RATS.BUCKET)
++          .createSignedUrls(chunk, SIGNED_URL_TTL);
++        if (error) {
++          console.warn('⚠️ [studyRats] Não foi possível assinar fotos agora.');
++          continue;
++        }
++        for (const item of (data ?? []) as Array<{ path?: string; signedUrl?: string; error?: string }>) {
++          if (!item.signedUrl || !item.path) continue;
++          signedUrlCache.set(item.path, {
++            url: item.signedUrl,
++            expiresAt: now + SIGNED_URL_TTL * 1000,
++          });
++          result.set(item.path, item.signedUrl);
++        }
++      }
++    } catch (error) {
++      console.warn(
++        '⚠️ [studyRats] Falha ao gerar URLs assinadas:',
++        error instanceof Error ? error.message : error,
++      );
++    }
++  }
++
++  // Para as que falharam agora, aproveita o cache mesmo perto de expirar.
++  for (const path of unique) {
++    if (!result.has(path)) {
++      const cached = signedUrlCache.get(path);
++      if (cached) result.set(path, cached.url);
++    }
++  }
++
++  return result;
++}
++
++// ============================================================
++// NORMALIZAÇÃO DE DADOS DAS RPCs
++// ============================================================
++
++function toNumber(value: unknown): number {
++  const n = Number(value);
++  return Number.isFinite(n) ? n : 0;
++}
++
++function toStr(value: unknown): string | null {
++  return typeof value === 'string' && value.length > 0 ? value : null;
++}
++
++function mapAuthor(row: any, prefix: 'author' = 'author'): StudyAuthor {
++  return {
++    id: String(row.out_user_id ?? ''),
++    name: toStr(row[`out_${prefix}_name`]) ?? '',
++    avatarUrl: toStr(row[`out_${prefix}_avatar_url`]),
++    avatarTipo: toStr(row[`out_${prefix}_avatar_tipo`]),
++    avatarId: toStr(row[`out_${prefix}_avatar_id`]),
++    bio: toStr(row.out_author_bio),
++  };
++}
++
++function mapPostRow(row: any, urls: Map<string, string>): StudyPost {
++  const photos: StudyPhoto[] = Array.isArray(row.out_photos)
++    ? row.out_photos.map((p: any) => {
++        const path = String(p.photo_path ?? '');
++        return {
++          id: String(p.id ?? ''),
++          path,
++          position: toNumber(p.position),
++          url: urls.get(path) ?? null,
++        };
++      })
++    : [];
++
++  return {
++    id: String(row.out_id),
++    userId: String(row.out_user_id ?? ''),
++    kind: row.out_kind === STUDY_RATS.TIPOS.POST ? 'post' : 'checkin',
++    category: (toStr(row.out_category) as StudyCategory | null) ?? null,
++    title: toStr(row.out_title),
++    caption: toStr(row.out_caption),
++    subject: toStr(row.out_subject),
++    durationMin: toNumber(row.out_duration_min),
++    studyDate: toStr(row.out_study_date),
++    studyTime: toStr(row.out_study_time),
++    inFeed: row.out_in_feed === true,
++    createdAt: String(row.out_created_at ?? new Date().toISOString()),
++    author: mapAuthor(row),
++    likesCount: toNumber(row.out_likes_count),
++    commentsCount: toNumber(row.out_comments_count),
++    likedByMe: row.out_liked_by_me === true,
++    savedByMe: row.out_saved_by_me === true,
++    friendLikerId: toStr(row.out_friend_liker_id),
++    friendLikerName: toStr(row.out_friend_liker_name),
++    photos,
++  };
++}
++
++// ============================================================
++// FEED
++// ============================================================
++
++export async function getFeed({
++  cursor = null,
++  filter = {},
++  pageSize = STUDY_RATS.LIMITES.PAGINA_FEED,
++}: StudyFeedParams = {}): Promise<StudyFeedPage> {
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase.rpc(STUDY_RATS.RPC.FEED, {
++    p_cursor_created: cursor?.createdAt ?? null,
++    p_cursor_id: cursor?.id ?? null,
++    p_page_size: pageSize,
++    p_kind: filter.kind ?? null,
++    p_category: filter.category ?? null,
++    p_author_id: filter.authorId ?? null,
++    p_saved_only: filter.savedOnly === true,
++  });
++
++  if (error) {
++    throw fail('Não foi possível carregar o feed agora.', error);
++  }
++
++  const rows = (data ?? []) as any[];
++  const paths: string[] = [];
++  for (const row of rows) {
++    if (Array.isArray(row.out_photos)) {
++      for (const photo of row.out_photos) {
++        if (photo?.photo_path) paths.push(String(photo.photo_path));
++      }
++    }
++  }
++
++  const urls = await getSignedPhotoUrls(paths);
++  const posts = rows.map((row) => mapPostRow(row, urls));
++  const last = rows[rows.length - 1];
++
++  return {
++    posts,
++    nextCursor:
++      rows.length >= pageSize && last
++        ? { createdAt: String(last.out_created_at), id: String(last.out_id) }
++        : null,
++  };
++}
++
++/** Publicações de uma pessoa (usa o feed paginado por cursor). */
++export async function getProfilePosts(
++  userId: string,
++  kind?: StudyPostKind,
++): Promise<StudyPost[]> {
++  const all: StudyPost[] = [];
++  let cursor: StudyFeedCursor | null = null;
++
++  for (let page = 0; page < 20; page++) {
++    const result = await getFeed({
++      cursor,
++      filter: { authorId: userId, kind },
++      pageSize: 50,
++    });
++    all.push(...result.posts);
++    if (!result.nextCursor) break;
++    cursor = result.nextCursor;
++  }
++
++  return all;
++}
++
++/** Itens salvos pela própria usuária. */
++export async function getSavedPosts(): Promise<StudyPost[]> {
++  const all: StudyPost[] = [];
++  let cursor: StudyFeedCursor | null = null;
++
++  for (let page = 0; page < 10; page++) {
++    const result = await getFeed({
++      cursor,
++      filter: { savedOnly: true },
++      pageSize: STUDY_RATS.LIMITES.PAGINA_FEED,
++    });
++    all.push(...result.posts);
++    if (!result.nextCursor) break;
++    cursor = result.nextCursor;
++  }
++
++  return all;
++}
++
++// ============================================================
++// CURTIDAS E SALVOS
++// ============================================================
++
++export async function toggleLike(
++  postId: string,
++  options: { onlyLike?: boolean } = {},
++): Promise<{ liked: boolean }> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const { data: existing, error: selectError } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_LIKES)
++    .select('post_id')
++    .eq('post_id', postId)
++    .eq('user_id', userId)
++    .maybeSingle();
++
++  if (selectError) {
++    throw fail('Não foi possível curtir agora.', selectError);
++  }
++
++  if (existing) {
++    if (options.onlyLike) return { liked: true };
++    const { error } = await supabase
++      .from(STUDY_RATS.TABELAS.POST_LIKES)
++      .delete()
++      .eq('post_id', postId)
++      .eq('user_id', userId);
++    if (error) throw fail('Não foi possível descurtir agora.', error);
++    return { liked: false };
++  }
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_LIKES)
++    .insert({ post_id: postId, user_id: userId });
++
++  // 23505 = já curtido em outra aba/dispositivo.
++  if (error && (error as { code?: string }).code !== '23505') {
++    throw fail('Não foi possível curtir agora.', error);
++  }
++
++  return { liked: true };
++}
++
++export async function toggleSave(postId: string): Promise<{ saved: boolean }> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const { data: existing, error: selectError } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_SAVES)
++    .select('post_id')
++    .eq('post_id', postId)
++    .eq('user_id', userId)
++    .maybeSingle();
++
++  if (selectError) {
++    throw fail('Não foi possível salvar agora.', selectError);
++  }
++
++  if (existing) {
++    const { error } = await supabase
++      .from(STUDY_RATS.TABELAS.POST_SAVES)
++      .delete()
++      .eq('post_id', postId)
++      .eq('user_id', userId);
++    if (error) throw fail('Não foi possível remover dos salvos agora.', error);
++    return { saved: false };
++  }
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_SAVES)
++    .insert({ post_id: postId, user_id: userId });
++
++  if (error && (error as { code?: string }).code !== '23505') {
++    throw fail('Não foi possível salvar agora.', error);
++  }
++
++  return { saved: true };
++}
++
++// ============================================================
++// COMENTÁRIOS
++// ============================================================
++
++export async function getComments(postId: string): Promise<StudyComment[]> {
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase.rpc(STUDY_RATS.RPC.POST_COMMENTS, {
++    p_post_id: postId,
++  });
++
++  if (error) throw fail('Não foi possível carregar os comentários.', error);
++
++  return ((data ?? []) as any[]).map((row) => ({
++    id: String(row.out_id),
++    postId: String(row.out_post_id),
++    userId: String(row.out_user_id ?? ''),
++    text: String(row.out_text ?? ''),
++    createdAt: String(row.out_created_at ?? ''),
++    author: {
++      id: String(row.out_user_id ?? ''),
++      name: toStr(row.out_author_name) ?? '',
++      avatarUrl: toStr(row.out_author_avatar_url),
++      avatarTipo: toStr(row.out_author_avatar_tipo),
++      avatarId: toStr(row.out_author_avatar_id),
++    },
++  }));
++}
++
++export async function addComment(postId: string, text: string): Promise<StudyComment> {
++  const userId = getCurrentUserId();
++  const clean = text.trim();
++
++  if (!clean) throw new StudyRatsError('Escreva um comentário antes de publicar.');
++  if (clean.length > STUDY_RATS.LIMITES.MAX_COMENTARIO) {
++    throw new StudyRatsError(
++      `O comentário pode ter no máximo ${STUDY_RATS.LIMITES.MAX_COMENTARIO} caracteres.`,
++    );
++  }
++
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_COMMENTS)
++    .insert({ post_id: postId, user_id: userId, text: clean })
++    .select('id, post_id, user_id, text, created_at')
++    .single();
++
++  if (error || !data) throw fail('Não foi possível publicar o comentário.', error);
++
++  return {
++    id: String(data.id),
++    postId: String(data.post_id),
++    userId: String(data.user_id),
++    text: String(data.text),
++    createdAt: String(data.created_at),
++    author: {
++      id: String(data.user_id),
++      name: '',
++      avatarUrl: null,
++      avatarTipo: null,
++      avatarId: null,
++    },
++  };
++}
++
++export async function deleteComment(commentId: string): Promise<void> {
++  const supabase = await getSupabaseWithToken();
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_COMMENTS)
++    .delete()
++    .eq('id', commentId);
++
++  if (error) throw fail('Não foi possível excluir o comentário.', error);
++}
++
++// ============================================================
++// COMPRESSÃO E UPLOAD DAS FOTOS
++// ============================================================
++
++const ALLOWED_INPUT_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
++const ALLOWED_OUTPUT_TYPES = ['image/webp', 'image/jpeg'];
++const BUCKET_MAX_BYTES = 2 * 1024 * 1024; // limite do bucket na migration
++
++interface PreparedPhoto {
++  blob: Blob;
++  ext: 'webp' | 'jpg';
++  contentType: string;
++}
++
++/**
++ * Comprime a foto no cliente (reencodar já remove EXIF), mira WebP 1080 px / ≤ 0,8 MB.
++ * Safari antigo pode devolver PNG — nesse caso reencoda como JPEG (extensão .jpg),
++ * porque o bucket só aceita image/webp e image/jpeg.
++ */
++async function compressForUpload(file: File): Promise<PreparedPhoto> {
++  if (!ALLOWED_INPUT_TYPES.includes(file.type)) {
++    throw new StudyRatsError('Formato de imagem não suportado. Use JPG, PNG ou WebP.');
++  }
++
++  const maxBytes = STUDY_RATS.LIMITES.MAX_ARQUIVO_MB * 1024 * 1024;
++  if (file.size > maxBytes) {
++    throw new StudyRatsError(
++      `Cada foto pode ter no máximo ${STUDY_RATS.LIMITES.MAX_ARQUIVO_MB} MB.`,
++    );
++  }
++
++  const options = {
++    maxSizeMB: STUDY_RATS.LIMITES.IMAGEM_ALVO_MB,
++    maxWidthOrHeight: STUDY_RATS.LIMITES.IMAGEM_MAX_PX,
++    useWebWorker: true,
++    fileType: 'image/webp',
++    initialQuality: 0.8,
++  };
++
++  let out: Blob;
++  try {
++    out = await imageCompression.default(file, options);
++  } catch (error) {
++    throw fail('Não foi possível preparar esta imagem. Tente outra foto.', error);
++  }
++
++  if (!ALLOWED_OUTPUT_TYPES.includes(out.type)) {
++    try {
++      out = await imageCompression.default(out, { ...options, fileType: 'image/jpeg' });
++    } catch (error) {
++      throw fail('Não foi possível preparar esta imagem. Tente outra foto.', error);
++    }
++  }
++
++  const isWebp = out.type === 'image/webp';
++  const isJpeg = out.type === 'image/jpeg';
++  if (!isWebp && !isJpeg) {
++    throw new StudyRatsError('Não foi possível preparar esta imagem. Tente outra foto.');
++  }
++  if (out.size > BUCKET_MAX_BYTES) {
++    throw new StudyRatsError('A foto ficou grande demais. Escolha uma imagem menor.');
++  }
++
++  return {
++    blob: out,
++    ext: isWebp ? 'webp' : 'jpg',
++    contentType: out.type,
++  };
++}
++
++async function removeStorageFiles(supabase: any, paths: string[]): Promise<void> {
++  const unique = Array.from(new Set(paths.filter((p) => typeof p === 'string' && p)));
++  if (unique.length === 0) return;
++
++  for (let i = 0; i < unique.length; i += 100) {
++    const chunk = unique.slice(i, i + 100);
++    const { error } = await supabase.storage.from(STUDY_RATS.BUCKET).remove(chunk);
++    if (error) {
++      console.warn('⚠️ [studyRats] Não foi possível apagar arquivos do storage agora.');
++    }
++  }
++}
++
++// ============================================================
++// CRIAR / EDITAR / APAGAR PUBLICAÇÃO
++// ============================================================
++
++function validateCreateInput(input: CreateStudyPostInput): void {
++  const files = input.files ?? [];
++
++  if (files.length > STUDY_RATS.LIMITES.MAX_FOTOS) {
++    throw new StudyRatsError(
++      `Você pode enviar no máximo ${STUDY_RATS.LIMITES.MAX_FOTOS} fotos.`,
++    );
++  }
++  for (const file of files) {
++    if (!file.type.startsWith('image/')) {
++      throw new StudyRatsError('Só é possível enviar imagens.');
++    }
++  }
++
++  if (input.kind === STUDY_RATS.TIPOS.CHECKIN) {
++    if (files.length === 0) {
++      throw new StudyRatsError('O check-in precisa de pelo menos uma foto.');
++    }
++    if (!input.subject || !input.subject.trim()) {
++      throw new StudyRatsError('Escolha a matéria do check-in.');
++    }
++    const duration = Number(input.durationMin ?? 0);
++    if (!Number.isFinite(duration) || duration <= 0) {
++      throw new StudyRatsError('Informe quanto tempo você estudou.');
++    }
++    if (duration > 1440) {
++      throw new StudyRatsError('A duração máxima é de 24 horas.');
++    }
++  }
++
++  if (input.kind === STUDY_RATS.TIPOS.POST) {
++    if (!input.caption || !input.caption.trim()) {
++      throw new StudyRatsError('Escreva o texto da publicação.');
++    }
++    if (!input.category) {
++      throw new StudyRatsError('Escolha uma categoria para a publicação.');
++    }
++    if ((input.caption ?? '').trim().length > STUDY_RATS.LIMITES.MAX_LEGENDA) {
++      throw new StudyRatsError(
++        `O texto pode ter no máximo ${STUDY_RATS.LIMITES.MAX_LEGENDA} caracteres.`,
++      );
++    }
++  }
++}
++
++export async function createPost(input: CreateStudyPostInput): Promise<CreatedStudyPost> {
++  assertOnline();
++  validateCreateInput(input);
++
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const destination = input.destination;
++  const isCheckin = input.kind === STUDY_RATS.TIPOS.CHECKIN;
++  const needsPost = destination === STUDY_RATS.DESTINOS.FEED || isCheckin;
++  const needsStory = destination === STUDY_RATS.DESTINOS.STORY;
++
++  const postId = uid();
++  const storyId = uid();
++  const folderId = needsPost ? postId : storyId;
++  const files = input.files ?? [];
++  const subject = input.subject?.trim() || null;
++  const caption = input.caption?.trim() || null;
++  const category = input.category ?? null;
++  const durationMin = isCheckin ? Number(input.durationMin ?? 0) : 0;
++  const studyDate = input.studyDate || localDateStr();
++  const studyTime = localTimeStr();
++  const title = isCheckin
++    ? input.title?.trim() || (subject ? `Check-in de ${subject}` : 'Check-in de estudo')
++    : input.title?.trim() || null;
++
++  const uploaded: StudyPhoto[] = [];
++  let postInserted = false;
++  let storyInserted = false;
++
++  try {
++    // 1. Comprimir e subir as fotos (caminho: {userId}/{postId ou storyId}/{posição}.{ext})
++    const prepared: PreparedPhoto[] = [];
++    for (const file of files) {
++      prepared.push(await compressForUpload(file));
++    }
++
++    for (let position = 0; position < prepared.length; position++) {
++      const photo = prepared[position];
++      const path = `${userId}/${folderId}/${position}.${photo.ext}`;
++      const { error } = await supabase.storage
++        .from(STUDY_RATS.BUCKET)
++        .upload(path, photo.blob, { contentType: photo.contentType, upsert: false });
++
++      if (error) {
++        throw fail('Não foi possível enviar as fotos. Verifique a internet e tente de novo.', error);
++      }
++
++      uploaded.push({ id: uid(), path, position, url: null });
++    }
++
++    // 2. Inserir o post (check-in sempre; publicação normal só no feed)
++    if (needsPost) {
++      const postRow = {
++        id: postId,
++        user_id: userId,
++        kind: input.kind,
++        category: isCheckin ? null : category,
++        title,
++        caption,
++        subject,
++        duration_min: durationMin,
++        study_date: isCheckin ? studyDate : null,
++        study_time: isCheckin ? studyTime : null,
++        in_feed: destination === STUDY_RATS.DESTINOS.FEED,
++      };
++
++      const { error } = await supabase.from(STUDY_RATS.TABELAS.POSTS).insert(postRow);
++      if (error) throw fail('Não foi possível salvar a publicação.', error);
++      postInserted = true;
++
++      // 3. Inserir as fotos do post
++      if (uploaded.length > 0) {
++        const rows = uploaded.map((photo) => ({
++          id: photo.id,
++          post_id: postId,
++          photo_path: photo.path,
++          position: photo.position,
++        }));
++        const { error: photosError } = await supabase
++          .from(STUDY_RATS.TABELAS.POST_PHOTOS)
++          .insert(rows);
++        if (photosError) throw fail('Não foi possível salvar as fotos da publicação.', photosError);
++      }
++    }
++
++    // 4. Inserir o story por último (o banco usa expires_at = now() + 24h; não enviamos expires_at)
++    if (needsStory) {
++      const storyRow = {
++        id: storyId,
++        user_id: userId,
++        kind: input.kind,
++        category: isCheckin ? null : category,
++        text: caption,
++        photo_path: uploaded[0]?.path ?? null,
++        subject,
++        duration_min: durationMin,
++        checkin_post_id: isCheckin ? postId : null,
++      };
++
++      const { error } = await supabase.from(STUDY_RATS.TABELAS.STORIES).insert(storyRow);
++      if (error) throw fail('Não foi possível publicar o story.', error);
++      storyInserted = true;
++    }
++
++    return {
++      postId: needsPost ? postId : null,
++      storyId: needsStory ? storyId : null,
++      photos: uploaded,
++    };
++  } catch (error) {
++    // Desfaz o que já foi gravado (linhas e arquivos), sem perder o texto digitado.
++    try {
++      if (storyInserted) {
++        await supabase
++          .from(STUDY_RATS.TABELAS.STORIES)
++          .delete()
++          .eq('id', storyId)
++          .eq('user_id', userId);
++      }
++      if (postInserted) {
++        await supabase
++          .from(STUDY_RATS.TABELAS.POSTS)
++          .delete()
++          .eq('id', postId)
++          .eq('user_id', userId);
++      }
++    } catch (rollbackError) {
++      console.warn(
++        '⚠️ [studyRats] Falha ao desfazer linhas da publicação:',
++        rollbackError instanceof Error ? rollbackError.message : rollbackError,
++      );
++    }
++
++    if (uploaded.length > 0) {
++      await removeStorageFiles(supabase, uploaded.map((photo) => photo.path));
++    }
++
++    if (error instanceof StudyRatsError) throw error;
++    throw new StudyRatsError(studyRatsErrorMessage(error));
++  }
++}
++
++export async function updatePost(
++  postId: string,
++  data: UpdateStudyPostInput,
++): Promise<void> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const patch: Record<string, unknown> = {};
++  if (data.title !== undefined) patch.title = data.title?.trim() || null;
++  if (data.caption !== undefined) patch.caption = data.caption?.trim() || null;
++  if (data.category !== undefined) patch.category = data.category ?? null;
++  if (data.subject !== undefined) patch.subject = data.subject?.trim() || null;
++  if (data.durationMin !== undefined) {
++    const duration = Number(data.durationMin);
++    if (!Number.isFinite(duration) || duration <= 0 || duration > 1440) {
++      throw new StudyRatsError('Duração inválida.');
++    }
++    patch.duration_min = duration;
++  }
++
++  if (Object.keys(patch).length === 0) return;
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.POSTS)
++    .update(patch)
++    .eq('id', postId)
++    .eq('user_id', userId);
++
++  if (error) throw fail('Não foi possível salvar as alterações.', error);
++}
++
++/**
++ * Soft delete da publicação + remoção do story vinculado + remoção dos arquivos.
++ * O banco não apaga arquivos sozinho; sem isso eles ficariam órfãos no bucket.
++ */
++export async function deletePost(postId: string): Promise<void> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const { data: photos } = await supabase
++    .from(STUDY_RATS.TABELAS.POST_PHOTOS)
++    .select('photo_path')
++    .eq('post_id', postId);
++
++  const { data: stories } = await supabase
++    .from(STUDY_RATS.TABELAS.STORIES)
++    .select('id')
++    .eq('checkin_post_id', postId)
++    .eq('user_id', userId);
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.POSTS)
++    .update({ is_deleted: true })
++    .eq('id', postId)
++    .eq('user_id', userId);
++
++  if (error) throw fail('Não foi possível excluir a publicação.', error);
++
++  const storyIds = ((stories ?? []) as Array<{ id: string }>).map((s) => s.id);
++  if (storyIds.length > 0) {
++    const { error: storyError } = await supabase
++      .from(STUDY_RATS.TABELAS.STORIES)
++      .delete()
++      .eq('user_id', userId)
++      .in('id', storyIds);
++    if (storyError) {
++      console.warn('⚠️ [studyRats] Story vinculado não foi removido agora.');
++    }
++  }
++
++  const paths = ((photos ?? []) as Array<{ photo_path: string }>).map((p) => p.photo_path);
++  if (paths.length > 0) {
++    await removeStorageFiles(supabase, paths);
++  }
++}
++
++// ============================================================
++// STORIES
++// ============================================================
++
++export async function getStories(): Promise<StudyStory[]> {
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase.rpc(STUDY_RATS.RPC.STORIES_FEED);
++
++  if (error) throw fail('Não foi possível carregar os stories.', error);
++
++  const rows = (data ?? []) as any[];
++  const paths = rows
++    .map((row) => toStr(row.out_photo_path))
++    .filter((p): p is string => !!p);
++  const urls = await getSignedPhotoUrls(paths);
++
++  return rows.map((row) => {
++    const photoPath = toStr(row.out_photo_path);
++    return {
++      id: String(row.out_id),
++      userId: String(row.out_user_id ?? ''),
++      kind: row.out_kind === STUDY_RATS.TIPOS.POST ? 'post' : 'checkin',
++      category: (toStr(row.out_category) as StudyCategory | null) ?? null,
++      text: toStr(row.out_text),
++      photoPath,
++      photoUrl: photoPath ? urls.get(photoPath) ?? null : null,
++      subject: toStr(row.out_subject),
++      durationMin: toNumber(row.out_duration_min),
++      checkinPostId: toStr(row.out_checkin_post_id),
++      createdAt: String(row.out_created_at ?? ''),
++      expiresAt: String(row.out_expires_at ?? ''),
++      viewedByMe: row.out_viewed_by_me === true,
++      viewedCount: toNumber(row.out_viewed_count),
++      author: {
++        id: String(row.out_user_id ?? ''),
++        name: toStr(row.out_author_name) ?? '',
++        avatarUrl: toStr(row.out_author_avatar_url),
++        avatarTipo: toStr(row.out_author_avatar_tipo),
++        avatarId: toStr(row.out_author_avatar_id),
++      },
++    };
++  });
++}
++
++export async function markStoryViewed(storyId: string): Promise<void> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.STORY_VIEWS)
++    .upsert(
++      { story_id: storyId, user_id: userId },
++      { onConflict: 'story_id,user_id', ignoreDuplicates: true },
++    );
++
++  if (error) throw fail('Não foi possível marcar o story como visto.', error);
++}
++
++export async function getStoryViewers(storyId: string): Promise<StudyStoryViewer[]> {
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase.rpc(STUDY_RATS.RPC.STORY_VIEWERS, {
++    p_story_id: storyId,
++  });
++
++  if (error) throw fail('Não foi possível carregar quem viu o story.', error);
++
++  return ((data ?? []) as any[]).map((row) => ({
++    userId: String(row.out_user_id ?? ''),
++    viewedAt: String(row.out_viewed_at ?? ''),
++    name: toStr(row.out_name) ?? '',
++    avatarUrl: toStr(row.out_avatar_url),
++    avatarTipo: toStr(row.out_avatar_tipo),
++    avatarId: toStr(row.out_avatar_id),
++  }));
++}
++
++/**
++ * Limpa stories expirados da própria usuária.
++ * Apaga no storage só os arquivos não compartilhados com um check-in e depois
++ * remove as linhas via RPC. Roda em segundo plano; qualquer erro é ignorado.
++ */
++export async function cleanupExpiredStories(): Promise<void> {
++  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
++
++  try {
++    const supabase = await getSupabaseWithToken();
++    const { data, error } = await supabase.rpc(STUDY_RATS.RPC.STORIES_EXPIRADOS);
++    if (error || !Array.isArray(data) || data.length === 0) return;
++
++    const rows = data as Array<{
++      out_id: string;
++      out_photo_path: string | null;
++      out_foto_compartilhada: boolean;
++    }>;
++
++    const onlyStoryFiles = rows
++      .filter((row) => row.out_foto_compartilhada === false && row.out_photo_path)
++      .map((row) => row.out_photo_path as string);
++
++    if (onlyStoryFiles.length > 0) {
++      await removeStorageFiles(supabase, onlyStoryFiles);
++    }
++
++    const ids = rows.map((row) => row.out_id).filter(Boolean);
++    if (ids.length > 0) {
++      await supabase.rpc(STUDY_RATS.RPC.STORIES_APAGAR_EXPIRADOS, { p_ids: ids });
++    }
++  } catch (error) {
++    console.warn(
++      '⚠️ [studyRats] Limpeza de stories expirados ignorada:',
++      error instanceof Error ? error.message : error,
++    );
++  }
++}
++
++// ============================================================
++// PERFIL
++// ============================================================
++
++export async function getProfile(userId: string): Promise<StudyProfileStats | null> {
++  const supabase = await getSupabaseWithToken();
++  const { data, error } = await supabase.rpc(STUDY_RATS.RPC.PERFIL_RESUMO, {
++    p_user_id: userId,
++  });
++
++  if (error) throw fail('Não foi possível carregar o perfil.', error);
++
++  const row = ((data ?? []) as any[])[0];
++  if (!row) return null;
++
++  return {
++    userId: String(row.out_user_id ?? userId),
++    name: toStr(row.out_name) ?? '',
++    bio: toStr(row.out_bio),
++    avatarUrl: toStr(row.out_avatar_url),
++    avatarTipo: toStr(row.out_avatar_tipo),
++    avatarId: toStr(row.out_avatar_id),
++    postsCount: toNumber(row.out_posts_count),
++    hours: toNumber(row.out_hours),
++  };
++}
++
++export async function updateBio(text: string): Promise<void> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++  const bio = text.trim();
++
++  if (bio.length > STUDY_RATS.LIMITES.MAX_BIO) {
++    throw new StudyRatsError(
++      `A bio pode ter no máximo ${STUDY_RATS.LIMITES.MAX_BIO} caracteres.`,
++    );
++  }
++
++  const { error } = await supabase
++    .from(STUDY_RATS.TABELAS.PROFILES)
++    .update({ bio: bio || null })
++    .eq('id', userId);
++
++  if (error) throw fail('Não foi possível salvar a bio.', error);
++}
++
++// ============================================================
++// CALENDÁRIO (check-ins da própria usuária)
++// ============================================================
++
++/** Check-ins da própria usuária no mês local informado (`month` de 1 a 12). */
++export async function getMyCheckinsByMonth(
++  year: number,
++  month: number,
++): Promise<StudyCalendarEntry[]> {
++  const userId = getCurrentUserId();
++  const supabase = await getSupabaseWithToken();
++  const { start, end } = localMonthRange(year, month);
++
++  const { data, error } = await supabase
++    .from(STUDY_RATS.TABELAS.POSTS)
++    .select(
++      'id, user_id, kind, category, title, caption, subject, duration_min, study_date, study_time, in_feed, created_at',
++    )
++    .eq('user_id', userId)
++    .eq('kind', STUDY_RATS.TIPOS.CHECKIN)
++    .eq('is_deleted', false)
++    .gte('study_date', start)
++    .lte('study_date', end)
++    .order('study_date', { ascending: true })
++    .order('study_time', { ascending: true });
++
++  if (error) throw fail('Não foi possível carregar o calendário.', error);
++
++  const posts = (data ?? []) as any[];
++  if (posts.length === 0) return [];
++
++  const postIds = posts.map((p) => String(p.id));
++  const photosByPost = new Map<string, Array<{ path: string; position: number }>>();
++
++  for (let i = 0; i < postIds.length; i += 100) {
++    const chunk = postIds.slice(i, i + 100);
++    const { data: photos, error: photosError } = await supabase
++      .from(STUDY_RATS.TABELAS.POST_PHOTOS)
++      .select('post_id, photo_path, position')
++      .in('post_id', chunk)
++      .order('position', { ascending: true });
++
++    if (photosError) {
++      console.warn('⚠️ [studyRats] Não foi possível carregar as fotos dos check-ins.');
++      continue;
++    }
++
++    for (const photo of (photos ?? []) as any[]) {
++      const list = photosByPost.get(String(photo.post_id)) ?? [];
++      list.push({ path: String(photo.photo_path), position: toNumber(photo.position) });
++      photosByPost.set(String(photo.post_id), list);
++    }
++  }
++
++  const allPaths = Array.from(photosByPost.values()).flatMap((list) =>
++    list.map((photo) => photo.path),
++  );
++  const urls = await getSignedPhotoUrls(allPaths);
++
++  return posts.map((post) => {
++    const list = (photosByPost.get(String(post.id)) ?? []).sort(
++      (a, b) => a.position - b.position,
++    );
++    return {
++      id: String(post.id),
++      studyDate: String(post.study_date ?? ''),
++      studyTime: toStr(post.study_time),
++      subject: toStr(post.subject),
++      durationMin: toNumber(post.duration_min),
++      title: toStr(post.title),
++      caption: toStr(post.caption),
++      inFeed: post.in_feed === true,
++      createdAt: String(post.created_at ?? ''),
++      photos: list.map((photo) => ({
++        path: photo.path,
++        position: photo.position,
++        url: urls.get(photo.path) ?? null,
++      })),
++    };
++  });
++}
+diff --git a/src/types/studyRats.ts b/src/types/studyRats.ts
+new file mode 100644
+index 00000000..0621d38c
+--- /dev/null
++++ b/src/types/studyRats.ts
+@@ -0,0 +1,194 @@
++// src/types/studyRats.ts
++// Tipos do Study Rats (feed estilo Instagram da aba Comunidade).
++// Os nomes seguem o padrão camelCase do TypeScript; o serviço converte para/de
++// snake_case nas tabelas e RPCs do Supabase (supabase/migrations/20261124120000_study_rats.sql).
++
++export type StudyPostKind = 'checkin' | 'post';
++
++export type StudyCategory = 'study_tip' | 'curiosity' | 'question' | 'motivation';
++
++export type StudyDestination = 'feed' | 'story';
++
++export interface StudyAuthor {
++  id: string;
++  name: string;
++  avatarUrl: string | null;
++  avatarTipo: string | null;
++  avatarId: string | null;
++  bio: string | null;
++}
++
++export interface StudyPhoto {
++  id: string;
++  path: string;
++  position: number;
++  url: string | null;
++}
++
++export interface StudyPost {
++  id: string;
++  userId: string;
++  kind: StudyPostKind;
++  category: StudyCategory | null;
++  title: string | null;
++  caption: string | null;
++  subject: string | null;
++  durationMin: number;
++  studyDate: string | null;
++  studyTime: string | null;
++  inFeed: boolean;
++  createdAt: string;
++  author: StudyAuthor;
++  likesCount: number;
++  commentsCount: number;
++  likedByMe: boolean;
++  savedByMe: boolean;
++  friendLikerId: string | null;
++  friendLikerName: string | null;
++  photos: StudyPhoto[];
++}
++
++export interface StudyComment {
++  id: string;
++  postId: string;
++  userId: string;
++  text: string;
++  createdAt: string;
++  author: Omit<StudyAuthor, 'bio'>;
++}
++
++export interface StudyStory {
++  id: string;
++  userId: string;
++  kind: StudyPostKind;
++  category: StudyCategory | null;
++  text: string | null;
++  photoPath: string | null;
++  photoUrl: string | null;
++  subject: string | null;
++  durationMin: number;
++  checkinPostId: string | null;
++  createdAt: string;
++  expiresAt: string;
++  viewedByMe: boolean;
++  viewedCount: number;
++  author: Omit<StudyAuthor, 'bio'>;
++}
++
++export interface StudyStoryViewer {
++  userId: string;
++  viewedAt: string;
++  name: string;
++  avatarUrl: string | null;
++  avatarTipo: string | null;
++  avatarId: string | null;
++}
++
++export interface StudyProfileStats {
++  userId: string;
++  name: string;
++  bio: string | null;
++  avatarUrl: string | null;
++  avatarTipo: string | null;
++  avatarId: string | null;
++  postsCount: number;
++  hours: number;
++}
++
++export interface StudyCalendarPhoto {
++  path: string;
++  position: number;
++  url: string | null;
++}
++
++export interface StudyCalendarEntry {
++  id: string;
++  studyDate: string;
++  studyTime: string | null;
++  subject: string | null;
++  durationMin: number;
++  title: string | null;
++  caption: string | null;
++  inFeed: boolean;
++  createdAt: string;
++  photos: StudyCalendarPhoto[];
++}
++
++export interface StudyFeedFilter {
++  kind?: StudyPostKind;
++  category?: StudyCategory;
++  authorId?: string;
++  savedOnly?: boolean;
++}
++
++export interface StudyFeedCursor {
++  createdAt: string;
++  id: string;
++}
++
++export interface StudyFeedPage {
++  posts: StudyPost[];
++  nextCursor: StudyFeedCursor | null;
++}
++
++export interface StudyFeedParams {
++  cursor?: StudyFeedCursor | null;
++  filter?: StudyFeedFilter;
++  pageSize?: number;
++}
++
++export interface CreateStudyPostInput {
++  destination: StudyDestination;
++  kind: StudyPostKind;
++  category?: StudyCategory | null;
++  files?: File[];
++  title?: string;
++  subject?: string;
++  durationMin?: number;
++  caption?: string;
++  /** Data local (YYYY-MM-DD). Se omitida, usa a data local de hoje. */
++  studyDate?: string;
++}
++
++export interface CreatedStudyPost {
++  postId: string | null;
++  storyId: string | null;
++  photos: StudyPhoto[];
++}
++
++export interface UpdateStudyPostInput {
++  title?: string;
++  caption?: string;
++  category?: StudyCategory | null;
++  subject?: string;
++  durationMin?: number;
++}
++
++// ------------------------------------------------------------------
++// Documento local (RxDB) — cache de LEITURA dos check-ins da usuária.
++// Nunca é enviado ao Supabase pelo sync: as escritas passam pelo serviço.
++// ------------------------------------------------------------------
++
++export interface StudyCheckinPhoto {
++  id: string;
++  path: string;
++  position: number;
++}
++
++export interface StudyCheckinRecord {
++  id: string;
++  user_id: string;
++  kind: 'checkin';
++  category: StudyCategory | null;
++  title: string | null;
++  caption: string | null;
++  subject: string | null;
++  duration_min: number;
++  study_date: string;
++  study_time: string | null;
++  in_feed: boolean;
++  created_at: string;
++  updated_at: string;
++  isDeleted: boolean;
++  photos: StudyCheckinPhoto[];
++}
+diff --git a/src/utils/date.ts b/src/utils/date.ts
+new file mode 100644
+index 00000000..6c811cec
+--- /dev/null
++++ b/src/utils/date.ts
+@@ -0,0 +1,36 @@
++// src/utils/date.ts
++// Datas locais do Study Rats (America/Fortaleza no dispositivo da usuária).
++// NUNCA usar toISOString() aqui: ele converte para UTC e pode voltar um dia.
++
++function pad2(n: number): string {
++  return String(n).padStart(2, '0');
++}
++
++/** Data local no formato YYYY-MM-DD (com zero à esquerda). */
++export function localDateStr(date: Date = new Date()): string {
++  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
++}
++
++/** Hora local no formato HH:MM:SS (aceito pela coluna study_time). */
++export function localTimeStr(date: Date = new Date()): string {
++  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
++}
++
++/** Primeiro e último dia (YYYY-MM-DD) de um mês local. `month` vai de 1 a 12. */
++export function localMonthRange(year: number, month: number): { start: string; end: string } {
++  const lastDay = new Date(year, month, 0).getDate();
++  return {
++    start: `${year}-${pad2(month)}-01`,
++    end: `${year}-${pad2(month)}-${pad2(lastDay)}`,
++  };
++}
++
++/** Prefixo YYYY-MM-DD de um mês local, para comparações de string. `month` de 1 a 12. */
++export function localMonthPrefix(year: number, month: number): string {
++  return `${year}-${pad2(month)}-`;
++}
++
++/** O dia `dateStr` (YYYY-MM-DD) pertence ao mês local informado? */
++export function isDateInMonth(dateStr: string | null | undefined, year: number, month: number): boolean {
++  return typeof dateStr === 'string' && dateStr.startsWith(localMonthPrefix(year, month));
++}
+diff --git a/src/utils/studyRatsFormat.ts b/src/utils/studyRatsFormat.ts
+new file mode 100644
+index 00000000..a1883893
+--- /dev/null
++++ b/src/utils/studyRatsFormat.ts
+@@ -0,0 +1,31 @@
++// src/utils/studyRatsFormat.ts
++// Formatações visíveis do Study Rats (movidas do protótipo mock-data.ts).
++
++/** 90 -> "1h30min" | 60 -> "1h" | 45 -> "45min". */
++export function fmtDuracao(min: number): string {
++  const total = Number.isFinite(min) ? Math.max(0, Math.round(min)) : 0;
++  if (total < 60) return `${total}min`;
++  const horas = Math.floor(total / 60);
++  const resto = total % 60;
++  return resto ? `${horas}h${String(resto).padStart(2, '0')}min` : `${horas}h`;
++}
++
++/** "agora", "há 3h", "há 2d"… a partir da data/hora atual do dispositivo. */
++export function tempoRelativo(iso: string, agora: Date = new Date()): string {
++  const alvo = new Date(iso);
++  if (Number.isNaN(alvo.getTime())) return '';
++
++  const diffMs = agora.getTime() - alvo.getTime();
++  if (diffMs < 60_000) return 'agora';
++
++  const minutos = Math.floor(diffMs / 60_000);
++  if (minutos < 60) return `há ${minutos}min`;
++
++  const horas = Math.floor(minutos / 60);
++  if (horas < 24) return `há ${horas}h`;
++
++  const dias = Math.floor(horas / 24);
++  if (dias < 7) return `há ${dias}d`;
++
++  return alvo.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
++}

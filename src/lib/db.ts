@@ -1135,6 +1135,49 @@ const studyPlanPauseSchema = {
 };
 
 // ============================================================
+// STUDY RATS — CHECK-INS (cache de LEITURA dos check-ins da própria usuária)
+// ============================================================
+// O RxDB guarda uma cópia local dos check-ins (kind = 'checkin') da usuária para
+// o calendário funcionar offline. O sync apenas PUXA estes dados: nunca enfileira
+// escrita (publicar exige internet e passa pelo studyRatsService).
+
+const studyPostSchema = {
+  title: 'study post schema',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    kind: { type: 'string', enum: ['checkin'] },
+    category: { type: ['string', 'null'] },
+    title: { type: ['string', 'null'] },
+    caption: { type: ['string', 'null'] },
+    subject: { type: ['string', 'null'] },
+    duration_min: { type: 'number' },
+    study_date: { type: 'string' },
+    study_time: { type: ['string', 'null'] },
+    in_feed: { type: 'boolean', default: true },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+    photos: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          path: { type: 'string' },
+          position: { type: 'number' },
+        },
+        required: ['id', 'path', 'position'],
+      },
+    },
+  },
+  required: ['id', 'user_id', 'kind', 'study_date', 'created_at', 'updated_at'],
+};
+
+// ============================================================
 // INSTÂNCIA
 // ============================================================
 
@@ -1365,6 +1408,8 @@ export async function getDb(): Promise<RxDatabase> {
       study_occurrences: { schema: studyOccurrenceSchema },
       // Pausas do Plano de Estudos (ETAPA 7)
       study_plan_pauses: { schema: studyPlanPauseSchema },
+      // Study Rats — cache de leitura dos check-ins da própria usuária
+      study_posts: { schema: studyPostSchema },
     });
 
     console.log('✅ Banco local criado com sucesso (v16).');
@@ -2208,6 +2253,105 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
       }
     } catch (integrityErr) {
       console.error('❌ [Integrity] Erro na verificação de integridade:', integrityErr);
+    }
+
+    // ============================================================
+    // STUDY RATS — check-ins da própria usuária (somente PULL, nunca push)
+    // ============================================================
+    // A policy de leitura do banco também libera posts de amizades; por isso o
+    // filtro por user_id + kind = 'checkin' é obrigatório aqui, senão cairiam no
+    // cache local e no calendário. Os apagados (is_deleted = true) também vêm para
+    // serem removidos localmente.
+    {
+      const collection = database.collections.study_posts;
+      if (collection) {
+        try {
+          const remoteRows: any[] = [];
+          for (let pagina = 0; pagina < 100; pagina++) {
+            const { data: lote, error: erroLote } = await supabaseClient
+              .from('study_posts')
+              .select('id, user_id, kind, category, title, caption, subject, duration_min, study_date, study_time, in_feed, created_at, updated_at, is_deleted')
+              .eq('user_id', userIdStr)
+              .eq('kind', 'checkin')
+              .order('created_at', { ascending: true })
+              .order('id', { ascending: true })
+              .range(remoteRows.length, remoteRows.length + 999);
+            if (erroLote) throw erroLote;
+            if (!lote || lote.length === 0) break;
+            remoteRows.push(...lote);
+          }
+
+          const photosByPost = new Map<string, Array<{ id: string; path: string; position: number }>>();
+          const ids = remoteRows.map((r) => r.id);
+          for (let i = 0; i < ids.length; i += 100) {
+            const chunk = ids.slice(i, i + 100);
+            const { data: fotos, error: erroFotos } = await supabaseClient
+              .from('study_post_photos')
+              .select('id, post_id, photo_path, position')
+              .in('post_id', chunk)
+              .order('position', { ascending: true });
+            if (erroFotos) throw erroFotos;
+            for (const foto of fotos || []) {
+              const lista = photosByPost.get(foto.post_id) || [];
+              lista.push({ id: foto.id, path: foto.photo_path, position: foto.position });
+              photosByPost.set(foto.post_id, lista);
+            }
+          }
+
+          const remoteIds = new Set<string>();
+          for (const row of remoteRows) {
+            remoteIds.add(row.id);
+            const existing = await collection.findOne({ selector: { id: row.id } }).exec();
+
+            if (row.is_deleted === true) {
+              if (existing) await existing.remove();
+              continue;
+            }
+
+            const doc = {
+              id: row.id,
+              user_id: row.user_id,
+              kind: row.kind,
+              category: row.category ?? null,
+              title: row.title ?? null,
+              caption: row.caption ?? null,
+              subject: row.subject ?? null,
+              duration_min: row.duration_min ?? 0,
+              study_date: row.study_date || '',
+              study_time: row.study_time ?? null,
+              in_feed: row.in_feed === true,
+              created_at: row.created_at,
+              updated_at: row.updated_at || row.created_at,
+              isDeleted: false,
+              photos: (photosByPost.get(row.id) || []).sort((a, b) => a.position - b.position),
+            };
+
+            if (existing) {
+              const localTs = existing.get('updated_at') || '1970-01-01T00:00:00Z';
+              if ((doc.updated_at || '') >= localTs) {
+                await existing.patch(doc);
+              }
+            } else {
+              await collection.insert(doc);
+            }
+          }
+
+          const locais = await collection.find({ selector: { user_id: userIdStr } }).exec();
+          let removidos = 0;
+          for (const local of locais) {
+            if (!remoteIds.has(local.get('id'))) {
+              await local.remove();
+              removidos++;
+            }
+          }
+          console.log(
+            `🐭 Study Rats: ${remoteRows.length} check-in(s) no cache local${removidos ? `, ${removidos} removido(s)` : ''}.`,
+          );
+        } catch (studyRatsErr) {
+          console.error('❌ Pull study_posts:', studyRatsErr);
+          houveErro = true;
+        }
+      }
     }
 
     if (houveErro) {

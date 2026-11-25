@@ -1,0 +1,828 @@
+=== RELATÓRIO DE REVISÃO — FASE 1 ===
+
+Estudo Rats — Fase 1: banco de dados, RLS e storage (somente SQL).
+Este relatório contém o conteúdo real do arquivo SQL gerado, os achados da leitura
+das migrations existentes, as decisões tomadas e as dúvidas para a usuária.
+
+Arquivo gerado: supabase/migrations/20261124_study_rats.sql
+Nenhum comando foi executado no banco. Nenhum arquivo do app (TS/TSX) foi alterado.
+Nenhuma chave/token/conteúdo de .env foi incluído neste relatório.
+
+---
+
+## PARTE A — ACHADOS DA LEITURA DAS MIGRATIONS REAIS (antes de escrever o SQL)
+
+### A.1. Como as policies identificam a usuária (Clerk)
+Todas as policies do projeto usam a expressão:
+    (auth.jwt() ->> 'sub') = user_id
+Não existe uso de auth.uid() em nenhuma migration.
+Exemplos reais (copiados das migrations):
+- 20261117_create_aula_materiais.sql:48  USING ((auth.jwt() ->> 'sub') = user_id)
+- 20261119_create_study_plan.sql:44       WITH CHECK ((auth.jwt() ->> 'sub') = user_id)
+- 20261119_create_study_plan.sql:49-51    USING/WITH CHECK ((auth.jwt() ->> 'sub') = user_id)
+Coluna user_id é sempre text (Clerk ID), nunca uuid.
+
+### A.2. Tipo do id (uid())
+src/utils/helpers.ts:24 — uid() usa crypto.randomUUID() (UUID v4) com fallback manual
+no formato RFC 4122. Logo, as colunas id são uuid (DEFAULT gen_random_uuid()).
+
+### A.3. Soft delete no banco
+Migrations recentes usam is_deleted boolean (snake_case) no Postgres
+(ex.: 20261119_create_study_plan.sql). No RxDB o campo é isDeleted (camelCase).
+A migração do Study Rats segue is_deleted no banco.
+
+### A.4. Amizades (friendships) — RISCO REGISTRADO
+friendships NÃO tem migration versionada (só existe no banco remoto).
+Pelo código (src/services/friendService.ts) e comentários do arquivo:
+- Colunas: id, requester_id, addressee_id, status ('pending'|'accepted'),
+  created_at, responded_at.
+- Comentário do friendService diz: "só quem convida cria (sempre pending);
+  só a pessoa convidada aceita; qualquer das duas pode apagar".
+- RISCO: a policy de UPDATE real não está versionada. Se a policy de UPDATE
+  permitir que QUEM CONVIDOU (requester_id) marque o próprio convite como
+  'accepted', a visibilidade do Study Rats (que depende de status='accepted')
+  fica comprometida. NÃO corrigi isso (fora do escopo desta fase); apenas registro
+  o risco para o revisor validar a policy de UPDATE de friendships no banco remoto.
+
+### A.5. profiles e buscar_pessoas_conhecidas
+- profiles (usado em app-shell.tsx:157, client.tsx:127, rankingService.ts:131,
+  SeletorAvatar.tsx): colunas id, name, email, avatar_url, avatar_tipo, avatar_id,
+  theme, deleted_at, created_at, updated_at. NÃO existe bio.
+- RPC buscar_pessoas_conhecidas (src/services/clerkService.ts:67) devolve APENAS
+  pessoa_id, pessoa_nome, pessoa_email (SEM avatar).
+- Avatar/nome da própria usuária vêm de profiles (name, avatar_url, avatar_tipo,
+  avatar_id) e são renderizados por UserAvatar (src/components/ui/UserAvatar.tsx).
+- Decisão: adicionar coluna bio em profiles (máx. 150) e expor name/avatar/bio
+  via RPCs do Study Rats (que já devolvem author_*), sem abrir a tabela profiles.
+
+### A.6. Buckets e policies de storage atuais
+- 20261117_create_aula_materiais.sql cria bucket PRIVADO (public=false) e policies
+  em storage.objects usando (storage.foldername(name))[1] = (auth.jwt() ->> 'sub').
+- 20261122_add_flashcard_images.sql usa bucket público 'flashcard-images' (getPublicUrl).
+- Logo, o padrão para bucket privado com Clerk é:
+  (storage.foldername(name))[1] = (auth.jwt() ->> 'sub').
+
+### A.7. RPCs e padrão de sync
+- 20261119_create_study_plan.sql usa funções SECURITY DEFINER com search_path e
+  batch INSERT ... ON CONFLICT (id) DO UPDATE, com REVOKE/GRANT.
+- 20261124_theme_timeline_topic_ids.sql segue o mesmo padrão.
+- Não há cron no app (ver Fase 0). Limpeza de stories é feita na leitura.
+
+---
+
+## PARTE B — SQL COMPLETO GERADO
+
+Arquivo: supabase/migrations/20261124_study_rats.sql
+
+```sql
+-- Migração: Study Rats — banco de dados, RLS, RPCs e storage
+-- Data: 2026-11-24
+-- Fase: 1 (somente SQL; não executar antes da revisão)
+-- Objetivo: tornar funcional o feed estilo Instagram (Study Rats) na aba Comunidade.
+--   - Tabelas: study_posts, study_post_photos, study_post_likes, study_post_comments,
+--     study_post_saves, study_stories, study_story_views.
+--   - Coluna bio em profiles (máx. 150 caracteres).
+--   - RLS baseada em Clerk: (auth.jwt() ->> 'sub') = user_id (user_id text).
+--   - Visibilidade: só a própria autora e amizades aceitas (friendships.status = 'accepted').
+--   - Bucket privado 'study-rats' com URLs assinadas (createSignedUrls no cliente).
+--   - Regra central: só se publica pela Comunidade; o calendário apenas lê check-ins.
+--   - in_feed = false => check-in publicado como story (conta no calendário/horas,
+--     fora do feed e da grade do perfil). Post normal (kind='post') nunca entra no calendário.
+--   - Datas de estudo = data local do dispositivo (America/Fortaleza), nunca UTC.
+--
+-- DECISÕES FIXAS (herdadas da Fase 0):
+--   * Autenticação é Clerk (não Supabase Auth). Toda policy usa (auth.jwt() ->> 'sub').
+--   * user_id é text (igual às demais tabelas). id é uuid (uid() gera UUID v4).
+--   * Soft delete no banco: is_deleted boolean (padrão das migrations recentes).
+--   * Amizades: friendships(requester_id, addressee_id, status pending|accepted).
+
+-- ============================================================
+-- 0. FUNÇÕES AUXILIARES (SECURITY DEFINER, is_speechless)
+-- ============================================================
+-- Estas funções encapsulam a lógica de amizade para reuso em policies e RPCs.
+-- SECURITY DEFINER + search_path fixo evita que o chamador precise ler friendships/profiles.
+
+-- 0.1. Sou amigo aceito de p_other?
+CREATE OR REPLACE FUNCTION public.sr_sou_amigo_de(p_other text)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.friendships f
+    WHERE f.status = 'accepted'
+      AND (
+        (f.requester_id = (auth.jwt() ->> 'sub') AND f.addressee_id = p_other)
+        OR
+        (f.addressee_id = (auth.jwt() ->> 'sub') AND f.requester_id = p_other)
+      )
+  );
+$$;
+
+-- 0.2. Posso ver o post p_post_id? (dona ou amizade aceita da dona)
+CREATE OR REPLACE FUNCTION public.sr_posso_ver_post(p_post_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.study_posts p
+    WHERE p.id = p_post_id
+      AND (
+        p.user_id = (auth.jwt() ->> 'sub')
+        OR public.sr_sou_amigo_de(p.user_id)
+      )
+  );
+$$;
+
+-- 0.3. Posso ver o story p_story_id? (dona ou amizade aceita da dona; não expirado)
+CREATE OR REPLACE FUNCTION public.sr_posso_ver_story(p_story_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.study_stories s
+    WHERE s.id = p_story_id
+      AND s.expires_at > now()
+      AND (
+        s.user_id = (auth.jwt() ->> 'sub')
+        OR public.sr_sou_amigo_de(s.user_id)
+      )
+  );
+$$;
+
+-- ============================================================
+-- 1. TABELA study_posts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_posts (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       text        NOT NULL,
+  kind          text        NOT NULL CHECK (kind IN ('checkin', 'post')),
+  category      text        CHECK (category IN ('study_tip', 'curiosity', 'question', 'motivation')),
+  title         text,
+  caption       text,
+  subject       text,
+  duration_min  integer     NOT NULL DEFAULT 0,
+  study_date    date,
+  study_time    time,
+  in_feed       boolean     NOT NULL DEFAULT true,
+  created_at    timestamptz DEFAULT now(),
+  updated_at    timestamptz DEFAULT now(),
+  is_deleted    boolean     DEFAULT false,
+  CONSTRAINT study_posts_checkin_fields CHECK (
+    kind <> 'checkin' OR (subject IS NOT NULL AND duration_min > 0)
+  ),
+  CONSTRAINT study_posts_post_fields CHECK (
+    kind <> 'post' OR (caption IS NOT NULL AND category IS NOT NULL)
+  ),
+  CONSTRAINT study_posts_duration_nonneg CHECK (duration_min >= 0)
+);
+
+COMMENT ON TABLE public.study_posts IS 'Publicações do Study Rats. kind=checkin (entra no calendário/horas) ou post (só feed/perfil). in_feed=false = check-in publicado como story (fora do feed e da grade do perfil). user_id = Clerk ID (auth.jwt() ->> ''sub'').';
+
+CREATE INDEX IF NOT EXISTS idx_study_posts_user_created
+  ON public.study_posts (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_study_posts_user_kind_date
+  ON public.study_posts (user_id, kind, study_date);
+CREATE INDEX IF NOT EXISTS idx_study_posts_feed
+  ON public.study_posts (in_feed, created_at DESC, id);
+
+ALTER TABLE public.study_posts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_posts_select" ON public.study_posts;
+CREATE POLICY "study_posts_select"
+  ON public.study_posts FOR SELECT
+  USING (
+    user_id = (auth.jwt() ->> 'sub')
+    OR public.sr_sou_amigo_de(user_id)
+  );
+
+DROP POLICY IF EXISTS "study_posts_insert_own" ON public.study_posts;
+CREATE POLICY "study_posts_insert_own"
+  ON public.study_posts FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub'));
+
+DROP POLICY IF EXISTS "study_posts_update_own" ON public.study_posts;
+CREATE POLICY "study_posts_update_own"
+  ON public.study_posts FOR UPDATE
+  USING (user_id = (auth.jwt() ->> 'sub'))
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub'));
+
+DROP POLICY IF EXISTS "study_posts_delete_own" ON public.study_posts;
+CREATE POLICY "study_posts_delete_own"
+  ON public.study_posts FOR DELETE
+  USING (user_id = (auth.jwt() ->> 'sub'));
+
+-- ============================================================
+-- 2. TABELA study_post_photos
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_post_photos (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id     uuid        NOT NULL REFERENCES public.study_posts(id) ON DELETE CASCADE,
+  photo_path  text        NOT NULL,
+  position    integer     NOT NULL DEFAULT 0 CHECK (position BETWEEN 0 AND 9),
+  created_at  timestamptz DEFAULT now()
+);
+
+COMMENT ON TABLE public.study_post_photos IS 'Fotos de um post/check-in. photo_path é o caminho no bucket privado study-rats. Máx. 10 por post (position 0-9).';
+
+CREATE INDEX IF NOT EXISTS idx_study_post_photos_post
+  ON public.study_post_photos (post_id, position);
+
+ALTER TABLE public.study_post_photos ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_post_photos_select" ON public.study_post_photos;
+CREATE POLICY "study_post_photos_select"
+  ON public.study_post_photos FOR SELECT
+  USING (public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_photos_insert_own" ON public.study_post_photos;
+CREATE POLICY "study_post_photos_insert_own"
+  ON public.study_post_photos FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.study_posts p
+      WHERE p.id = post_id AND p.user_id = (auth.jwt() ->> 'sub')
+    )
+  );
+
+DROP POLICY IF EXISTS "study_post_photos_delete_own" ON public.study_post_photos;
+CREATE POLICY "study_post_photos_delete_own"
+  ON public.study_post_photos FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.study_posts p
+      WHERE p.id = post_id AND p.user_id = (auth.jwt() ->> 'sub')
+    )
+  );
+
+-- ============================================================
+-- 3. TABELA study_post_likes
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_post_likes (
+  post_id     uuid        NOT NULL REFERENCES public.study_posts(id) ON DELETE CASCADE,
+  user_id     text        NOT NULL,
+  created_at  timestamptz DEFAULT now(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+COMMENT ON TABLE public.study_post_likes IS 'Curtidas. PK composta (post_id, user_id). Só quem pode ver o post pode curtir.';
+
+CREATE INDEX IF NOT EXISTS idx_study_post_likes_user
+  ON public.study_post_likes (user_id);
+
+ALTER TABLE public.study_post_likes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_post_likes_select" ON public.study_post_likes;
+CREATE POLICY "study_post_likes_select"
+  ON public.study_post_likes FOR SELECT
+  USING (public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_likes_insert" ON public.study_post_likes;
+CREATE POLICY "study_post_likes_insert"
+  ON public.study_post_likes FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub') AND public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_likes_delete_own" ON public.study_post_likes;
+CREATE POLICY "study_post_likes_delete_own"
+  ON public.study_post_likes FOR DELETE
+  USING (user_id = (auth.jwt() ->> 'sub'));
+
+-- ============================================================
+-- 4. TABELA study_post_comments
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_post_comments (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id     uuid        NOT NULL REFERENCES public.study_posts(id) ON DELETE CASCADE,
+  user_id     text        NOT NULL,
+  text        text        NOT NULL CHECK (char_length(text) BETWEEN 1 AND 500),
+  created_at  timestamptz DEFAULT now()
+);
+
+COMMENT ON TABLE public.study_post_comments IS 'Comentários. text com 1-500 caracteres. A autora do comentário e a autora do post podem excluir.';
+
+CREATE INDEX IF NOT EXISTS idx_study_post_comments_post
+  ON public.study_post_comments (post_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_study_post_comments_user
+  ON public.study_post_comments (user_id);
+
+ALTER TABLE public.study_post_comments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_post_comments_select" ON public.study_post_comments;
+CREATE POLICY "study_post_comments_select"
+  ON public.study_post_comments FOR SELECT
+  USING (public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_comments_insert" ON public.study_post_comments;
+CREATE POLICY "study_post_comments_insert"
+  ON public.study_post_comments FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub') AND public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_comments_delete" ON public.study_post_comments;
+CREATE POLICY "study_post_comments_delete"
+  ON public.study_post_comments FOR DELETE
+  USING (
+    user_id = (auth.jwt() ->> 'sub')
+    OR EXISTS (
+      SELECT 1 FROM public.study_posts p
+      WHERE p.id = post_id AND p.user_id = (auth.jwt() ->> 'sub')
+    )
+  );
+
+-- ============================================================
+-- 5. TABELA study_post_saves
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_post_saves (
+  post_id     uuid        NOT NULL REFERENCES public.study_posts(id) ON DELETE CASCADE,
+  user_id     text        NOT NULL,
+  created_at  timestamptz DEFAULT now(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+COMMENT ON TABLE public.study_post_saves IS 'Itens salvos. PK composta (post_id, user_id). Só a própria usuária lê os próprios salvos.';
+
+ALTER TABLE public.study_post_saves ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_post_saves_select_own" ON public.study_post_saves;
+CREATE POLICY "study_post_saves_select_own"
+  ON public.study_post_saves FOR SELECT
+  USING (user_id = (auth.jwt() ->> 'sub'));
+
+DROP POLICY IF EXISTS "study_post_saves_insert" ON public.study_post_saves;
+CREATE POLICY "study_post_saves_insert"
+  ON public.study_post_saves FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub') AND public.sr_posso_ver_post(post_id));
+
+DROP POLICY IF EXISTS "study_post_saves_delete_own" ON public.study_post_saves;
+CREATE POLICY "study_post_saves_delete_own"
+  ON public.study_post_saves FOR DELETE
+  USING (user_id = (auth.jwt() ->> 'sub'));
+
+-- ============================================================
+-- 6. TABELA study_stories
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_stories (
+  id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         text        NOT NULL,
+  kind            text        NOT NULL CHECK (kind IN ('checkin', 'post')),
+  category        text        CHECK (category IN ('study_tip', 'curiosity', 'question', 'motivation')),
+  text            text,
+  photo_path      text,
+  subject         text,
+  duration_min    integer     NOT NULL DEFAULT 0,
+  checkin_post_id uuid        REFERENCES public.study_posts(id) ON DELETE SET NULL,
+  created_at      timestamptz DEFAULT now(),
+  expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+  CONSTRAINT study_stories_checkin_fields CHECK (
+    kind <> 'checkin' OR (subject IS NOT NULL AND duration_min > 0)
+  ),
+  CONSTRAINT study_stories_post_fields CHECK (
+    kind <> 'post' OR (text IS NOT NULL OR photo_path IS NOT NULL)
+  )
+);
+
+COMMENT ON TABLE public.study_stories IS 'Stories de 24h. kind=checkin (vinculado a um study_post via checkin_post_id) ou post (texto/foto). expires_at = created_at + 24h. user_id = Clerk ID.';
+
+CREATE INDEX IF NOT EXISTS idx_study_stories_user_expires
+  ON public.study_stories (user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_study_stories_expires
+  ON public.study_stories (expires_at);
+
+ALTER TABLE public.study_stories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_stories_select" ON public.study_stories;
+CREATE POLICY "study_stories_select"
+  ON public.study_stories FOR SELECT
+  USING (
+    expires_at > now()
+    AND (
+      user_id = (auth.jwt() ->> 'sub')
+      OR public.sr_sou_amigo_de(user_id)
+    )
+  );
+
+DROP POLICY IF EXISTS "study_stories_insert_own" ON public.study_stories;
+CREATE POLICY "study_stories_insert_own"
+  ON public.study_stories FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub'));
+
+DROP POLICY IF EXISTS "study_stories_update_own" ON public.study_stories;
+CREATE POLICY "study_stories_update_own"
+  ON public.study_stories FOR UPDATE
+  USING (user_id = (auth.jwt() ->> 'sub'))
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub'));
+
+DROP POLICY IF EXISTS "study_stories_delete_own" ON public.study_stories;
+CREATE POLICY "study_stories_delete_own"
+  ON public.study_stories FOR DELETE
+  USING (user_id = (auth.jwt() ->> 'sub'));
+
+-- ============================================================
+-- 7. TABELA study_story_views
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.study_story_views (
+  story_id    uuid        NOT NULL REFERENCES public.study_stories(id) ON DELETE CASCADE,
+  user_id     text        NOT NULL,
+  viewed_at   timestamptz DEFAULT now(),
+  PRIMARY KEY (story_id, user_id)
+);
+
+COMMENT ON TABLE public.study_story_views IS 'Quem viu cada story. PK composta (story_id, user_id). Quem viu insere; só a autora do story lê quem viu.';
+
+ALTER TABLE public.study_story_views ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "study_story_views_select_owner" ON public.study_story_views;
+CREATE POLICY "study_story_views_select_owner"
+  ON public.study_story_views FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.study_stories s
+      WHERE s.id = story_id AND s.user_id = (auth.jwt() ->> 'sub')
+    )
+  );
+
+DROP POLICY IF EXISTS "study_story_views_insert" ON public.study_story_views;
+CREATE POLICY "study_story_views_insert"
+  ON public.study_story_views FOR INSERT
+  WITH CHECK (user_id = (auth.jwt() ->> 'sub') AND public.sr_posso_ver_story(story_id));
+
+-- ============================================================
+-- 8. COLUNA bio EM profiles
+-- ============================================================
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS bio text;
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_bio_len;
+ALTER TABLE public.profiles
+  ADD CONSTRAINT profiles_bio_len CHECK (bio IS NULL OR char_length(bio) <= 150);
+
+COMMENT ON COLUMN public.profiles.bio IS 'Biografia do perfil (máx. 150 caracteres). Usada no perfil do Study Rats.';
+
+-- ============================================================
+-- 9. RPCs — FEED, STORIES, PERFIL (evitam N+1)
+-- ============================================================
+-- Todas as RPCs são SECURITY DEFINER, com checagem de amizade interna,
+-- e usam (auth.jwt() ->> 'sub') como identidade da usuária.
+
+-- 9.1. Feed paginado por cursor (created_at, id).
+--   Parâmetros:
+--     p_cursor_created  timestamptz (null = primeira página)
+--     p_cursor_id       uuid        (null = primeira página)
+--     p_page_size       integer     (padrão 20)
+--     p_kind            text        (null = todos; 'checkin'|'post')
+--     p_category        text        (null = todas as categorias)
+--   Devolve: post + contagens + liked_by_me + saved_by_me +
+--            uma amiga que curtiu (friend_liker_id/name) + fotos (jsonb ordenado).
+CREATE OR REPLACE FUNCTION public.study_feed(
+  p_cursor_created timestamptz DEFAULT NULL,
+  p_cursor_id      uuid        DEFAULT NULL,
+  p_page_size      integer     DEFAULT 20,
+  p_kind           text        DEFAULT NULL,
+  p_category       text        DEFAULT NULL
+)
+RETURNS TABLE (
+  out_id              uuid,
+  out_user_id         text,
+  out_kind            text,
+  out_category        text,
+  out_title           text,
+  out_caption         text,
+  out_subject         text,
+  out_duration_min    integer,
+  out_study_date      date,
+  out_study_time      time,
+  out_in_feed         boolean,
+  out_created_at      timestamptz,
+  out_author_name     text,
+  out_author_avatar_url text,
+  out_author_avatar_tipo text,
+  out_author_avatar_id  text,
+  out_author_bio      text,
+  out_likes_count     bigint,
+  out_comments_count  bigint,
+  out_liked_by_me     boolean,
+  out_saved_by_me     boolean,
+  out_friend_liker_id text,
+  out_friend_liker_name text,
+  out_photos          jsonb
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH visible AS (
+    SELECT p.*
+    FROM public.study_posts p
+    WHERE p.in_feed = true
+      AND p.is_deleted = false
+      AND (
+        p.user_id = (auth.jwt() ->> 'sub')
+        OR public.sr_sou_amigo_de(p.user_id)
+      )
+      AND (p_kind IS NULL OR p.kind = p_kind)
+      AND (p_category IS NULL OR p.category = p_category)
+      AND (
+        p_cursor_created IS NULL
+        OR (p.created_at, p.id) < (p_cursor_created, p_cursor_id)
+      )
+  ),
+  liked AS (
+    SELECT l.post_id, l.user_id
+    FROM public.study_post_likes l
+    WHERE l.post_id IN (SELECT id FROM visible)
+  ),
+  friend_like AS (
+    SELECT DISTINCT ON (l.post_id)
+      l.post_id,
+      l.user_id AS friend_id,
+      pr.name   AS friend_name
+    FROM liked l
+    JOIN public.profiles pr ON pr.id = l.user_id
+    WHERE l.user_id <> (auth.jwt() ->> 'sub')
+      AND public.sr_sou_amigo_de(l.user_id)
+    ORDER BY l.post_id, l.created_at DESC
+  )
+  SELECT
+    v.id, v.user_id, v.kind, v.category, v.title, v.caption, v.subject,
+    v.duration_min, v.study_date, v.study_time, v.in_feed, v.created_at,
+    pr.name, pr.avatar_url, pr.avatar_tipo, pr.avatar_id, pr.bio,
+    (SELECT count(*) FROM liked l WHERE l.post_id = v.id),
+    (SELECT count(*) FROM public.study_post_comments c WHERE c.post_id = v.id),
+    EXISTS (SELECT 1 FROM liked l WHERE l.post_id = v.id AND l.user_id = (auth.jwt() ->> 'sub')),
+    EXISTS (SELECT 1 FROM public.study_post_saves s WHERE s.post_id = v.id AND s.user_id = (auth.jwt() ->> 'sub')),
+    fl.friend_id, fl.friend_name,
+    COALESCE(
+      (SELECT jsonb_agg(jsonb_build_object('id', ph.id, 'photo_path', ph.photo_path, 'position', ph.position) ORDER BY ph.position)
+       FROM public.study_post_photos ph WHERE ph.post_id = v.id),
+      '[]'::jsonb
+    )
+  FROM visible v
+  LEFT JOIN public.profiles pr ON pr.id = v.user_id
+  LEFT JOIN friend_like fl ON fl.post_id = v.id
+  ORDER BY v.created_at DESC, v.id DESC
+  LIMIT LEAST(GREATEST(p_page_size, 1), 50);
+$$;
+
+-- 9.2. Stories ativos (expires_at > now()) da usuária e das amizades.
+--   Devolve: story + author + viewed_by_me + viewed_count (só preenchido para a dona).
+CREATE OR REPLACE FUNCTION public.study_stories_feed()
+RETURNS TABLE (
+  out_id              uuid,
+  out_user_id         text,
+  out_kind            text,
+  out_category        text,
+  out_text            text,
+  out_photo_path      text,
+  out_subject         text,
+  out_duration_min    integer,
+  out_checkin_post_id uuid,
+  out_created_at      timestamptz,
+  out_expires_at      timestamptz,
+  out_author_name     text,
+  out_author_avatar_url text,
+  out_author_avatar_tipo text,
+  out_author_avatar_id  text,
+  out_viewed_by_me    boolean,
+  out_viewed_count    bigint
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    s.id, s.user_id, s.kind, s.category, s.text, s.photo_path, s.subject,
+    s.duration_min, s.checkin_post_id, s.created_at, s.expires_at,
+    pr.name, pr.avatar_url, pr.avatar_tipo, pr.avatar_id,
+    EXISTS (
+      SELECT 1 FROM public.study_story_views v
+      WHERE v.story_id = s.id AND v.user_id = (auth.jwt() ->> 'sub')
+    ),
+    CASE WHEN s.user_id = (auth.jwt() ->> 'sub')
+      THEN (SELECT count(*) FROM public.study_story_views v WHERE v.story_id = s.id)
+      ELSE 0
+    END
+  FROM public.study_stories s
+  LEFT JOIN public.profiles pr ON pr.id = s.user_id
+  WHERE s.expires_at > now()
+    AND (
+      s.user_id = (auth.jwt() ->> 'sub')
+      OR public.sr_sou_amigo_de(s.user_id)
+    )
+  ORDER BY s.created_at DESC;
+$$;
+
+-- 9.3. Resumo do perfil.
+--   posts_count = publicações com in_feed = true (posts normais + check-ins no feed).
+--   hours       = soma de duration_min de TODOS os check-ins (inclusive in_feed = false).
+--   bio/name/avatar da própria usuária (ou de amizade aceita).
+CREATE OR REPLACE FUNCTION public.study_perfil_resumo(p_user_id text)
+RETURNS TABLE (
+  out_user_id   text,
+  out_name      text,
+  out_bio       text,
+  out_avatar_url text,
+  out_avatar_tipo text,
+  out_avatar_id text,
+  out_posts_count bigint,
+  out_hours     numeric
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    pr.id, pr.name, pr.bio, pr.avatar_url, pr.avatar_tipo, pr.avatar_id,
+    (SELECT count(*) FROM public.study_posts p
+       WHERE p.user_id = pr.id AND p.in_feed = true AND p.is_deleted = false),
+    (SELECT COALESCE(sum(p.duration_min), 0) / 60.0
+       FROM public.study_posts p
+       WHERE p.user_id = pr.id AND p.kind = 'checkin' AND p.is_deleted = false)
+  FROM public.profiles pr
+  WHERE pr.id = p_user_id
+    AND (
+      pr.id = (auth.jwt() ->> 'sub')
+      OR public.sr_sou_amigo_de(pr.id)
+    );
+$$;
+
+-- ============================================================
+-- 10. LIMPEZA DE STORIES EXPIRADOS
+-- ============================================================
+-- Não há cron no app (ver Fase 0). A limpeza é feita na leitura:
+--   - study_stories_feed() já filtra expires_at > now(), então stories expirados
+--     nunca aparecem.
+--   - Esta função remove stories expirados e suas fotos no storage.
+--   - NÃO apaga o check-in vinculado (study_posts) nem a foto do check-in.
+--   - O cliente deve chamar study_limpar_stories_expiradas() ao abrir o Study Rats.
+CREATE OR REPLACE FUNCTION public.study_limpar_stories_expiradas()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_count integer;
+  v_path  text;
+BEGIN
+  -- Coleta caminhos de fotos de stories expirados (bucket study-rats)
+  FOR v_path IN
+    SELECT s.photo_path
+    FROM public.study_stories s
+    WHERE s.expires_at <= now() AND s.photo_path IS NOT NULL
+  LOOP
+    BEGIN
+      PERFORM storage.delete_object('study-rats', v_path);
+    EXCEPTION WHEN OTHERS THEN
+      -- Ignora erro de storage (objeto já removido ou sem permissão)
+      NULL;
+    END;
+  END LOOP;
+
+  -- Remove os stories expirados (checkin_post_id é ON DELETE SET NULL,
+  -- então o check-in vinculado permanece intacto)
+  WITH deleted AS (
+    DELETE FROM public.study_stories
+    WHERE expires_at <= now()
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_count FROM deleted;
+
+  RETURN v_count;
+END;
+$$;
+
+-- ============================================================
+-- 11. BUCKET PRIVADO 'study-rats' E POLICIES DE STORAGE
+-- ============================================================
+-- Bucket privado (public = false). Acesso por URLs assinadas (createSignedUrls).
+-- Caminho: {user_id}/{post_id ou story_id}/{position}.webp
+-- Escrita: só na pasta da própria usuária (1º folder = Clerk ID).
+-- Leitura: dona ou amizade aceita da autora (1º folder).
+-- A checagem de amizade usa sr_sou_amigo_de(folder[1]), sem abrir a tabela.
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('study-rats', 'study-rats', false, 838861, ARRAY['image/webp'])
+ON CONFLICT (id) DO UPDATE SET
+  file_size_limit    = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types,
+  public             = EXCLUDED.public;
+
+-- Leitura: dona ou amizade aceita da autora (1º folder)
+DROP POLICY IF EXISTS "study_rats_storage_select" ON storage.objects;
+CREATE POLICY "study_rats_storage_select"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'study-rats'
+    AND (
+      (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+      OR public.sr_sou_amigo_de((storage.foldername(name))[1])
+    )
+  );
+
+-- Inserção: só na própria pasta
+DROP POLICY IF EXISTS "study_rats_storage_insert" ON storage.objects;
+CREATE POLICY "study_rats_storage_insert"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'study-rats'
+    AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+  );
+
+-- Atualização: só na própria pasta
+DROP POLICY IF EXISTS "study_rats_storage_update" ON storage.objects;
+CREATE POLICY "study_rats_storage_update"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'study-rats'
+    AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+  )
+  WITH CHECK (
+    bucket_id = 'study-rats'
+    AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+  );
+
+-- Exclusão: só na própria pasta
+DROP POLICY IF EXISTS "study_rats_storage_delete" ON storage.objects;
+CREATE POLICY "study_rats_storage_delete"
+  ON storage.objects FOR DELETE
+  USING (
+    bucket_id = 'study-rats'
+    AND (storage.foldername(name))[1] = (auth.jwt() ->> 'sub')
+  );
+
+-- ============================================================
+-- FIM DA MIGRAÇÃO
+-- ============================================================
+-- Observações para o revisor:
+--   * RPCs usam SECURITY DEFINER + checagem de amizade; validar vazio entre contas.
+--   * Políticas de storage reusam sr_sou_amigo_de; confirmar que (auth.jwt() ->> 'sub')
+--     funciona no contexto de storage.objects (igual às migrations existentes).
+--   * in_feed: default true; check-in como story deve gravar in_feed = false.
+--   * Expiração: study_limpar_stories_expiradas() remove story + foto do story,
+--     preservando o check-in (ON DELETE SET NULL) e a foto do check-in.
+--   * Performance: índices em (user_id, created_at desc), (user_id, kind, study_date),
+--     (in_feed, created_at desc, id), (expires_at) e FKs.
+```
+
+---
+
+## PARTE C — VERIFICAÇÃO (tsc / lint / testes)
+
+Esta fase não alterou código TypeScript/TSX; apenas gerou um arquivo .sql.
+Portanto não há build/teste de código a rodar. O SQL não foi executado no banco
+(conforme instrução). Nenhuma verificação de lint/tsc se aplica.
+
+---
+
+## PARTE D — DECISÕES TOMADAS
+
+1. Identidade da usuária: (auth.jwt() ->> 'sub') em todas as policies (Clerk).
+2. user_id text; id uuid (uid() gera UUID v4).
+3. Soft delete no banco: is_deleted boolean (padrão das migrations recentes).
+4. Visibilidade: dona OU amizade aceita (friendships.status='accepted'), via função
+   sr_sou_amigo_de() reutilizada em policies e RPCs.
+5. in_feed default true; check-in como story grava in_feed=false (fora do feed/grade,
+   contando no calendário/horas). Post normal nunca entra no calendário.
+6. Fotos: bucket privado 'study-rats' (public=false), caminho {user_id}/{post_id|story_id}/{position}.webp,
+   até 10 por post (position 0-9), limite 0,8 MB (838861 bytes), image/webp.
+7. bio: coluna nova em profiles, CHECK char_length <= 150. Policies de profiles
+   mantidas; autores devolvem name/avatar/bio via RPCs (sem abrir a tabela).
+8. Feed/stories/perfil: RPCs SECURITY DEFINER evitando N+1 (contagens + fotos em jsonb).
+9. Expiração: sem cron; limpeza na leitura via study_limpar_stories_expiradas(),
+   que apaga story + foto do story e preserva o check-in (ON DELETE SET NULL).
+10. Comentário: text 1-500; excluir permitido à autora do comentário e à autora do post.
+11. study_story_views: quem viu insere; só a autora do story lê quem viu.
+12. study_post_saves: só a própria usuária lê.
+
+---
+
+## PARTE E — PONTOS PARA ATENÇÃO DO REVISOR
+
+1. Vazamento entre contas: RPCs e policies dependem de sr_sou_amigo_de();
+   validar que nenhum caminho (feed, stories, perfil, storage) vaza para não-amigas.
+2. RLS de amizade: a policy de UPDATE de friendships não está versionada; se o
+   requester puder marcar o próprio convite como 'accepted', a visibilidade fica
+   comprometida (risco registrado, não corrigido nesta fase).
+3. Policies de storage: confirmar que (auth.jwt() ->> 'sub') funciona no contexto
+   de storage.objects (as migrations existentes já usam esse padrão).
+4. in_feed: garantir que o serviço grave in_feed=false ao publicar check-in como story.
+5. Expiração de stories: study_limpar_stories_expiradas() usa storage.delete_object;
+   validar permissão e idempotência (objeto já removido).
+6. Performance: índices criados; validar planos de execução do feed paginado.
+
+---
+
+## PARTE F — DÚVIDAS PARA A USUÁRIA (máx. 3, sim/não ou A/B)
+
+D1. A coluna bio em profiles terá edição no perfil do Study Rats (Fase 2)?
+   ( ) Sim  ( ) Não
+D2. Confirma que o check-in publicado como story deve contar no calendário e nas
+   horas, mas NÃO aparecer no feed nem na grade do perfil (in_feed=false)?
+   ( ) Sim  ( ) Não
+D3. Sobre o risco da amizade (requester marcar convite como accepted):
+   (A) Tratar como risco e só validar na revisão  (B) Corrigir a policy de UPDATE
+   de friendships nesta fase
+
+=== FIM DO RELATÓRIO — FASE 1 ===

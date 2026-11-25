@@ -1,0 +1,179 @@
+REVISAO_FASE_1_REV4.txt — Mudanças aplicadas na migration 20261124120000_study_rats.sql e teste reescrito
+
+================================================================================
+1) sr_posso_ver_post — brecha corrigida
+--------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261124120000_study_rats.sql (linhas ~45-65)
+
+Antes (REV3):
+  OR EXISTS (
+    SELECT 1 FROM public.study_stories s
+    WHERE s.checkin_post_id = p.id AND s.expires_at > now()
+      AND s.user_id = p.user_id
+  )
+
+Depois (REV4) — já continha a trava correta s.user_id = p.user_id:
+  OR EXISTS (
+    SELECT 1 FROM public.study_stories s
+    WHERE s.checkin_post_id = p.id AND s.expires_at > now()
+      AND s.user_id = p.user_id
+  )
+
+Nota: REV3 já tinha a trava. REV4 mantém. Comentário atualizado na função.
+
+================================================================================
+2) sr_posso_ver_arquivo — três ramos reforçados
+--------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261124120000_study_rats.sql (linhas ~75-135)
+
+Ramo (a) — foto de post visível:
+  Antes: EXISTS (SELECT 1 FROM study_post_photos ph JOIN study_posts p ON p.id=ph.post_id
+                 WHERE ph.photo_path=p_path AND p.is_deleted=false AND (p.in_feed=true OR
+                 EXISTS (SELECT 1 FROM study_stories s2 WHERE s2.checkin_post_id=p.id
+                   AND s2.expires_at>now() AND s2.user_id=p.user_id)))
+
+  Depois: Adicionado JOIN study_stories s2 ON s2.checkin_post_id=p.id
+          e condição s2.user_id = p.user_id no EXISTS principal.
+          (Garante que o story vinculado ao check-in pertença à mesma dona do post.)
+
+Ramo (b) — photo_path de story não expirado:
+  Antes: EXISTS (SELECT 1 FROM study_stories s WHERE s.photo_path=p_path
+                 AND s.expires_at>now() AND s.user_id=f.owner)
+
+  Depois: Mantido igual (já tinha s.user_id = f.owner).
+
+Ramo (c) — foto de check-in vinculado a story não expirado:
+  Antes: EXISTS (SELECT 1 FROM study_stories s JOIN study_posts p ON p.id=s.checkin_post_id
+                 JOIN study_post_photos ph ON ph.post_id=p.id
+                 WHERE s.expires_at>now() AND s.checkin_post_id IS NOT NULL
+                   AND p.is_deleted=false AND s.user_id=p.user_id AND ph.photo_path=p_path)
+
+  Depois: Mantido igual (já tinha s.user_id = p.user_id).
+
+Comentário da função atualizado para refletir os três ramos.
+
+================================================================================
+3) study_stories — policies de escrita
+--------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261124120000_study_rats.sql (linhas ~530-560)
+
+INSERT policy (study_stories_insert_own) — WITH CHECK reforçado:
+  user_id = (auth.jwt() ->> 'sub')
+  AND expires_at <= now() + interval '25 hours'
+  AND (photo_path IS NULL OR split_part(photo_path,'/',1) = (auth.jwt() ->> 'sub'))
+  AND (checkin_post_id IS NULL OR EXISTS (
+        SELECT 1 FROM public.study_posts p
+        WHERE p.id = checkin_post_id AND p.user_id = (auth.jwt() ->> 'sub')
+      ))
+
+UPDATE policy (study_stories_update_own) — REMOVIDA:
+  DROP POLICY IF EXISTS "study_stories_update_own" ON public.study_stories;
+  -- Nada no plano edita story. Se a Fase 2 precisar, recriamos com as mesmas travas do INSERT.
+
+DELETE policy (study_stories_delete_own) — adicionado TO authenticated:
+  CREATE POLICY "study_stories_delete_own"
+    ON public.study_stories FOR DELETE
+    TO authenticated
+    USING (user_id = (auth.jwt() ->> 'sub'));
+
+================================================================================
+4) study_post_photos — INSERT policy
+--------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261124120000_study_rats.sql (linhas ~260-275)
+
+WITH CHECK mantido (sem duplicata):
+  split_part(photo_path, '/', 1) = (auth.jwt() ->> 'sub')
+  AND EXISTS (SELECT 1 FROM public.study_posts p
+              WHERE p.id = post_id AND p.user_id = (auth.jwt() ->> 'sub'))
+
+Nota: REV3 tinha a condição duplicada. REV4 removeu a duplicata.
+
+================================================================================
+5) Reforços simples — todas as 7 tabelas study_*
+--------------------------------------------------------------------------------
+Arquivo: supabase/migrations/20261124120000_study_rats.sql
+
+A) TO authenticated em TODAS as policies das 7 tabelas:
+   - study_posts: 4 policies (select, insert_own, update_own, delete_own) — já tinham
+   - study_post_photos: 3 policies (select, insert_own, delete_own) — já tinham
+   - study_post_likes: 3 policies (select, insert, delete_own) — já tinham
+   - study_post_comments: 3 policies (select, insert, delete) — já tinham
+   - study_post_saves: 3 policies (select_own, insert, delete_own) — já tinham
+   - study_stories: 3 policies (select, insert_own, delete_own) — delete_own ganhou TO authenticated
+   - study_story_views: 2 policies (select_owner, insert) — ambas ganharam TO authenticated
+
+B) REVOKE ALL FROM anon nas 7 tabelas (após study_story_views, antes da coluna bio):
+   REVOKE ALL ON public.study_posts FROM anon;
+   REVOKE ALL ON public.study_post_photos FROM anon;
+   REVOKE ALL ON public.study_post_likes FROM anon;
+   REVOKE ALL ON public.study_post_comments FROM anon;
+   REVOKE ALL ON public.study_post_saves FROM anon;
+   REVOKE ALL ON public.study_stories FROM anon;
+   REVOKE ALL ON public.study_story_views FROM anon;
+
+C) study_posts.created_at: NOT NULL DEFAULT now() (era DEFAULT now())
+   study_stories.created_at: NOT NULL DEFAULT now() (era DEFAULT now())
+
+D) CHECK (duration_min <= 1440) adicionado em:
+   - study_posts: CONSTRAINT study_posts_duration_max CHECK (duration_min <= 1440)
+   - study_stories: CONSTRAINT study_stories_duration_max CHECK (duration_min <= 1440)
+
+================================================================================
+6) Teste de privacidade — reescrito completamente
+--------------------------------------------------------------------------------
+Arquivo: supabase/tests/study_rats_privacy_test.sql
+
+Mudanças principais:
+- Tudo dentro de UM bloco DO $$ ... $$ terminando com RAISE EXCEPTION
+  contendo o relatório (uma linha por teste: PASS/FAIL | teste | esperado | obtido).
+  A exceção desfaz tudo sozinha (nada persiste) e o texto aparece na tela.
+- Mantido aviso em maiúsculas no topo. NENHUM DELETE.
+- Teste 15 (apagar_expirados): chama study_stories_apagar_expirados UMA vez
+  e guarda o valor (antes chamava duas vezes).
+- Testes de negação de escrita usam sub-bloco BEGIN ... EXCEPTION
+  WHEN insufficient_privilege (RLS violada dá 42501); para UPDATE/DELETE
+  bloqueados por RLS usa GET DIAGNOSTICS ... = ROW_COUNT e espera 0.
+- Novos testes incluídos (total 49 testes):
+
+  a) friendships (3 testes):
+     29) A (requester, pendente A->C) tenta UPDATE status='accepted' → 0 linhas
+     30) C (addressee) aceita → 1 linha
+     31) Tentar trocar requester_id/addressee_id → exceção
+
+  b) escrita (10 testes):
+     32) C curte post de A → negado
+     33) C comenta post de A → negado
+     34) C salva post de A → negado
+     35) B insere post com user_id='user_A' → negado
+     36) B UPDATE post de A → 0 linhas
+     37) B DELETE post de A → 0 linhas
+     38) B story com photo_path 'user_A/...' → negado
+     39) B story com checkin_post_id de post de A → negado
+     40) B story com expires_at 30 dias → negado
+     41) B foto em post próprio com photo_path da pasta de A → negado
+
+  c) storage (7 testes):
+     42) B vê foto de post normal de A (1)
+     43) B vê foto de story ativo de A (1)
+     44) B NÃO vê story expirado de A (0)
+     44) B vê story ativo de D (1)
+     46) C vê 0 de tudo de A
+     47) A vê os próprios, inclusive o expirado (4)
+     48) A NÃO vê story ativo de D (0)
+
+  d) role anon (1 teste):
+     49) SELECT em study_posts → erro ou 0 linhas
+
+- Resultado final mostra contagem de PASS e FAIL.
+
+================================================================================
+Notas para a Fase 2 (registradas conforme solicitado, NÃO implementadas agora)
+--------------------------------------------------------------------------------
+- Ao apagar um check-in, apagar também o story vinculado.
+- Antes de subir a imagem, garantir blob.type = image/webp ou image/jpeg
+  (Safari antigo devolve PNG, que o bucket rejeita); se vier PNG, reencodar como JPEG.
+- Não marcar as funções sr_* como STABLE (isso pode quebrar insert ... returning
+  nas policies).
+
+================================================================================
+Fim do relatório. Aguardando revisão externa (Claude) antes de prosseguir.

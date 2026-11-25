@@ -1,0 +1,584 @@
+=== RELATÓRIO DE REVISÃO — FASE 0 ===
+
+Este relatório contém a análise completa do código existente para implementar o Study Rats (Fase 0 — sem alterar arquivos). Todas as referências de caminho/linha são baseadas no estado atual do repositório.
+
+---
+
+## 1. src/routes/comunidade.tsx — Abas e integração da aba Study Rats
+
+**Arquivo:** `src/routes/comunidade.tsx` (linhas 1-155)
+
+### Como as abas funcionam hoje:
+- Três abas fixas: `ranking` | `amizades` | `compartilhado` (tipo `Tab`)
+- Estado da aba vem da URL: `searchParams.get("tab")` → validador `isTab()` → default `"ranking"`
+- Troca de aba: `setSearchParams({ tab: nova }, { replace: true })` (não recarrega a página)
+- Renderização condicional: `{tab === "ranking" && <RankingTab />}`, etc.
+
+### Componente `BotaoTab` (linhas 135-155):
+```tsx
+function BotaoTab({
+  ativo, onClick, label, badge, badgeTone = "muted", icon, "data-tour": dataTour
+}: { ... }) {
+  return (
+    <button onClick={onClick} data-tour={dataTour} className={...}>
+      {icon} {label}
+      {mostrarBadge && <span className={...}>{badge}</span>}
+    </button>
+  );
+}
+```
+
+### Onde entra a aba `studyrats`:
+1. Adicionar `"studyrats"` ao tipo `Tab`
+2. Adicionar caso no `isTab()` 
+3. Adicionar `<BotaoTab>` na barra (ícone sugerido: `Users` ou `MessageCircle`)
+4. Adicionar renderização: `{tab === "studyrats" && <StudyRatsFeed />}`
+
+> **Nota:** O `StudyRatsFeed` já existe em `src/components/study-rats/StudyRatsFeed.tsx` e exporta o componente. O `StudyRatsStyles` também é importado lá.
+
+---
+
+## 2. src/routes/calendario.tsx — Célula do dia e painel do dia selecionado
+
+**Arquivo:** `src/routes/calendario.tsx` (1056+ linhas)
+
+### Estrutura atual:
+- **Visão "Agenda"**: grade mensal + sidebar do dia selecionado
+- **Visão "Plano"**: `StudyPlanHub` (não será alterado)
+- Estados: `anoVisivel`, `mesVisivel`, `diaSelecionado` (number | null)
+- `dataSelecionada` = `${ano}-${mes+1}-${dia}` (formato YYYY-MM-DD local)
+
+### Célula de cada dia (linhas 285-325):
+```tsx
+{cells.map((d, i) => {
+  if (!d) return <div key={i} className="aspect-square sm:aspect-auto sm:h-[68px]" />;
+  const e = daysWithStudy[d]; // { teorico?: boolean, pratico?: boolean }
+  const isHoje = d === diaAtual && anoVisivel === anoAtual && mesVisivel === mesAtual;
+  const isSelecionado = d === diaSelecionado;
+
+  return (
+    <button key={i} onClick={() => setDiaSelecionado(d)} className={...}>
+      <span className="text-xs font-medium tabular-nums">{d}</span>
+      {e && (
+        <div className="absolute bottom-1.5 left-2 flex gap-1">
+          {e.teorico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-primary"}`} />}
+          {e.pratico && <span className={`h-1.5 w-1.5 rounded-full ${isSelecionado ? "bg-white" : "bg-accent"}`} />}
+        </div>
+      )}
+    </button>
+  );
+})}
+```
+
+**Onde as fotos dos check-ins entrarão:**
+- Adicionar indicador visual (ex: miniatura circular da foto) quando houver check-in no dia
+- O `StudyRatsCalendario` (protótipo) já faz isso: `porDia[iso(d)]` → `regs[0].foto` → `<img>` dentro de `.srx-thumb`
+
+### Painel do dia selecionado (linhas 330-450+):
+```tsx
+<aside className="space-y-4">
+  <PlanoDiaCard data={dataSelecionada ?? undefined} onAbrirGerenciamento={() => setVisao("plano")} />
+  <div className="rf-card p-5">
+    <div className="mb-4 flex items-center justify-between">
+      <h3>{diaSelecionado !== null ? tituloSidebar : "Selecione um dia"}</h3>
+      {diaSelecionado !== null && <button onClick={() => setDiaSelecionado(null)}><X /></button>}
+    </div>
+    {diaSelecionado !== null ? (
+      <>
+        {revisoesDoDia.length > 0 && (
+          <ul className="space-y-2">...</ul>
+        )}
+        {registrosDoDia.length > 0 && (
+          <ul className="space-y-2 mt-4">...</ul>
+        )}
+        {revisoesDoDia.length === 0 && registrosDoDia.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">Nenhum registro nem revisão para este dia.</p>
+        )}
+      </>
+    ) : (
+      <p className="py-8 text-center text-sm text-muted-foreground">Selecione um dia para ver os detalhes.</p>
+    )}
+  </div>
+</aside>
+```
+
+**Onde as fotos dos check-ins entrarão:**
+- No `PlanoDiaCard` (componente separado) — já recebe `data` prop
+- Na lista `registrosDoDia` — cada registro poderia mostrar miniatura da foto do check-in
+- Regra: **só check-ins** (`in_feed = false`) aparecem no calendário; posts normais nunca entram
+
+---
+
+## 3. UserContext — userId, nome, foto, bio
+
+**Arquivo:** `src/contexts/UserContext.tsx`
+
+### O que fornece (`useAppUser()`):
+```tsx
+interface UserContextType {
+  user: {
+    id: string;
+    fullName: string | null;
+    emailAddresses: { emailAddress: string }[];
+    username: string | null;
+  } | null;
+  isLoaded: boolean;
+  isSignedIn: boolean;
+  userId: string | null;
+}
+```
+
+### Fonte dos dados:
+- **Online**: Clerk (`useClerkUser()`) → mapeia `user.fullName`, `user.username`, `user.emailAddresses`
+- **Offline**: `localStorage.getItem('revisaflash_user_id')` → cria objeto mínimo com nome "Usuário Offline"
+
+### Foto do usuário (avatar):
+- **Não está no UserContext** — carregada no `AppShell` via tabela `profiles` do Supabase:
+```tsx
+// src/components/app-shell.tsx (linhas 85-110)
+const { data } = await supabaseClient
+  .from('profiles')
+  .select('name, avatar_url, avatar_tipo, avatar_id')
+  .eq('id', user.id)
+  .maybeSingle();
+```
+- Campos em `profiles`: `name`, `avatar_url`, `avatar_tipo`, `avatar_id`
+
+### Bio:
+- **Não existe atualmente** — nem no Clerk, nem no `profiles`, nem no UserContext
+- Se necessário para o perfil do Study Rats, precisa:
+  1. Adicionar coluna `bio` na tabela `profiles` (Supabase)
+  2. Adicionar no select do AppShell
+  3. Expor via UserContext ou criar hook específico
+
+---
+
+## 4. friendService e RLS — Tabela de amizades
+
+**Arquivo:** `src/services/friendService.ts`
+
+### Tabela `friendships` (Supabase):
+```ts
+interface Friendship {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: 'pending' | 'accepted';
+  created_at: string;
+  responded_at: string | null;
+}
+```
+
+### Fluxo:
+- Quem convida cria linha com `status: 'pending'`
+- Convidado aceita → `status: 'accepted'` + `responded_at`
+- Qualquer um pode apagar (recusar, cancelar, desfazer)
+- Ao desfazer, trigger no banco apaga compartilhamentos entre as duas
+
+### RLS (Row Level Security) — **não está no código**, mas implícito:
+- Política esperada: cada usuário só enxerga linhas onde `requester_id = auth.uid() OR addressee_id = auth.uid()`
+- `loadFriendsOverview` já filtra pelo `myId` passado
+- A segurança real está no banco (RLS), não no frontend
+
+### Funções exportadas:
+- `loadFriendsOverview(myId)` → `FriendsOverview { amigas, recebidos, enviados }`
+- `searchPerson(email)` → `PessoaEncontrada | null` (usa `clerkService.findPersonByEmail`)
+- `sendInvite(myId, otherId)` → insert em `friendships`
+- `acceptInvite(friendshipId)` → update status = 'accepted'
+- `removeFriendship(friendshipId)` → delete
+- `listAcceptedFriends(myId)` → `PessoaInfo[]` (para botão "Compartilhar")
+
+### clerkService (busca de pessoas):
+```ts
+// src/services/clerkService.ts
+export async function findPersonByEmail(email) { /* RPC buscar_pessoa_por_email */ }
+export async function findUsersByIds(ids) { /* RPC buscar_pessoas_conhecidas */ }
+```
+- RPCs no Supabase: `buscar_pessoa_por_email(p_email)`, `buscar_pessoas_conhecidas(p_ids)`
+- Só encontra quem já entrou no app (perfil criado no primeiro acesso)
+
+---
+
+## 5. Padrão Offline — ErrorContext, StudyContext, RxDB, sync
+
+### RxDB Schema (`src/lib/db.ts`):
+- **Database name:** `revisaflash_db_v2` (constante `DB_NAME` em `src/constants/index.ts`)
+- **Soft delete:** campo `isDeleted: { type: 'boolean', default: false }` (maioria das collections)
+  - **Exceção:** `listas`, `simulados`, `questoes`, `cadernos` usam `isdeleted` (snake_case)
+- **IDs:** `uid()` de `@/utils/helpers` (nanoid-like)
+- **updated_at:** obrigatório em todos os schemas para sync/conflito
+
+### Sync (`src/lib/db.ts` → `syncWithSupabase`):
+- **Chave de sync por usuário:** `lastSyncTimestamp_${userId}` no localStorage
+- **Conflict resolution:** compara `updated_at` remoto vs local → vence o mais recente
+- **Push com verificação:** `pushWithConflictCheck` faz SELECT remoto antes do UPSERT
+- **Queue offline:** `enqueueOperation` (create/update/delete) → processado quando online
+
+### StudyContext (`src/contexts/StudyContext.tsx`):
+```tsx
+// Carrega do RxDB com filtro isDeleted: false
+const result = await db.study_records.find({
+  selector: { user_id: userId, isDeleted: { $ne: true } }
+}).exec();
+
+// Listener reativo
+db.collections.study_records.$.subscribe(() => { debounce(loadData) });
+
+// Add/Edit/Delete → RxDB primeiro → RPC salvar_study_records_batch → queue se falhar
+```
+
+### ErrorContext (`src/contexts/ErrorContext.tsx`):
+- Mesmo padrão: RxDB + `isDeleted` + sync via `enqueueOperation`
+- `addOrIncrementError` evita duplicatas (mesma questão + disciplina)
+
+---
+
+## 6. Upload de imagens existente (Flashcards)
+
+**Arquivo:** `src/services/flashcardImageService.ts`
+
+### Fluxo:
+```ts
+export async function compressAndUploadImage(file: File, userId: string): Promise<string> {
+  // 1. Valida tipo (PNG, JPEG, WebP)
+  // 2. Comprime com browser-image-compression:
+  //    - maxSizeMB: 0.5
+  //    - maxWidthOrHeight: 800
+  //    - fileType: 'image/webp'
+  //    - useWebWorker: true
+  // 3. Upload para bucket 'flashcard-images'
+  //    - path: `${userId}/flashcards/${crypto.randomUUID()}.webp`
+  //    - contentType: 'image/webp'
+  // 4. Retorna URL pública via getPublicUrl
+}
+```
+
+### Bucket Supabase:
+- **Nome:** `flashcard-images` (constante no serviço)
+- **Política:** pública (URL pública via `getPublicUrl`)
+- **Estrutura:** `{userId}/flashcards/{uuid}.webp`
+
+### Uso no Flashcards (`src/routes/flashcards.tsx`):
+- Upload antes de salvar card (linhas 493-514)
+- URLs salvas em `front_image_url` / `back_image_url` (RxDB schema v16)
+- Delete órfão se erro após upload (linha 621)
+
+---
+
+## 7. Câmera (getUserMedia) e PWA
+
+### Câmera:
+- **Não implementada** no app atual
+- Protótipo StudyRats usa apenas `<input type="file" accept="image/*">` (linha 326 `StudyRatsFeed.tsx`)
+- Ícones `Camera` do Lucide são apenas decorativos
+
+### PWA / Service Worker:
+**Arquivo:** `public/sw.js`
+- **Cache version:** `una-vox-v2`
+- **Estratégia:**
+  - **Documentos (HTML/SPA routes):** Network-first → fallback para `/index.html` cached
+  - **Assets (/assets/*):** Cache-first + revalidação em background
+  - **Bypass:** github.com, *.githubusercontent.com, *.workers.dev, Range headers, video/audio, .mp4
+- **Install:** Cacheia assets estáticos + extrai assets do index.html
+- **Activate:** Limpa caches antigos + `clients.claim()`
+- **Funciona offline** para navegação SPA e assets já cacheados
+
+---
+
+## 8. Funcionalidades existentes relacionadas
+
+### Lista de matérias da usuária:
+- **Tabela/Collection:** `disciplines` (RxDB + Supabase)
+- **Schema:** `id, name, user_id, createdAt, updated_at, isDeleted`
+- **Uso:** `ContentTreeSelector`, `calendario.tsx`, `StudyContext`, etc.
+
+### Sequência de dias seguidos (streak):
+- **Cálculo:** baseado em `study_records` (datas com registros)
+- **Onde aparece:**
+  - `src/components/app-shell.tsx` (linhas 115, 199-220, 467, 470, 554, 557) — sidebar
+  - `src/routes/index.tsx` (linhas 29, 138-148, 317) — dashboard
+  - `src/components/DailyChallenge.tsx` (linhas 14-137) — localStorage `revisaflash_daily_streak`
+  - `src/components/study-rats/StudyRatsPerfil.tsx` (linha 31) — "7 dias seguidos" (mock)
+  - `src/components/study-rats/StudyRatsFeed.tsx` (linha 108) — "7🔥 dias seguidos" (mock)
+  - `src/components/study-rats/StudyRatsCalendario.tsx` (linha 41) — "7🔥" (mock)
+- **Implementação real:** `app-shell.tsx` recalcula a cada load:
+```ts
+let streakCount = 0;
+for (let i = 0; i < 365; i++) {
+  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  if (records.some(r => r.date === dateStr)) streakCount++;
+  else break;
+}
+```
+
+### "Compartilhado comigo":
+- **Aba em Comunidade:** `?tab=compartilhado` → `<CompartilhadosConteudo />` (`src/routes/amigas.tsx`)
+- **Página dedicada:** `/compartilhados` → `src/routes/compartilhados.tsx`
+- **Fonte:** RxDB local — filtra `disciplines`, `listas`, `simulados`, `cadernos` onde `user_id !== meu_id` e `!isDeleted`
+- **Badge:** `useComunidadeBadge` hook conta itens compartilhados
+
+### Cron / rotina agendada:
+- **useNotificacoes.ts:** `setInterval(recompute, 2 * 60_000)` (2 min)
+- **useComunidadeBadge.ts:** `setInterval(refresh, 60_000)` (1 min)
+- **PomodoroContext:** `setInterval` para timer (1s/500ms)
+- **ActiveSessionContext:** `setInterval` para tempo de sessão (1s)
+- **MusicContext:** `setInterval` para fade (100ms)
+- **Não há:** cron jobs no servidor, workers, ou agendamento persistente
+
+### Barra inferior mobile própria:
+- **Não existe** no app atual
+- Protótipo StudyRats menciona: "Mobile: barra inferior (Comunidade · + · Calendários)"
+- App usa sidebar responsiva (`AppShell`) + header fixo
+
+### Biblioteca de cache de dados (react-query):
+- **Configurado mas pouco usado:**
+```ts
+// src/router.tsx
+import { QueryClient } from '@tanstack/react-query';
+export const queryClient = new QueryClient();
+```
+- Não há `QueryClientProvider` visível no código lido
+- Dados vêm majoritariamente do RxDB (reativo via `.subscribe()`) + Context API
+
+---
+
+## 9. Tokens CSS do Una Vox vs StudyRatsStyles
+
+**Arquivo:** `src/components/study-rats/StudyRatsStyles.tsx`
+
+### Tokens usados (CSS custom properties):
+```css
+:root {
+  --surface
+  --surface-2
+  --border
+  --primary
+  --accent
+  --muted-foreground
+  --foreground
+  --background
+  --accent-foreground
+  --primary-foreground
+}
+```
+
+### Classes do StudyRatsStyles:
+- `.srx-card` — background `--surface`, border `--border`, radius 1.5rem
+- `.srx-hero` — gradiente radial + linear com `--primary`
+- `.srx-ring` — conic-gradient `--accent`/`--primary` (stories)
+- `.srx-chip` — badge pequeno com `--accent` 14%
+- `.srx-badge` — badge com backdrop-filter, `--background` 65%
+- `.srx-scroll` — scroll horizontal snap, sem scrollbar
+- `.srx-dot` / `[data-on="true"]` — indicadores de carrossel
+- `.srx-icon` — botões de ação (like, comentar, etc.)
+- `.srx-liked` / `.srx-saved` — estados ativos (cores `--primary`/`--accent`)
+- `.srx-burst` — animação de "curtir" duplo toque
+- `.srx-fab` — botão principal (gradiente `--accent` → `--primary`)
+- `.srx-overlay` / `.srx-sheet` — modals/sheets com blur
+- `.srx-progress` — barra de progresso do story
+- `.srx-day` / `.srx-thumb` / `.srx-count` — calendário fotográfico
+- `.srx-tile` — grid de fotos do perfil
+- `.srx-seg` — segmented control (Feed/Perfil, Feed/Story)
+
+### Verificação:
+✅ **Todos os tokens existem no design system do Una Vox** (usados em `AppShell`, `calendario`, `flashcards`, etc.)
+✅ **Nenhum valor hardcoded** — tudo via `var(--token)`
+⚠️ **Atenção:** `--surface-2` é usado no protótipo; confirmar se existe no app (parece que sim, usado em `calendario.tsx`)
+
+---
+
+## 10. Tratamento de data/fuso horário
+
+### Padrão atual:
+- **Data local do dispositivo** (Brasil, America/Fortaleza) — **nunca UTC**
+- Múltiplas funções `localDateStr` duplicadas:
+  - `src/contexts/PomodoroContext.tsx` (linha 103)
+  - `src/components/DailyChallenge.tsx` (linha 24)
+  - `src/components/PomodoroStats.tsx` (linha 10)
+  - `src/routes/sessoes.tsx` (linha 54)
+  - `src/routes/calendario.tsx` (linha 59 — `isoToDateKey`)
+  - `src/components/study-rats/StudyRatsCalendario.tsx` (linha 22-26)
+
+### Exemplo típico:
+```ts
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+```
+
+### Uso no Calendário:
+- `new Date()` → `getFullYear()`, `getMonth()`, `getDate()` → tudo timezone local
+- `toLocaleDateString('pt-BR', ...)` para exibição
+- Datas armazenadas como string `YYYY-MM-DD` (ex: `"2026-11-24"`)
+
+### Função centralizada "hoje local":
+- **Não existe** — cada componente reimplementa
+- Recomendação: criar `src/utils/date.ts` com `getLocalDateKey()`, `getTodayLocal()`, `formatLocalDate()`
+
+---
+
+## 11. Estruturas de dados relevantes (código real)
+
+### db.ts — schemas principais (trechos):
+```ts
+// study_records (v1)
+const studyRecordSchema = {
+  version: 1,
+  primaryKey: 'id',
+  properties: {
+    id: { type: 'string' },
+    user_id: { type: 'string' },
+    date: { type: 'string' },        // YYYY-MM-DD local
+    type: { type: 'string' },        // 'teorico' | 'pratico'
+    discipline: { type: 'string' },
+    topic: { type: 'string' },
+    duration: { type: 'number' },    // minutos
+    material: { type: 'string' },
+    questionsCount: { type: 'number' },
+    correctCount: { type: 'number' },
+    wrongCount: { type: 'number' },
+    source: { type: 'string' },
+    observations: { type: 'string' },
+    createdAt: { type: 'string' },
+    updated_at: { type: 'string' },
+    isDeleted: { type: 'boolean', default: false },
+    // Novos campos Plano→Agenda (v1)
+    occurrenceSourceType: { type: ['string', 'null'] }, // 'block' | 'extra'
+    occurrenceSourceId: { type: ['string', 'null'] },
+    occurrenceDate: { type: ['string', 'null'] },
+    autoGenerated: { type: 'boolean', default: false }
+  }
+};
+
+// friendships — NÃO está no RxDB (só Supabase via friendService)
+```
+
+### friendService — loadFriendsOverview (trecho):
+```ts
+export async function loadFriendsOverview(myId: string): Promise<FriendsOverview> {
+  const supabase = await getSupabaseWithToken();
+  const { data, error } = await supabase
+    .from('friendships')
+    .select('id, requester_id, addressee_id, status, created_at, responded_at')
+    .order('created_at', { ascending: false });
+
+  // Separa em amigas (accepted), recebidos (pending onde sou addressee), enviados (pending onde sou requester)
+  // Busca nomes via clerkService.findUsersByIds(otherIds)
+}
+```
+
+### RLS policy esperada para friendships (Supabase):
+```sql
+-- Política SELECT: usuário vê linhas onde participa
+CREATE POLICY "Users can view their friendships"
+ON friendships FOR SELECT
+USING (requester_id = auth.uid() OR addressee_id = auth.uid());
+
+-- Política INSERT: só pode criar como requester (convite)
+CREATE POLICY "Users can send friend requests"
+ON friendships FOR INSERT
+WITH CHECK (requester_id = auth.uid() AND status = 'pending');
+
+-- Política UPDATE: addressee pode aceitar, qualquer pode deletar
+CREATE POLICY "Users can accept or remove friendships"
+ON friendships FOR UPDATE
+USING (requester_id = auth.uid() OR addressee_id = auth.uid());
+```
+
+### Upload de imagem — flashcardImageService (trecho):
+```ts
+const options = {
+  maxSizeMB: 0.5,
+  maxWidthOrHeight: 800,
+  useWebWorker: true,
+  fileType: 'image/webp',
+  initialQuality: 0.8,
+};
+const compressedFile = await imageCompression.default(file, options);
+const fileName = `${userId}/flashcards/${crypto.randomUUID()}.webp`;
+const { data, error } = await supabaseClient.storage
+  .from('flashcard-images')
+  .upload(fileName, compressedFile, { contentType: 'image/webp', upsert: false });
+const { data: urlData } = supabaseClient.storage.from('flashcard-images').getPublicUrl(data.path);
+return urlData.publicUrl;
+```
+
+### Calendário — célula e painel (trechos):
+```tsx
+// Célula (calendario.tsx linhas 285-325)
+<button onClick={() => setDiaSelecionado(d)} className={...}>
+  <span>{d}</span>
+  {e && <div className="absolute bottom-1.5 left-2 flex gap-1">
+    {e.teorico && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+    {e.pratico && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
+  </div>}
+</button>
+
+// Painel do dia (calendario.tsx linhas 330-450)
+<aside>
+  <PlanoDiaCard data={dataSelecionada} ... />
+  <div className="rf-card p-5">
+    <h3>{tituloSidebar}</h3>
+    {revisoesDoDia.map(...) }
+    {registrosDoDia.map(...) }
+  </div>
+</aside>
+```
+
+---
+
+## 12. Decisões tomadas e dúvidas
+
+### Decisões confirmadas (baseadas no código existente):
+1. ✅ Aba `studyrats` entra em `comunidade.tsx` via `?tab=studyrats`
+2. ✅ Calendário **não será substituído** — só ganha fotos dos check-ins nas células e no painel do dia
+3. ✅ Check-in publicado como story → `in_feed = false` → aparece no calendário e nas horas, não no feed/perfil
+4. ✅ Post normal (`in_feed = true`) → só no feed/perfil, **nunca** no calendário
+5. ✅ Upload de imagem: seguir padrão `flashcardImageService` (compressão WebP 0.5MB, bucket público)
+6. ✅ IDs: `uid()` de `@/utils/helpers`
+7. ✅ Constantes em `src/constants/index.ts` (criar `STUDY_RATS` object)
+8. ✅ Soft delete: `isDeleted` (camelCase) — padronizar nas novas tabelas
+9. ✅ Offline-first: RxDB + sync com `updated_at` + queue
+10. ✅ Datas: local device (YYYY-MM-DD), sem UTC
+11. ✅ Amizades: só `accepted` veem posts/fotos/stories (via `friendService` + RLS)
+12. ✅ Publicar exige internet → aviso amigável, não perde rascunho
+
+### Dúvidas para a usuária (máximo 3, sim/não ou A/B):
+
+**D1. Bio do perfil:** O perfil do Study Rats mostra bio (ex: "Concurseira 📚 Direito · Português · Biologia"). Hoje não existe campo `bio` no banco.  
+→ **Opção A:** Adicionar coluna `bio` em `profiles` (Supabase) + campo no UserContext + UI de edição  
+→ **Opção B:** Usar `disciplines` da usuária como "bio" automática (lista de matérias)  
+→ **Opção C:** Deixar bio opcional/vazia no MVP
+
+**D2. Câmera nativa:** O protótipo usa `<input type="file">`. Quer adicionar botão "Tirar foto" com `getUserMedia` (câmera nativa) além de escolher da galeria?  
+→ **Sim / Não**
+
+**D3. Barra inferior mobile:** O app não tem barra inferior hoje. O protótipo StudyRats prevê uma (Comunidade · + · Calendários).  
+→ **Opção A:** Implementar barra inferior global do app (afeta todas as rotas)  
+→ **Opção B:** Só no Study Rats (aba Comunidade), usar sheet/modal para "+" (como já faz o protótipo)  
+→ **Opção C:** Não fazer barra inferior no MVP
+
+---
+
+## 13. Próximos passos (Fase 1+)
+
+Com base na análise, a implementação deve seguir:
+
+1. **Constants:** Adicionar `STUDY_RATS` em `src/constants/index.ts` (tipos, categorias, destinos, bucket, limites)
+2. **RxDB Schema:** Novas collections: `study_rats_posts`, `study_rats_checkins`, `study_rats_stories`, `study_rats_likes`, `study_rats_comments`, `study_rats_saves`, `study_rats_follows`
+3. **Supabase Migration:** Tabelas equivalentes + RLS (usar `friendships` para visibilidade) + bucket `study-rats-images`
+4. **Services:** `studyRatsService.ts` (CRUD + sync + visibilidade por amizade)
+5. **Context/Hook:** `useStudyRats` (reativo via RxDB `.subscribe()`)
+6. **UI:** Conectar `StudyRatsFeed`, `StudyRatsPerfil`, `StudyRatsCalendario` aos dados reais
+7. **Calendário:** Integrar fotos dos check-ins nas células + painel do dia
+8. **Upload:** Adaptar `flashcardImageService` para bucket `study-rats-images`
+9. **Offline:** Rascunho de post/check-in no localStorage + sync quando online
+
+---
+
+**Fim do relatório — Fase 0 (análise apenas).**  
+Nenhum arquivo do app foi alterado.  
+Arquivo gerado: `REVISAO_FASE_0.txt` (este arquivo).

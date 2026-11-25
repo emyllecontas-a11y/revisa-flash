@@ -1,5 +1,7 @@
 // src/constants/index.ts
 
+import type { StudyCategory, StudyDestination, StudyPostKind } from '@/types/studyRats';
+
 // ============================================================
 // 📦 NOMES DE CAMPOS (para evitar erros de digitação)
 // ============================================================
@@ -211,3 +213,76 @@ export const SUPABASE = {
     STUDY_SESSIONS: "study_sessions",
   },
 } as const;
+
+// ============================================================
+// 🐭 STUDY RATS (feed estilo Instagram da aba Comunidade)
+// ============================================================
+
+export const STUDY_RATS = {
+  TABELAS: {
+    POSTS: "study_posts",
+    POST_PHOTOS: "study_post_photos",
+    POST_LIKES: "study_post_likes",
+    POST_COMMENTS: "study_post_comments",
+    POST_SAVES: "study_post_saves",
+    STORIES: "study_stories",
+    STORY_VIEWS: "study_story_views",
+    PROFILES: "profiles",
+  },
+  COLECOES: {
+    CHECKINS: "study_posts",
+  },
+  BUCKET: "study-rats",
+  RPC: {
+    FEED: "study_feed",
+    STORIES_FEED: "study_stories_feed",
+    PERFIL_RESUMO: "study_perfil_resumo",
+    POST_COMMENTS: "study_post_comments_list",
+    STORY_VIEWERS: "study_story_viewers",
+    STORIES_EXPIRADOS: "study_stories_meus_expirados",
+    STORIES_APAGAR_EXPIRADOS: "study_stories_apagar_expirados",
+  },
+  TIPOS: {
+    CHECKIN: "checkin",
+    POST: "post",
+  },
+  LISTA_TIPOS: ["checkin", "post"] as StudyPostKind[],
+  CATEGORIAS: {
+    DICA: "study_tip",
+    CURIOSIDADE: "curiosity",
+    DUVIDA: "question",
+    MOTIVACAO: "motivation",
+  },
+  LISTA_CATEGORIAS: ["study_tip", "curiosity", "question", "motivation"] as StudyCategory[],
+  DESTINOS: {
+    FEED: "feed",
+    STORY: "story",
+  },
+  LISTA_DESTINOS: ["feed", "story"] as StudyDestination[],
+  LIMITES: {
+    MAX_FOTOS: 10,
+    MAX_BIO: 150,
+    MAX_COMENTARIO: 500,
+    MAX_LEGENDA: 2000,
+    MAX_ARQUIVO_MB: 20,
+    MAX_DURACAO_MIN: 1440,
+    IMAGEM_ALVO_MB: 0.8,
+    IMAGEM_MAX_PX: 1080,
+    PAGINA_FEED: 20,
+    STORY_HORAS: 24,
+    URL_ASSINADA_SEGUNDOS: 3600,
+    URL_ASSINADA_RENOVAR_SEGUNDOS: 3000,
+  },
+} as const;
+
+/** Categorias de publicação com rótulo (português) e emoji usados na interface. */
+export const STUDY_RATS_CATEGORIAS: ReadonlyArray<{
+  value: StudyCategory;
+  label: string;
+  emoji: string;
+}> = [
+  { value: STUDY_RATS.CATEGORIAS.DICA, label: "Dica de estudo", emoji: "💡" },
+  { value: STUDY_RATS.CATEGORIAS.CURIOSIDADE, label: "Curiosidade", emoji: "🔎" },
+  { value: STUDY_RATS.CATEGORIAS.DUVIDA, label: "Dúvida", emoji: "❓" },
+  { value: STUDY_RATS.CATEGORIAS.MOTIVACAO, label: "Motivação", emoji: "🔥" },
+];
