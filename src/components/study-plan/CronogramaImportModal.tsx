@@ -3,7 +3,7 @@ import { Upload, FileSpreadsheet, Copy, Check, ArrowRight, ArrowLeft, X, AlertTr
 import { toast } from "sonner";
 import { CRONOGRAMA_IMPORT_PROMPT } from "@/services/cronogramaPrompt";
 import { parseCronogramaExcel, validateCronograma, buildImportPreview, type ValidationResult, type ImportPreview } from "@/services/cronogramaImporter";
-import { upsertStudyTaskByName, upsertStudyWeeklyBlock, upsertStudyThemeTimeline } from "@/services/studyPlanService";
+import { upsertStudyTaskByName, upsertStudyWeeklyBlock, upsertStudyThemeTimeline, findActiveWeeklyBlock } from "@/services/studyPlanService";
 import {
   carregarConteudoExistente,
   calcularConteudoNovo,
@@ -57,6 +57,11 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
       return;
     }
     setFile(f);
+    // Arquivo novo: descarta a validação do arquivo anterior
+    setValidatedData(null);
+    setPreview(null);
+    setConteudoNovo(null);
+    setSelecaoConteudo({ disciplinas: [], topicos: [] });
   };
 
   const handleValidate = async () => {
@@ -162,28 +167,33 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
         else skippedTasks++;
       }
 
-      // 2. Timelines (linha do tempo) - topic_ids via mapaIds (disciplina+tópico) ou topicMatches (fallback)
+      // 2. Timelines (linha do tempo)
+      // Vários tópicos no mesmo período viram UM período com todos os temas.
+      // (Antes cada linha sobrescrevia a anterior e só o último tópico da semana ficava.)
+      const periodos = new Map<string, { period_type: 'week' | 'month'; period_start: string; themes: string[]; topic_ids: string[] }>();
       for (const timeline of validatedData.timelines) {
-        let topicIds: string[] = [];
+        const chavePeriodo = `${timeline.period_type}::${timeline.period_start}`;
+        if (!periodos.has(chavePeriodo)) {
+          periodos.set(chavePeriodo, { period_type: timeline.period_type, period_start: timeline.period_start, themes: [], topic_ids: [] });
+        }
+        const periodo = periodos.get(chavePeriodo)!;
 
-        const topicIdFromMap = buscarTopicoId(timeline.discipline, timeline.topic);
-        if (topicIdFromMap) {
-          topicIds = [topicIdFromMap];
-        } else {
-          // Fallback para o match solto original
-          const topicIdFromMatch = validatedData.topicMatches.get(timeline.topic);
-          if (topicIdFromMatch) topicIds = [topicIdFromMatch];
+        if (!periodo.themes.some(t => normalizarNome(t) === normalizarNome(timeline.topic))) {
+          periodo.themes.push(timeline.topic);
         }
 
-        const result = await upsertStudyThemeTimeline({
-          period_type: timeline.period_type,
-          period_start: timeline.period_start,
-          themes: [timeline.topic], // themes é array de strings
-          topic_ids: topicIds,
-        });
-        if (result.id) {
-          createdTimelines++;
+        // Primeiro pela disciplina + tópico; se não achar, pelo nome exato do tópico
+        const topicId = buscarTopicoId(timeline.discipline, timeline.topic)
+          ?? validatedData.topicMatches.get(timeline.topic);
+        if (topicId && !periodo.topic_ids.includes(topicId)) {
+          periodo.topic_ids.push(topicId);
         }
+      }
+
+      for (const periodo of periodos.values()) {
+        const result = await upsertStudyThemeTimeline(periodo);
+        if (result.created_at === result.updated_at) createdTimelines++;
+        else updatedTimelines++;
       }
 
       // 3. Blocks (rotina semanal) - precisam da task criada/achada
@@ -202,13 +212,17 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
         else if (taskResult.action === 'updated') updatedTasks++;
         else skippedTasks++;
 
-        // Agora o bloco semanal
+        // Agora o bloco semanal.
+        // Se já existe um bloco ativo igual (mesma tarefa, dia e horário de início),
+        // reaproveita ele em vez de criar outro — assim importar de novo não duplica a rotina.
+        const startHHMM = block.start_time.slice(0, 5);
+        const ativo = await findActiveWeeklyBlock(taskResult.task.id, block.weekday, startHHMM, hoje);
         const blockResult = await upsertStudyWeeklyBlock({
           task_id: taskResult.task.id,
           weekday: block.weekday,
-          start_time: block.start_time.slice(0, 5), // HH:MM
+          start_time: startHHMM, // HH:MM
           end_time: block.end_time.slice(0, 5),
-          effective_from: hoje,
+          effective_from: ativo?.effective_from ?? hoje,
         });
         if (blockResult.action === 'created') createdBlocks++;
         else if (blockResult.action === 'updated') updatedBlocks++;
@@ -387,7 +401,14 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
                 >
                   Validar
                 </button>
-                <button onClick={() => setStep(2)} className={primary}>Próximo <ArrowRight className="h-4 w-4" /></button>
+                <button
+                  onClick={() => setStep(2)}
+                  disabled={!validatedData || isProcessing}
+                  title={!validatedData ? "Valide o arquivo primeiro" : undefined}
+                  className={`${primary} disabled:opacity-50`}
+                >
+                  Próximo <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
           </div>

@@ -523,6 +523,38 @@ export async function findStudyWeeklyBlock(
  * Se mudou end_time, atualiza; senão pula; senão cria.
  * Retorna { action, block } onde action = 'created' | 'updated' | 'skipped'.
  */
+/**
+ * Procura um bloco semanal que ainda esteja valendo (sem fim, ou com fim a partir de `hoje`)
+ * com a mesma tarefa, dia da semana e horário de início — independente da data de início.
+ * Usado pelo importador de cronograma para não duplicar blocos ao importar de novo.
+ */
+export async function findActiveWeeklyBlock(
+  task_id: string,
+  weekday: number,
+  start_time: string,
+  hoje: string,
+): Promise<StudyWeeklyBlock | null> {
+  const userId = await assertUserId();
+  const db = await getDb();
+  const docs = await db.study_weekly_blocks.find({
+    selector: { user_id: userId, isDeleted: { $ne: true } },
+  }).exec();
+
+  const hhmm = (t: string) => (t || '').slice(0, 5);
+  for (const doc of docs) {
+    const block = doc.toJSON() as StudyWeeklyBlock;
+    if (
+      block.task_id === task_id &&
+      block.weekday === weekday &&
+      hhmm(block.start_time) === hhmm(start_time) &&
+      (!block.effective_until || block.effective_until >= hoje)
+    ) {
+      return block;
+    }
+  }
+  return null;
+}
+
 export async function upsertStudyWeeklyBlock(data: {
   task_id: string;
   weekday: number;
