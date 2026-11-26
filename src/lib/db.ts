@@ -8,6 +8,7 @@ import { supabase, getSupabaseWithToken } from './supabaseClient';
 // ============================================================
 const LAST_SYNC_PREFIX = 'lastSyncTimestamp_';
 const LAST_SYNC_LEGACY = 'lastSyncTimestamp';
+const LAST_SYNCED_USER_KEY = 'revisaflash_last_synced_user';
 
 export function getLastSyncKey(userId: string): string {
   return `${LAST_SYNC_PREFIX}${userId}`;
@@ -1446,6 +1447,19 @@ export async function syncWithSupabase(userId: string, onComplete?: () => void) 
     const database = await getDb();
     const supabaseClient = await getSupabaseWithToken();
     const userIdStr = String(userId);
+
+    // Troca de conta no mesmo navegador: o banco local é um só para todas as contas,
+    // e o sync de compartilhados da OUTRA conta remove do aparelho os dados desta.
+    // Por isso, quando a conta muda, zera o lastSync desta conta para forçar um
+    // pull COMPLETO e trazer tudo de volta do servidor.
+    try {
+      const ultimaConta = localStorage.getItem(LAST_SYNCED_USER_KEY);
+      if (ultimaConta !== userIdStr) {
+        console.log(`🔄 Conta diferente da última sincronizada neste aparelho — forçando pull completo.`);
+        localStorage.removeItem(getLastSyncKey(userIdStr));
+        localStorage.setItem(LAST_SYNCED_USER_KEY, userIdStr);
+      }
+    } catch { /* ignore */ }
 
     const lastSyncGlobal = readLastSync(userId);
     if (lastSyncGlobal === '1970-01-01T00:00:00Z') {

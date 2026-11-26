@@ -133,13 +133,20 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
       let createdBlocks = 0, updatedBlocks = 0, skippedBlocks = 0;
       let createdDisciplinas = 0, createdTopicos = 0;
 
-      // 0. Criar disciplinas e tópicos selecionados (se houver)
-      let mapaIds: MapaIds = { disciplinas: new Map(), topicos: new Map() };
-      if (conteudoNovo && (selecaoConteudo.disciplinas.length > 0 || selecaoConteudo.topicos.length > 0)) {
-        mapaIds = await criarConteudoSelecionado(userId, selecaoConteudo);
-        createdDisciplinas = selecaoConteudo.disciplinas.length;
-        createdTopicos = selecaoConteudo.topicos.length;
-      }
+      // 0. Criar disciplinas e tópicos selecionados (se houver).
+      // Chamado sempre: com seleção vazia ele só devolve o mapa do que já existe,
+      // e esse mapa é usado para ligar a linha do tempo aos tópicos certos.
+      const selecaoParaCriar: SelecaoConteudo = conteudoNovo ? selecaoConteudo : { disciplinas: [], topicos: [] };
+      const mapaIds: MapaIds = await criarConteudoSelecionado(userId, selecaoParaCriar);
+      createdDisciplinas = mapaIds.criadas?.disciplinas ?? 0;
+      createdTopicos = mapaIds.criadas?.topicos ?? 0;
+
+      // O mapa de tópicos usa a chave `${idDaDisciplina}::${tópicoNormalizado}`
+      const buscarTopicoId = (disciplina: string, topico: string): string | undefined => {
+        const discId = mapaIds.disciplinas.get(normalizarNome(disciplina));
+        if (!discId) return undefined;
+        return mapaIds.topicos.get(`${discId}::${normalizarNome(topico)}`);
+      };
 
       // 1. Tasks (biblioteca)
       for (const task of validatedData.tasks) {
@@ -158,9 +165,8 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
       // 2. Timelines (linha do tempo) - topic_ids via mapaIds (disciplina+tópico) ou topicMatches (fallback)
       for (const timeline of validatedData.timelines) {
         let topicIds: string[] = [];
-        const chave = `${normalizarNome(timeline.discipline)}::${normalizarNome(timeline.topic)}`;
 
-        const topicIdFromMap = mapaIds.topicos.get(chave);
+        const topicIdFromMap = buscarTopicoId(timeline.discipline, timeline.topic);
         if (topicIdFromMap) {
           topicIds = [topicIdFromMap];
         } else {
@@ -233,42 +239,53 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
   };
 
   // Helpers para checkboxes da seção de conteúdos novos
+  // (comparação por nome normalizado: "matemática" e "Matemática" são a mesma disciplina)
+  const mesmoNome = (a: string, b: string) => normalizarNome(a) === normalizarNome(b);
+  const ehDisciplinaNova = (nome: string) =>
+    !!conteudoNovo?.disciplinasNovas.some(d => mesmoNome(d, nome));
+
   const toggleDisciplina = (nome: string) => {
     setSelecaoConteudo(prev => {
-      const isSelected = prev.disciplinas.includes(nome);
-      let novasDisciplinas = isSelected
-        ? prev.disciplinas.filter(d => d !== nome)
-        : [...prev.disciplinas, nome];
-
-      // Se desmarcar disciplina, desmarcar tópicos dela
-      let novosTopicos = prev.topicos;
+      const isSelected = prev.disciplinas.some(d => mesmoNome(d, nome));
       if (isSelected) {
-        novosTopicos = prev.topicos.filter(t => t.disciplina !== nome);
+        // Desmarcar disciplina desmarca os tópicos dela
+        return {
+          disciplinas: prev.disciplinas.filter(d => !mesmoNome(d, nome)),
+          topicos: prev.topicos.filter(t => !mesmoNome(t.disciplina, nome)),
+        };
       }
-
-      return { disciplinas: novasDisciplinas, topicos: novosTopicos };
+      // Marcar disciplina marca os tópicos novos dela
+      const topicosDela = (conteudoNovo?.topicosNovos ?? []).filter(t => mesmoNome(t.disciplina, nome));
+      const jaMarcados = new Set(prev.topicos.map(t => `${normalizarNome(t.disciplina)}::${normalizarNome(t.nome)}`));
+      const acrescentar = topicosDela
+        .filter(t => !jaMarcados.has(`${normalizarNome(t.disciplina)}::${normalizarNome(t.nome)}`))
+        .map(t => ({ disciplina: t.disciplina, nome: t.nome }));
+      return {
+        disciplinas: [...prev.disciplinas, nome],
+        topicos: [...prev.topicos, ...acrescentar],
+      };
     });
   };
 
   const toggleTopico = (disciplina: string, nome: string) => {
     setSelecaoConteudo(prev => {
-      const chave = `${disciplina}::${nome}`;
-      const isSelected = prev.topicos.some(t => `${t.disciplina}::${t.nome}` === chave);
-      let novosTopicos = isSelected
-        ? prev.topicos.filter(t => `${t.disciplina}::${t.nome}` !== chave)
+      const igual = (t: { disciplina: string; nome: string }) => mesmoNome(t.disciplina, disciplina) && mesmoNome(t.nome, nome);
+      const isSelected = prev.topicos.some(igual);
+      const novosTopicos = isSelected
+        ? prev.topicos.filter(t => !igual(t))
         : [...prev.topicos, { disciplina, nome }];
 
-      // Se marcar tópico, garantir que a disciplina está marcada
       let novasDisciplinas = prev.disciplinas;
-      if (!isSelected && !prev.disciplinas.includes(disciplina)) {
-        novasDisciplinas = [...prev.disciplinas, disciplina];
-      }
-
-      // Se desmarcar último tópico de uma disciplina nova, desmarcar a disciplina
-      if (isSelected) {
-        const restantesDaDisc = novosTopicos.filter(t => t.disciplina === disciplina);
-        if (restantesDaDisc.length === 0 && conteudoNovo?.disciplinasNovas.includes(disciplina)) {
-          novasDisciplinas = novasDisciplinas.filter(d => d !== disciplina);
+      if (!isSelected) {
+        // Marcar tópico garante a disciplina marcada (se já existir, o serviço só reaproveita)
+        if (!prev.disciplinas.some(d => mesmoNome(d, disciplina))) {
+          novasDisciplinas = [...prev.disciplinas, disciplina];
+        }
+      } else {
+        // Desmarcar o último tópico de uma disciplina NOVA desmarca a disciplina
+        const restantes = novosTopicos.filter(t => mesmoNome(t.disciplina, disciplina));
+        if (restantes.length === 0 && ehDisciplinaNova(disciplina)) {
+          novasDisciplinas = novasDisciplinas.filter(d => !mesmoNome(d, disciplina));
         }
       }
 
@@ -276,9 +293,9 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
     });
   };
 
-  const isDisciplinaSelecionada = (nome: string) => selecaoConteudo.disciplinas.includes(nome);
+  const isDisciplinaSelecionada = (nome: string) => selecaoConteudo.disciplinas.some(d => mesmoNome(d, nome));
   const isTopicoSelecionado = (disciplina: string, nome: string) =>
-    selecaoConteudo.topicos.some(t => t.disciplina === disciplina && t.nome === nome);
+    selecaoConteudo.topicos.some(t => mesmoNome(t.disciplina, disciplina) && mesmoNome(t.nome, nome));
 
   const marcarTodos = () => {
     if (!conteudoNovo) return;
@@ -295,7 +312,8 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
   const totalSelecionados = () => {
     if (!conteudoNovo) return { disciplinas: 0, topicos: 0 };
     return {
-      disciplinas: selecaoConteudo.disciplinas.length,
+      // só conta disciplinas realmente novas (as que já existem só recebem tópicos)
+      disciplinas: selecaoConteudo.disciplinas.filter(d => ehDisciplinaNova(d)).length,
       topicos: selecaoConteudo.topicos.length,
     };
   };
@@ -437,65 +455,58 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
                   </div>
                 </div>
                 <div className="space-y-3 max-h-60 overflow-y-auto">
+                  {/* Disciplinas novas, cada uma com seus tópicos novos */}
                   {conteudoNovo.disciplinasNovas.map((discNome) => {
-                    const topicosDaDisc = conteudoNovo.topicosNovos.filter(t => t.disciplina === discNome);
-                    const discSelecionada = isDisciplinaSelecionada(discNome);
+                    const topicosDaDisc = conteudoNovo.topicosNovos.filter(t => mesmoNome(t.disciplina, discNome));
                     return (
                       <div key={discNome} className="space-y-2 pl-2 border-l-2 border-border">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <span
-                            className="h-4 w-4 rounded border-2 border-border flex items-center justify-center transition-colors"
-                            style={{
-                              backgroundColor: discSelecionada ? 'var(--primary)' : 'transparent',
-                              borderColor: discSelecionada ? 'var(--primary)' : 'var(--border)',
-                              color: discSelecionada ? 'var(--primary-foreground)' : 'transparent',
-                            }}
-                          >
-                            {discSelecionada && <Check className="h-3 w-3" />}
-                          </span>
-                          <span className="text-sm font-medium text-foreground">{discNome}</span>
-                        </label>
+                        <ItemConteudo
+                          marcado={isDisciplinaSelecionada(discNome)}
+                          onClick={() => toggleDisciplina(discNome)}
+                          forte
+                        >
+                          {discNome} <span className="text-xs font-normal text-muted-foreground">(disciplina nova)</span>
+                        </ItemConteudo>
                         {topicosDaDisc.length > 0 && (
                           <div className="space-y-1 ml-6">
                             {topicosDaDisc.map((tp) => (
-                              <label key={tp.nome} className="flex items-center gap-2 cursor-pointer">
-                                <span
-                                  className="h-4 w-4 rounded border border-border flex items-center justify-center transition-colors"
-                                  style={{
-                                    backgroundColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'transparent',
-                                    borderColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'var(--border)',
-                                    color: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary-foreground)' : 'transparent',
-                                  }}
-                                >
-                                  {isTopicoSelecionado(tp.disciplina, tp.nome) && <Check className="h-3 w-3" />}
-                                </span>
-                                <span className="text-sm text-foreground">{tp.nome}</span>
-                              </label>
+                              <ItemConteudo
+                                key={tp.nome}
+                                marcado={isTopicoSelecionado(tp.disciplina, tp.nome)}
+                                onClick={() => toggleTopico(tp.disciplina, tp.nome)}
+                              >
+                                {tp.nome}
+                              </ItemConteudo>
                             ))}
                           </div>
                         )}
                       </div>
                     );
                   })}
-                  {conteudoNovo.disciplinasNovas.length === 0 && conteudoNovo.topicosNovos.length > 0 && (
-                    <div className="space-y-2 pl-2">
-                      {conteudoNovo.topicosNovos.map((tp) => (
-                        <label key={`${tp.disciplina}::${tp.nome}`} className="flex items-center gap-2 cursor-pointer">
-                          <span
-                            className="h-4 w-4 rounded border border-border flex items-center justify-center transition-colors"
-                            style={{
-                              backgroundColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'transparent',
-                              borderColor: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary)' : 'var(--border)',
-                              color: isTopicoSelecionado(tp.disciplina, tp.nome) ? 'var(--primary-foreground)' : 'transparent',
-                            }}
-                          >
-                            {isTopicoSelecionado(tp.disciplina, tp.nome) && <Check className="h-3 w-3" />}
-                          </span>
-                          <span className="text-sm text-foreground">{tp.nome} <span className="text-muted-foreground">({tp.disciplina})</span></span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
+
+                  {/* Tópicos novos em disciplinas que você já tem */}
+                  {(() => {
+                    const topicosEmExistentes = conteudoNovo.topicosNovos.filter(t => !ehDisciplinaNova(t.disciplina));
+                    if (topicosEmExistentes.length === 0) return null;
+                    return (
+                      <div className="space-y-2 pl-2 border-l-2 border-border">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Tópicos novos em disciplinas que você já tem
+                        </p>
+                        <div className="space-y-1 ml-1">
+                          {topicosEmExistentes.map((tp) => (
+                            <ItemConteudo
+                              key={`${tp.disciplina}::${tp.nome}`}
+                              marcado={isTopicoSelecionado(tp.disciplina, tp.nome)}
+                              onClick={() => toggleTopico(tp.disciplina, tp.nome)}
+                            >
+                              {tp.nome} <span className="text-muted-foreground">({tp.disciplina})</span>
+                            </ItemConteudo>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -515,5 +526,40 @@ export function CronogramaImportModal({ userId, isOpen, onClose }: CronogramaImp
         )}
       </div>
     </div>
+  );
+}
+
+/** Linha clicável com caixinha, usada na seção "Conteúdos novos". */
+function ItemConteudo({
+  marcado,
+  onClick,
+  forte = false,
+  children,
+}: {
+  marcado: boolean;
+  onClick: () => void;
+  forte?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={marcado}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/60"
+    >
+      <span
+        className={`h-4 w-4 shrink-0 rounded ${forte ? 'border-2' : 'border'} flex items-center justify-center transition-colors`}
+        style={{
+          backgroundColor: marcado ? 'var(--primary)' : 'transparent',
+          borderColor: marcado ? 'var(--primary)' : 'var(--border)',
+          color: marcado ? 'var(--primary-foreground)' : 'transparent',
+        }}
+      >
+        {marcado && <Check className="h-3 w-3" />}
+      </span>
+      <span className={`text-sm text-foreground ${forte ? 'font-medium' : ''}`}>{children}</span>
+    </button>
   );
 }
