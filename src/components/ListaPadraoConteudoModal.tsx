@@ -32,7 +32,6 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
   const [carregandoExistente, setCarregandoExistente] = useState(true);
 
   // Seleção da usuária
-  const [areasSelecionadas, setAreasSelecionadas] = useState<Set<string>>(new Set());
   const [materiasSelecionadas, setMateriasSelecionadas] = useState<Set<string>>(new Set()); // chave: normMateria
   const [topicosSelecionados, setTopicosSelecionados] = useState<Set<string>>(new Set()); // chave: `${normMateria}::${normTopico}`
   const [areasExpandidas, setAreasExpandidas] = useState<Set<string>>(new Set());
@@ -103,7 +102,6 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
   // Reset ao fechar
   useEffect(() => {
     if (!isOpen) {
-      setAreasSelecionadas(new Set());
       setMateriasSelecionadas(new Set());
       setTopicosSelecionados(new Set());
       setAreasExpandidas(new Set());
@@ -124,18 +122,37 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
     return conteudoExistente.topicos.some(t => t.disciplina === normMateria && t.nome === normTopico);
   }, [conteudoExistente.topicos]);
 
-  // Toggle área
-  const toggleArea = useCallback((areaNome: string) => {
-    setAreasSelecionadas(prev => {
+  // Toggle área: marca/desmarca todas as matérias da área que ainda não existem (com seus tópicos)
+  const toggleArea = useCallback((area: TaxonomiaDisciplina) => {
+    const materiasValidas = area.materias.filter(m => !disciplinaExiste(normalizarNome(m.nome)));
+    if (materiasValidas.length === 0) return;
+
+    const todasMarcadas = materiasValidas.every(m => materiasSelecionadas.has(normalizarNome(m.nome)));
+
+    setMateriasSelecionadas(prev => {
       const next = new Set(prev);
-      if (next.has(areaNome)) {
-        next.delete(areaNome);
-      } else {
-        next.add(areaNome);
+      for (const m of materiasValidas) {
+        const normMateria = normalizarNome(m.nome);
+        if (todasMarcadas) next.delete(normMateria);
+        else next.add(normMateria);
       }
       return next;
     });
-  }, []);
+
+    setTopicosSelecionados(prev => {
+      const next = new Set(prev);
+      for (const m of materiasValidas) {
+        const normMateria = normalizarNome(m.nome);
+        for (const t of m.topicos) {
+          const normTopico = normalizarNome(t.nome);
+          const chave = `${normMateria}::${normTopico}`;
+          if (todasMarcadas) next.delete(chave);
+          else if (!topicoExiste(normMateria, normTopico)) next.add(chave);
+        }
+      }
+      return next;
+    });
+  }, [disciplinaExiste, topicoExiste, materiasSelecionadas]);
 
   // Toggle matéria
   const toggleMateria = useCallback((areaNome: string, materia: TaxonomiaMateria) => {
@@ -307,7 +324,10 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
 
   // Handler do botão Adicionar
   const handleAdicionar = useCallback(async () => {
-    if (contadores.disciplinasNovas === 0 && contadores.topicosNovos === 0) return;
+    if (contadores.disciplinasNovas === 0 && contadores.topicosNovos === 0) {
+      toast.info('Tudo o que você marcou já existe nos seus conteúdos.');
+      return;
+    }
 
     setIsSaving(true);
     setErrorMessage('');
@@ -315,12 +335,39 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
     try {
       const selecao = construirSelecao();
       const entradas = montarEntradasDaTaxonomia(selecao, taxonomia);
-      await criarConteudoSelecionado(userId, {
-        disciplinas: entradas.filter(e => !e.topico).map(e => e.disciplina),
+
+      // Toda disciplina que aparece na seleção precisa ir na lista de disciplinas,
+      // inclusive as que têm tópicos marcados. Antes só iam as matérias SEM tópicos,
+      // e por isso a disciplina não era criada e os tópicos eram pulados
+      // ("Disciplina ... não encontrada no mapa, pulando tópicos").
+      // As que já existem são ignoradas pelo serviço (idempotente).
+      const disciplinas: string[] = [];
+      const vistas = new Set<string>();
+      for (const e of entradas) {
+        const norm = normalizarNome(e.disciplina);
+        if (!vistas.has(norm)) {
+          vistas.add(norm);
+          disciplinas.push(e.disciplina);
+        }
+      }
+
+      const resultado = await criarConteudoSelecionado(userId, {
+        disciplinas,
         topicos: entradas.filter(e => e.topico).map(e => ({ disciplina: e.disciplina, nome: e.topico! })),
       });
 
-      toast.success(`Adicionado: ${contadores.disciplinasNovas} disciplina(s) e ${contadores.topicosNovos} tópico(s)`);
+      const criadasDisc = resultado.criadas?.disciplinas ?? 0;
+      const criadosTop = resultado.criadas?.topicos ?? 0;
+
+      if (criadasDisc === 0 && criadosTop === 0) {
+        toast.info('Nada novo para adicionar: essas disciplinas e tópicos já existem nos seus conteúdos.');
+      } else {
+        const partes: string[] = [];
+        if (criadasDisc > 0) partes.push(`${criadasDisc} disciplina${criadasDisc !== 1 ? 's' : ''}`);
+        if (criadosTop > 0) partes.push(`${criadosTop} tópico${criadosTop !== 1 ? 's' : ''}`);
+        toast.success(`Adicionado: ${partes.join(' e ')}`);
+      }
+
       onSuccess(); // recarregar a lista
       onClose();
     } catch (e: any) {
@@ -385,7 +432,6 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
                   key={area.disciplina}
                   area={area}
                   expandida={areasExpandidas.has(area.disciplina)}
-                  selecionada={areasSelecionadas.has(area.disciplina)}
                   totalmenteSelecionada={areaTotalmenteSelecionada(area)}
                   disciplinaExiste={disciplinaExiste}
                   topicoExiste={topicoExiste}
@@ -461,7 +507,6 @@ export function ListaPadraoConteudoModal({ isOpen, onClose, userId, onSuccess }:
 interface AreaSectionProps {
   area: TaxonomiaDisciplina;
   expandida: boolean;
-  selecionada: boolean;
   totalmenteSelecionada: boolean;
   disciplinaExiste: (norm: string) => boolean;
   topicoExiste: (normMateria: string, normTopico: string) => boolean;
@@ -469,7 +514,7 @@ interface AreaSectionProps {
   topicosSelecionados: Set<string>;
   materiasExpandidas: Set<string>;
   onToggleExpand: (areaNome: string) => void;
-  onToggleArea: (areaNome: string) => void;
+  onToggleArea: (area: TaxonomiaDisciplina) => void;
   onToggleMateria: (areaNome: string, materia: TaxonomiaMateria) => void;
   onToggleTopico: (materia: TaxonomiaMateria, topico: TaxonomiaMateria['topicos'][0]) => void;
   onToggleMateriaExpand: (normMateria: string) => void;
@@ -480,7 +525,6 @@ interface AreaSectionProps {
 function AreaSection({
   area,
   expandida,
-  selecionada,
   totalmenteSelecionada,
   disciplinaExiste,
   topicoExiste,
@@ -495,33 +539,44 @@ function AreaSection({
   materiaTotalmenteSelecionada,
   materiaParcialmenteSelecionada,
 }: AreaSectionProps) {
-  const materiasFiltradas = area.materias.filter(m => !disciplinaExiste(normalizarNome(m.nome)));
+  // Matérias que ainda não existem (são as únicas que a caixa da área marca)
+  const materiasNovas = area.materias.filter(m => !disciplinaExiste(normalizarNome(m.nome)));
+  const totalExistentes = area.materias.length - materiasNovas.length;
 
   return (
     <div className="rounded-xl border border-border bg-background overflow-hidden">
-      {/* Cabeçalho da área */}
-      <button
-        type="button"
-        onClick={() => onToggleExpand(area.disciplina)}
-        className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-surface/50 transition-colors"
-      >
-        <ChevronRight
-          className={`h-4 w-4 text-foreground/50 transition-transform ${expandida ? 'rotate-90' : ''}`}
-        />
-        <span className="font-medium text-foreground flex-1">{area.disciplina}</span>
+      {/* Cabeçalho da área (sem botão dentro de botão) */}
+      <div className="w-full px-4 py-3 flex items-center gap-3 hover:bg-surface/50 transition-colors">
+        <button
+          type="button"
+          onClick={() => onToggleExpand(area.disciplina)}
+          className="flex flex-1 items-center gap-3 text-left"
+        >
+          <ChevronRight
+            className={`h-4 w-4 text-foreground/50 transition-transform ${expandida ? 'rotate-90' : ''}`}
+          />
+          <span className="font-medium text-foreground flex-1">
+            {area.disciplina}
+            {totalExistentes > 0 && (
+              <span className="ml-2 text-xs font-normal text-foreground/50">
+                {totalExistentes} de {area.materias.length} já nos seus conteúdos
+              </span>
+            )}
+          </span>
+        </button>
         <CheckboxIndeterminado
-          marcado={selecionada}
+          marcado={totalmenteSelecionada}
           indeterminado={false}
-          desabilitado={materiasFiltradas.length === 0}
-          onClick={() => onToggleArea(area.disciplina)}
+          desabilitado={materiasNovas.length === 0}
+          onClick={() => onToggleArea(area)}
         />
-      </button>
+      </div>
 
       {/* Conteúdo da área */}
       {expandida && (
         <div className="px-4 pb-3 border-t border-border/50">
           <div className="space-y-2 pt-3">
-            {materiasFiltradas.map(materia => (
+            {area.materias.map(materia => (
               <MateriaRow
                 key={materia.nome}
                 materia={materia}
@@ -539,9 +594,9 @@ function AreaSection({
                 areaNome={area.disciplina}
               />
             ))}
-            {materiasFiltradas.length === 0 && (
+            {materiasNovas.length === 0 && (
               <div className="text-sm text-foreground/40 py-2">
-                Todas as matérias desta área já existem em seus Conteúdos.
+                Todas as matérias desta área já existem nos seus conteúdos. Abra uma matéria para adicionar os tópicos que faltam.
               </div>
             )}
           </div>
@@ -608,9 +663,13 @@ function MateriaRow({
           desabilitado={jaExiste}
           onClick={() => !jaExiste && onToggleMateria(areaNome, materia)}
         />
-        <span className={`font-medium flex-1 ${jaExiste ? 'text-foreground/40 line-through' : 'text-foreground'}`}>
+        <span className={`font-medium flex-1 ${jaExiste ? 'text-foreground/60' : 'text-foreground'}`}>
           {materia.nome}
-          {jaExiste && <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-surface border border-border text-foreground/50">já existe</span>}
+          {jaExiste && (
+            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-surface border border-border text-foreground/50">
+              {temTopicos ? 'você já tem · dá para adicionar tópicos' : 'você já tem tudo'}
+            </span>
+          )}
         </span>
       </div>
 

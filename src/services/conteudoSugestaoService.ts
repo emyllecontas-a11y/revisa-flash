@@ -45,6 +45,8 @@ export interface SelecaoConteudo {
 export interface MapaIds {
   disciplinas: Map<string, string>; // normName -> id
   topicos: Map<string, string>; // `${normDisc}::${normTopico}` -> id
+  /** Quantos itens foram REALMENTE criados nesta chamada (os que já existiam não contam). */
+  criadas?: { disciplinas: number; topicos: number };
 }
 
 // ============================================================
@@ -299,6 +301,7 @@ export async function criarConteudoSelecionado(
   const mapaIds: MapaIds = {
     disciplinas: new Map(),
     topicos: new Map(),
+    criadas: { disciplinas: 0, topicos: 0 },
   };
 
   // 1. Primeiro, carregar o que já existe no RxDB para idempotência
@@ -356,6 +359,7 @@ export async function criarConteudoSelecionado(
     }
 
     mapaIds.disciplinas.set(normDisc, id);
+    mapaIds.criadas!.disciplinas++;
   }
 
   // 3. Criar tópicos novos (na ordem do arquivo, sequencial por disciplina)
@@ -437,6 +441,7 @@ export async function criarConteudoSelecionado(
       }
 
       mapaIds.topicos.set(chave, id);
+      mapaIds.criadas!.topicos++;
       order++;
     }
   }
